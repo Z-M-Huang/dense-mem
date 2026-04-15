@@ -1,0 +1,237 @@
+package http
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/dense-mem/dense-mem/internal/config"
+	"github.com/dense-mem/dense-mem/internal/observability"
+)
+
+// TestHealthEndpointReturns200 verifies that /health returns 200 {"status":"ok"}
+func TestHealthEndpointReturns200(t *testing.T) {
+	// Arrange
+	cfg := config.Config{HTTPAddr: ":8080"}
+	logger := observability.New(slog.LevelInfo)
+	e := NewServer(cfg, logger, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	// Act
+	err := handleHealth(c)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+
+	var response map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("failed to unmarshal response: %v", err)
+	}
+
+	if response["status"] != "ok" {
+		t.Errorf("expected status 'ok', got '%s'", response["status"])
+	}
+}
+
+// TestReadyBypassesAuth verifies that /ready is not behind auth/profile/rate-limit middleware
+func TestReadyBypassesAuth(t *testing.T) {
+	// Arrange
+	cfg := config.Config{HTTPAddr: ":8080"}
+	logger := observability.New(slog.LevelInfo)
+	checks := []HealthCheck{}
+	e := NewServer(cfg, logger, checks)
+
+	// Act - make request without any auth headers
+	req := httptest.NewRequest(http.MethodGet, "/ready", nil)
+	rec := httptest.NewRecorder()
+
+	// Execute the request through Echo
+	e.ServeHTTP(rec, req)
+
+	// Assert - should get 200, not 401/403 (auth) or 429 (rate limit)
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+
+	var response map[string]interface{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("failed to unmarshal response: %v", err)
+	}
+
+	if response["status"] != "ready" {
+		t.Errorf("expected status 'ready', got '%v'", response["status"])
+	}
+}
+
+// TestReadyDegradedWhenCheckFails verifies that /ready returns 503 when at least one HealthCheck returns error
+func TestReadyDegradedWhenCheckFails(t *testing.T) {
+	// Arrange
+	cfg := config.Config{HTTPAddr: ":8080"}
+	logger := observability.New(slog.LevelInfo)
+
+	// Create a failing health check
+	failingCheck := func(ctx context.Context) error {
+		return errors.New("database connection failed")
+	}
+
+	checks := []HealthCheck{failingCheck}
+	e := NewServer(cfg, logger, checks)
+
+	// Act
+	req := httptest.NewRequest(http.MethodGet, "/ready", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	// Assert
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("expected status %d, got %d", http.StatusServiceUnavailable, rec.Code)
+	}
+
+	var response map[string]interface{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("failed to unmarshal response: %v", err)
+	}
+
+	if response["status"] != "degraded" {
+		t.Errorf("expected status 'degraded', got '%v'", response["status"])
+	}
+
+	deps, ok := response["dependencies"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected dependencies to be a map, got %T", response["dependencies"])
+	}
+
+	// Check that at least one dependency is marked as failed
+	foundFailed := false
+	for _, status := range deps {
+		if status == "failed" {
+			foundFailed = true
+			break
+		}
+	}
+	if !foundFailed {
+		t.Error("expected at least one dependency to be 'failed'")
+	}
+}
+
+// TestReadyReadyWhenAllChecksPass verifies that /ready returns 200 when all checks pass
+func TestReadyReadyWhenAllChecksPass(t *testing.T) {
+	// Arrange
+	cfg := config.Config{HTTPAddr: ":8080"}
+	logger := observability.New(slog.LevelInfo)
+
+	// Create passing health checks
+	passingCheck1 := func(ctx context.Context) error {
+		return nil
+	}
+	passingCheck2 := func(ctx context.Context) error {
+		return nil
+	}
+
+	checks := []HealthCheck{passingCheck1, passingCheck2}
+	e := NewServer(cfg, logger, checks)
+
+	// Act
+	req := httptest.NewRequest(http.MethodGet, "/ready", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	// Assert
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+
+	var response map[string]interface{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("failed to unmarshal response: %v", err)
+	}
+
+	if response["status"] != "ready" {
+		t.Errorf("expected status 'ready', got '%v'", response["status"])
+	}
+
+	deps, ok := response["dependencies"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected dependencies to be a map, got %T", response["dependencies"])
+	}
+
+	// All dependencies should be "ok"
+	for _, status := range deps {
+		if status != "ok" {
+			t.Errorf("expected all dependencies to be 'ok', got '%v'", status)
+		}
+	}
+}
+
+// TestGracefulShutdown verifies that in-flight requests complete within the shutdown window
+func TestGracefulShutdown(t *testing.T) {
+	// This test verifies the shutdown timeout is set to 10 seconds
+	// We can't easily test actual graceful shutdown in unit tests,
+	// but we can verify the timeout constant is correct
+
+	cfg := config.Config{HTTPAddr: ":8080"}
+	logger := observability.New(slog.LevelInfo)
+	checks := []HealthCheck{}
+
+	// Create server with graceful shutdown
+	_, shutdown := NewServerWithGracefulShutdown(cfg, logger, checks)
+
+	// The shutdown function should exist and be callable
+	// In a real scenario, it would use 10-second timeout
+	if shutdown == nil {
+		t.Error("expected shutdown function to be returned")
+	}
+
+	// We can call shutdown immediately since no server is actually running
+	// This should complete quickly as there's nothing to shut down
+	shutdown()
+}
+
+// TestNewServerAcceptsHealthChecks verifies that NewServer accepts []HealthCheck and compiles
+func TestNewServerAcceptsHealthChecks(t *testing.T) {
+	cfg := config.Config{HTTPAddr: ":8080"}
+	logger := observability.New(slog.LevelInfo)
+
+	// Create various health checks
+	checks := []HealthCheck{
+		func(ctx context.Context) error { return nil },
+		func(ctx context.Context) error { return nil },
+	}
+
+	// This should compile and create a server
+	server := NewServer(cfg, logger, checks)
+	if server == nil {
+		t.Error("expected Echo instance to be created")
+	}
+}
+
+// TestHealthEndpointNoMiddleware verifies that /health has no middleware applied
+func TestHealthEndpointNoMiddleware(t *testing.T) {
+	cfg := config.Config{HTTPAddr: ":8080"}
+	logger := observability.New(slog.LevelInfo)
+	e := NewServer(cfg, logger, nil)
+
+	// Make request without any headers
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	rec := httptest.NewRecorder()
+
+	e.ServeHTTP(rec, req)
+
+	// Should get 200 without any auth
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+}

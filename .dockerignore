@@ -1,0 +1,59 @@
+# Version control
+.git
+.gitignore
+.gitattributes
+
+# Docker artifacts (don't recurse into the build context)
+# NOTE: docker-entrypoint.sh is NOT ignored — it is copied into the image.
+Dockerfile
+docker-compose.yml
+docker-compose.example.yml
+.dockerignore
+
+# Secrets and env — never ship to the image
+.env
+.env.local
+.env.*.local
+
+# Local build outputs
+bin/
+dist/
+build/
+server
+main
+migrate
+
+# VCP planning + claude tooling (not needed at build time)
+.vcp/
+.claude/
+
+# Docs and licensing (keep out of the build context to speed it up;
+# the binary is self-contained)
+docs/
+README.md
+CLAUDE.md
+LICENSE
+
+# Tests (not compiled into cmd/server or cmd/migrate binaries)
+tests/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs and temp
+logs/
+*.log
+tmp/
+temp/
+*.tmp
+
+# Node artifacts (none expected, but mirror .gitignore)
+node_modules/
+bun.lockb

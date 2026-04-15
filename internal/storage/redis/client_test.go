@@ -1,0 +1,142 @@
+package redis
+
+import (
+	"context"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+// TestKeyBuilder_RateLimit_Format tests that RateLimit produces the correct key format.
+func TestKeyBuilder_RateLimit_Format(t *testing.T) {
+	kb := NewKeyBuilder()
+	key, err := kb.RateLimit("profile123", "user@example.com")
+	require.NoError(t, err)
+	assert.Equal(t, "profile:profile123:ratelimit:user@example.com", key)
+}
+
+// TestKeyBuilder_Cache_Format tests that Cache produces the correct key format.
+func TestKeyBuilder_Cache_Format(t *testing.T) {
+	kb := NewKeyBuilder()
+	key, err := kb.Cache("profile456", "session-abc")
+	require.NoError(t, err)
+	assert.Equal(t, "profile:profile456:cache:session-abc", key)
+}
+
+// TestKeyBuilder_Session_Format tests that Session produces the correct key format.
+func TestKeyBuilder_Session_Format(t *testing.T) {
+	kb := NewKeyBuilder()
+	key, err := kb.Session("profile789", "refresh-token-xyz")
+	require.NoError(t, err)
+	assert.Equal(t, "profile:profile789:session:refresh-token-xyz", key)
+}
+
+// TestKeyBuilder_Stream_Format tests that Stream produces the correct key format.
+func TestKeyBuilder_Stream_Format(t *testing.T) {
+	kb := NewKeyBuilder()
+	key, err := kb.Stream("profile999", "stream-id-123")
+	require.NoError(t, err)
+	assert.Equal(t, "profile:profile999:stream:stream-id-123", key)
+}
+
+// TestKeyBuilder_EmptyProfileID_Rejects tests that empty profileID is rejected.
+func TestKeyBuilder_EmptyProfileID_Rejects(t *testing.T) {
+	kb := NewKeyBuilder()
+
+	_, err := kb.RateLimit("", "identifier")
+	assert.ErrorIs(t, err, ErrEmptyProfileID)
+
+	_, err = kb.Cache("", "identifier")
+	assert.ErrorIs(t, err, ErrEmptyProfileID)
+
+	_, err = kb.Session("", "identifier")
+	assert.ErrorIs(t, err, ErrEmptyProfileID)
+
+	_, err = kb.Stream("", "identifier")
+	assert.ErrorIs(t, err, ErrEmptyProfileID)
+}
+
+// TestKeyBuilder_InvalidCategory_Rejects tests that invalid categories are rejected.
+func TestKeyBuilder_InvalidCategory_Rejects(t *testing.T) {
+	kb := NewKeyBuilder()
+	_, err := kb.buildKey("profile123", "invalid_category", "identifier")
+	assert.ErrorIs(t, err, ErrInvalidCategory)
+}
+
+// TestKeyBuilder_EmptyIdentifier_Rejects tests that empty identifier is rejected.
+func TestKeyBuilder_EmptyIdentifier_Rejects(t *testing.T) {
+	kb := NewKeyBuilder()
+	_, err := kb.RateLimit("profile123", "")
+	assert.ErrorIs(t, err, ErrEmptyIdentifier)
+}
+
+// TestRedisHealth_Ping tests that the Redis client can ping the server.
+// This test requires a running Redis instance and the integration build tag.
+func TestRedisHealth_Ping(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Create a mock config for testing
+	cfg := &mockConfig{
+		redisAddr:     "localhost:6379",
+		redisPassword: "",
+		redisDB:       0,
+	}
+
+	client, err := NewClient(ctx, cfg)
+	if err != nil {
+		t.Skipf("Redis not available: %v", err)
+	}
+	defer client.Close()
+
+	err = client.Ping(ctx)
+	require.NoError(t, err)
+}
+
+// TestRedisClient_NoRawKeyExposure tests that raw unprefixed keys are not exposed.
+func TestRedisClient_NoRawKeyExposure(t *testing.T) {
+	kb := NewKeyBuilder()
+
+	// Verify that KeyBuilderInterface does not expose any raw key methods
+	// All methods return prefixed keys
+	var _ KeyBuilderInterface = kb
+
+	// Verify that all methods return properly prefixed keys
+	// and that there's no way to bypass the prefix
+	key, err := kb.RateLimit("profile1", "id1")
+	require.NoError(t, err)
+	assert.Contains(t, key, "profile:profile1:")
+	assert.Contains(t, key, ":ratelimit:")
+
+	key, err = kb.Cache("profile1", "id1")
+	require.NoError(t, err)
+	assert.Contains(t, key, "profile:profile1:")
+	assert.Contains(t, key, ":cache:")
+
+	key, err = kb.Session("profile1", "id1")
+	require.NoError(t, err)
+	assert.Contains(t, key, "profile:profile1:")
+	assert.Contains(t, key, ":session:")
+
+	key, err = kb.Stream("profile1", "id1")
+	require.NoError(t, err)
+	assert.Contains(t, key, "profile:profile1:")
+	assert.Contains(t, key, ":stream:")
+}
+
+// mockConfig implements ConfigProvider for testing
+type mockConfig struct {
+	redisAddr     string
+	redisPassword string
+	redisDB       int
+}
+
+func (m *mockConfig) GetRedisAddr() string     { return m.redisAddr }
+func (m *mockConfig) GetRedisPassword() string { return m.redisPassword }
+func (m *mockConfig) GetRedisDB() int          { return m.redisDB }

@@ -1,0 +1,101 @@
+package integration
+
+import (
+	"context"
+	"testing"
+
+	"github.com/testcontainers/testcontainers-go"
+)
+
+// TestEnvProvider is the companion interface for TestEnv to enable mockability
+type TestEnvProvider interface {
+	Setup(ctx context.Context) error
+	Teardown(ctx context.Context) error
+	GetPostgresDSN() string
+	GetNeo4jURI() string
+	GetNeo4jAuth() (username, password string)
+	GetRedisAddr() string
+	GetServerBaseURL() string
+}
+
+// TestEnv is a shared integration fixture that manages test containers
+// and in-process server lifecycle for UAT tests
+type TestEnv struct {
+	// Postgres container
+	postgresContainer testcontainers.Container
+	postgresDSN       string
+
+	// Neo4j container
+	neo4jContainer testcontainers.Container
+	neo4jURI       string
+	neo4jUser      string
+	neo4jPassword  string
+
+	// Redis container
+	redisContainer testcontainers.Container
+	redisAddr      string
+
+	// Server
+	serverBaseURL string
+}
+
+// Ensure TestEnv implements TestEnvProvider
+var _ TestEnvProvider = (*TestEnv)(nil)
+
+// Setup initializes all test containers and starts the in-process server
+func (te *TestEnv) Setup(ctx context.Context) error {
+	// Placeholder: container initialization will be implemented in subsequent units
+	return nil
+}
+
+// Teardown stops all containers and cleans up resources
+func (te *TestEnv) Teardown(ctx context.Context) error {
+	// Placeholder: container cleanup will be implemented in subsequent units
+	return nil
+}
+
+// GetPostgresDSN returns the connection string for the test Postgres container
+func (te *TestEnv) GetPostgresDSN() string {
+	return te.postgresDSN
+}
+
+// GetNeo4jURI returns the Bolt URI for the test Neo4j container
+func (te *TestEnv) GetNeo4jURI() string {
+	return te.neo4jURI
+}
+
+// GetNeo4jAuth returns the credentials for the test Neo4j container
+func (te *TestEnv) GetNeo4jAuth() (username, password string) {
+	return te.neo4jUser, te.neo4jPassword
+}
+
+// GetRedisAddr returns the address for the test Redis container
+func (te *TestEnv) GetRedisAddr() string {
+	return te.redisAddr
+}
+
+// GetServerBaseURL returns the base URL for the in-process test server
+func (te *TestEnv) GetServerBaseURL() string {
+	return te.serverBaseURL
+}
+
+// NewTestEnv creates a new TestEnv instance
+func NewTestEnv() *TestEnv {
+	return &TestEnv{}
+}
+
+// SetupTestEnv is a helper function that sets up the test environment
+// and returns a cleanup function
+func SetupTestEnv(t *testing.T, ctx context.Context) (*TestEnv, func()) {
+	t.Helper()
+	env := NewTestEnv()
+	if err := env.Setup(ctx); err != nil {
+		t.Fatalf("failed to setup test environment: %v", err)
+	}
+	cleanup := func() {
+		if err := env.Teardown(ctx); err != nil {
+			t.Logf("warning: failed to teardown test environment: %v", err)
+		}
+	}
+	return env, cleanup
+}

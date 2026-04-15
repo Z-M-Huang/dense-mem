@@ -1,0 +1,121 @@
+# Dense-Mem docker compose TEMPLATE.
+#
+# Copy this file to docker-compose.yml (gitignored) and adjust as needed.
+# A matching .env file must live beside it — use .env.example as a starting
+# point and set at minimum POSTGRES_PASSWORD and NEO4J_PASSWORD.
+#
+# Required env in .env:
+#   POSTGRES_PASSWORD         Postgres password for the postgres container
+#   NEO4J_PASSWORD            Neo4j password (user defaults to "neo4j")
+#   POSTGRES_HOST, _USER, _DB, _PORT, _SSLMODE  (for the entrypoint to
+#                             assemble POSTGRES_DSN — see docker-entrypoint.sh)
+#
+# Optional env (sensible defaults — see .env for the full list):
+#   NEO4J_USER, NEO4J_DATABASE
+#   REDIS_PASSWORD, REDIS_DB
+#   HTTP_PORT (host port to expose the API on; default 8080)
+#   BOOTSTRAP_ADMIN_KEY (seed one admin key on first start; leave unset in
+#     production and mint admin keys via the /admin endpoints instead)
+#
+# The image entrypoint (/app/docker-entrypoint.sh) builds POSTGRES_DSN from
+# its component env vars at container start, so no credentialed connection
+# string literal appears in this file, in .env, or anywhere else on disk.
+#
+# Migrations run once on `docker compose up` via the `migrate` service, which
+# is gated on postgres health and exits 0 on success. The `server` service
+# waits for it via service_completed_successfully before starting.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-densemem}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-densemem}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"${POSTGRES_USER:-densemem}\" -d \"${POSTGRES_DB:-densemem}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+  neo4j:
+    image: neo4j:5.26-community
+    environment:
+      NEO4J_AUTH: ${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:?NEO4J_PASSWORD must be set in .env}
+      NEO4J_server_memory_heap_initial__size: 512m
+      NEO4J_server_memory_heap_max__size: 1g
+      NEO4J_server_memory_pagecache_size: 512m
+    volumes:
+      - neo4j-data:/data
+      - neo4j-logs:/logs
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - >
+          wget -q --spider http://127.0.0.1:7474
+          && cypher-shell -u "${NEO4J_USER:-neo4j}" -p "${NEO4J_PASSWORD}" 'RETURN 1' >/dev/null 2>&1
+          || exit 1
+      interval: 10s
+      timeout: 10s
+      retries: 20
+      start_period: 30s
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: >
+      redis-server
+      --appendonly yes
+      ${REDIS_PASSWORD:+--requirepass ${REDIS_PASSWORD}}
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ${REDIS_PASSWORD:+-a $$REDIS_PASSWORD} ping | grep -q PONG"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    restart: unless-stopped
+
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: densemem:latest
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["/app/migrate", "up"]
+    restart: "no"
+
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: densemem:latest
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    ports:
+      - "${HTTP_PORT:-8080}:8080"
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  neo4j-data:
+  neo4j-logs:
+  redis-data:

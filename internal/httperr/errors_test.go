@@ -1,0 +1,188 @@
+package httperr
+
+import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/labstack/echo/v4"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func TestErrorEnvelopeShape(t *testing.T) {
+	// Create an APIError
+	apiErr := New(VALIDATION_ERROR, "test error message")
+	envelope := NewErrorEnvelope(apiErr)
+
+	// Marshal to JSON
+	jsonBytes, err := json.Marshal(envelope)
+	require.NoError(t, err)
+
+	// Unmarshal to verify structure
+	var result map[string]interface{}
+	err = json.Unmarshal(jsonBytes, &result)
+	require.NoError(t, err)
+
+	// Verify top-level "error" key exists
+	errorObj, ok := result["error"]
+	require.True(t, ok, "expected 'error' key at top level")
+
+	// Verify error object has required fields
+	errorMap, ok := errorObj.(map[string]interface{})
+	require.True(t, ok, "expected error to be an object")
+
+	// Check code field
+	code, ok := errorMap["code"]
+	require.True(t, ok, "expected 'code' field")
+	assert.Equal(t, "VALIDATION_ERROR", code)
+
+	// Check message field
+	message, ok := errorMap["message"]
+	require.True(t, ok, "expected 'message' field")
+	assert.Equal(t, "test error message", message)
+
+	// Check details field exists (can be null)
+	_, ok = errorMap["details"]
+	require.True(t, ok, "expected 'details' field")
+}
+
+func TestErrorCodes(t *testing.T) {
+	tests := []struct {
+		code     ErrorCode
+		expected string
+	}{
+		{AUTH_MISSING, "AUTH_MISSING"},
+		{AUTH_INVALID, "AUTH_INVALID"},
+		{AUTH_EXPIRED, "AUTH_EXPIRED"},
+		{AUTH_REVOKED, "AUTH_REVOKED"},
+		{FORBIDDEN, "FORBIDDEN"},
+		{NOT_FOUND, "NOT_FOUND"},
+		{VALIDATION_ERROR, "VALIDATION_ERROR"},
+		{PROFILE_ID_REQUIRED, "PROFILE_ID_REQUIRED"},
+		{INVALID_UUID, "INVALID_UUID"},
+		{CONFLICT, "CONFLICT"},
+		{RATE_LIMITED, "RATE_LIMITED"},
+		{SERVICE_UNAVAILABLE, "SERVICE_UNAVAILABLE"},
+		{INTERNAL_ERROR, "INTERNAL_ERROR"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.expected, func(t *testing.T) {
+			// Verify the code serializes correctly
+			apiErr := New(tt.code, "test message")
+			assert.Equal(t, tt.expected, string(apiErr.Code))
+
+			// Verify Error() method
+			assert.Contains(t, apiErr.Error(), tt.expected)
+		})
+	}
+}
+
+func TestErrorWithDetails(t *testing.T) {
+	details := []ErrorDetail{
+		{Field: "name", Message: "name is required"},
+		{Field: "email", Message: "email is invalid"},
+	}
+
+	apiErr := NewWithDetails(VALIDATION_ERROR, "validation failed", details)
+
+	// Verify details are set
+	require.Len(t, apiErr.Details, 2)
+	assert.Equal(t, "name", apiErr.Details[0].Field)
+	assert.Equal(t, "name is required", apiErr.Details[0].Message)
+	assert.Equal(t, "email", apiErr.Details[1].Field)
+	assert.Equal(t, "email is invalid", apiErr.Details[1].Message)
+
+	// Verify JSON serialization
+	envelope := NewErrorEnvelope(apiErr)
+	jsonBytes, err := json.Marshal(envelope)
+	require.NoError(t, err)
+
+	var result map[string]interface{}
+	err = json.Unmarshal(jsonBytes, &result)
+	require.NoError(t, err)
+
+	errorMap := result["error"].(map[string]interface{})
+	detailsArr := errorMap["details"].([]interface{})
+	require.Len(t, detailsArr, 2)
+
+	detail0 := detailsArr[0].(map[string]interface{})
+	assert.Equal(t, "name", detail0["field"])
+	assert.Equal(t, "name is required", detail0["message"])
+}
+
+func TestHTTPStatusCode(t *testing.T) {
+	tests := []struct {
+		code     ErrorCode
+		expected int
+	}{
+		{AUTH_MISSING, http.StatusUnauthorized},
+		{AUTH_INVALID, http.StatusUnauthorized},
+		{AUTH_EXPIRED, http.StatusUnauthorized},
+		{AUTH_REVOKED, http.StatusUnauthorized},
+		{FORBIDDEN, http.StatusForbidden},
+		{NOT_FOUND, http.StatusNotFound},
+		{VALIDATION_ERROR, http.StatusUnprocessableEntity}, // 422 for validation errors
+		{PROFILE_ID_REQUIRED, http.StatusBadRequest},
+		{INVALID_UUID, http.StatusBadRequest},
+		{CONFLICT, http.StatusConflict},
+		{RATE_LIMITED, http.StatusTooManyRequests},
+		{SERVICE_UNAVAILABLE, http.StatusServiceUnavailable},
+		{INTERNAL_ERROR, http.StatusInternalServerError},
+		{ErrorCode("UNKNOWN"), http.StatusInternalServerError},
+	}
+
+	for _, tt := range tests {
+		t.Run(string(tt.code), func(t *testing.T) {
+			assert.Equal(t, tt.expected, HTTPStatusCode(tt.code))
+		})
+	}
+}
+
+func TestErrorHandler(t *testing.T) {
+	e := echo.New()
+	e.HTTPErrorHandler = ErrorHandler
+
+	t.Run("handles APIError", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/test", nil)
+		rec := httptest.NewRecorder()
+		c := e.NewContext(req, rec)
+
+		apiErr := New(NOT_FOUND, "resource not found")
+		ErrorHandler(apiErr, c)
+
+		assert.Equal(t, http.StatusNotFound, rec.Code)
+		assert.Contains(t, rec.Body.String(), `"code":"NOT_FOUND"`)
+		assert.Contains(t, rec.Body.String(), `"message":"resource not found"`)
+	})
+
+	t.Run("handles generic error", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/test", nil)
+		rec := httptest.NewRecorder()
+		c := e.NewContext(req, rec)
+
+		ErrorHandler(assert.AnError, c)
+
+		assert.Equal(t, http.StatusInternalServerError, rec.Code)
+		assert.Contains(t, rec.Body.String(), `"code":"INTERNAL_ERROR"`)
+	})
+}
+
+func TestAPIErrorProvider(t *testing.T) {
+	// Verify APIError implements APIErrorProvider
+	var _ APIErrorProvider = (*APIError)(nil)
+
+	apiErr := New(FORBIDDEN, "access denied")
+
+	// Test interface methods
+	assert.Equal(t, FORBIDDEN, apiErr.GetCode())
+	assert.Equal(t, "access denied", apiErr.GetMessage())
+	assert.Nil(t, apiErr.GetDetails())
+
+	// Test with details
+	details := []ErrorDetail{{Field: "id", Message: "invalid"}}
+	apiErrWithDetails := NewWithDetails(VALIDATION_ERROR, "bad input", details)
+	assert.Equal(t, details, apiErrWithDetails.GetDetails())
+}

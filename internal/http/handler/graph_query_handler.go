@@ -1,0 +1,134 @@
+package handler
+
+import (
+	"context"
+	"net/http"
+
+	"github.com/google/uuid"
+	"github.com/labstack/echo/v4"
+
+	"github.com/dense-mem/dense-mem/internal/http/middleware"
+	"github.com/dense-mem/dense-mem/internal/httperr"
+	"github.com/dense-mem/dense-mem/internal/tools/graphquery"
+)
+
+// GraphQueryRequest represents the request body for graph-query.
+type GraphQueryRequest struct {
+	Query  string         `json:"query" validate:"required"`
+	Params map[string]any `json:"params,omitempty"`
+}
+
+// GraphQueryResponse represents the response for graph-query.
+type GraphQueryResponse struct {
+	Data GraphQueryData `json:"data"`
+	Meta GraphQueryMeta `json:"meta"`
+}
+
+// GraphQueryData represents the data portion of the response.
+type GraphQueryData struct {
+	Columns []string         `json:"columns"`
+	Rows    []map[string]any `json:"rows"`
+}
+
+// GraphQueryMeta represents the metadata portion of the response.
+type GraphQueryMeta struct {
+	RowCount     int  `json:"row_count"`
+	RowCapApplied bool `json:"row_cap_applied"`
+}
+
+// GraphQueryServiceInterface defines the interface for graph query service.
+type GraphQueryServiceInterface interface {
+	Execute(ctx context.Context, profileID string, query string, params map[string]any) (*graphquery.GraphQueryResult, error)
+}
+
+// GraphQueryHandler handles HTTP requests for graph-query operations.
+type GraphQueryHandler struct {
+	svc GraphQueryServiceInterface
+}
+
+// GraphQueryHandlerInterface is the companion interface for GraphQueryHandler.
+type GraphQueryHandlerInterface interface {
+	Handle(c echo.Context) error
+}
+
+// Ensure GraphQueryHandler implements GraphQueryHandlerInterface.
+var _ GraphQueryHandlerInterface = (*GraphQueryHandler)(nil)
+
+// NewGraphQueryHandler creates a new graph query handler.
+func NewGraphQueryHandler(svc GraphQueryServiceInterface) *GraphQueryHandler {
+	return &GraphQueryHandler{svc: svc}
+}
+
+// Handle handles POST /api/v1/tools/graph-query.
+// It validates the request, executes the query, and returns results.
+func (h *GraphQueryHandler) Handle(c echo.Context) error {
+	ctx := c.Request().Context()
+
+	// Get resolved profile ID from context (set by ProfileResolutionMiddleware)
+	profileID, ok := middleware.GetResolvedProfileID(ctx)
+	if !ok {
+		return httperr.New(httperr.PROFILE_ID_REQUIRED, "profile ID is required")
+	}
+
+	// Bind request body
+	var req GraphQueryRequest
+	if err := c.Bind(&req); err != nil {
+		return httperr.New(httperr.VALIDATION_ERROR, "malformed JSON body")
+	}
+
+	// Validate required query field
+	if req.Query == "" {
+		return httperr.New(httperr.VALIDATION_ERROR, "query is required")
+	}
+
+	// Execute query
+	result, err := h.svc.Execute(ctx, profileID.String(), req.Query, req.Params)
+	if err != nil {
+		return handleGraphQueryError(err)
+	}
+
+	// Build response
+	response := GraphQueryResponse{
+		Data: GraphQueryData{
+			Columns: result.Columns,
+			Rows:    result.Rows,
+		},
+		Meta: GraphQueryMeta{
+			RowCount:     result.RowCount,
+			RowCapApplied: result.RowCapApplied,
+		},
+	}
+
+	return c.JSON(http.StatusOK, response)
+}
+
+// handleGraphQueryError converts service errors to HTTP errors.
+func handleGraphQueryError(err error) *httperr.APIError {
+	if err == nil {
+		return nil
+	}
+
+	// Check for specific error types
+	if graphquery.IsLimitError(err) {
+		return httperr.New(httperr.VALIDATION_ERROR, err.Error())
+	}
+
+	if graphquery.IsForbiddenParamError(err) {
+		return httperr.New(httperr.VALIDATION_ERROR, err.Error())
+	}
+
+	if graphquery.IsSyntaxError(err) {
+		return httperr.New(httperr.VALIDATION_ERROR, err.Error())
+	}
+
+	// Check for validation errors from CypherValidator
+	if _, ok := err.(*graphquery.ValidationError); ok {
+		return httperr.New(httperr.VALIDATION_ERROR, err.Error())
+	}
+
+	// Default to internal error
+	return httperr.New(httperr.INTERNAL_ERROR, "failed to execute query")
+}
+
+// Ensure imports are used
+var _ = uuid.UUID{}

@@ -1,0 +1,511 @@
+package service
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"fmt"
+	"log/slog"
+	"os"
+	"time"
+
+	"github.com/google/uuid"
+	"gorm.io/gorm"
+)
+
+// AuditLogEntry represents a single audit log entry to be written.
+type AuditLogEntry struct {
+	ID             string
+	ProfileID      *string
+	Timestamp      time.Time
+	Operation      string
+	EntityType     string
+	EntityID       string
+	BeforePayload  map[string]interface{}
+	AfterPayload   map[string]interface{}
+	ActorKeyID     *string
+	ActorRole      string
+	ClientIP       string
+	CorrelationID  string
+	Metadata       map[string]interface{}
+}
+
+// AuditService is the companion interface for audit logging operations.
+// Consumers and tests depend on this abstraction rather than the concrete struct.
+type AuditService interface {
+	Append(ctx context.Context, entry AuditLogEntry) error
+
+	// List retrieves audit log entries for a specific profile with pagination.
+	// Returns entries, total count, and error.
+	List(ctx context.Context, profileID string, limit, offset int) ([]AuditLogEntry, int, error)
+
+	// Profile lifecycle helpers
+	ProfileCreated(ctx context.Context, profileID string, afterPayload map[string]interface{}, actorKeyID *string, actorRole, clientIP, correlationID string) error
+	ProfileUpdated(ctx context.Context, profileID string, beforePayload, afterPayload map[string]interface{}, actorKeyID *string, actorRole, clientIP, correlationID string) error
+	ProfileDeleteBlocked(ctx context.Context, profileID string, beforePayload map[string]interface{}, actorKeyID *string, actorRole, clientIP, correlationID string, reason string) error
+	ProfileDeleted(ctx context.Context, profileID string, beforePayload map[string]interface{}, actorKeyID *string, actorRole, clientIP, correlationID string) error
+
+	// API key lifecycle helpers
+	APIKeyCreated(ctx context.Context, profileID *string, keyID string, afterPayload map[string]interface{}, actorKeyID *string, actorRole, clientIP, correlationID string) error
+	APIKeyRevoked(ctx context.Context, profileID *string, keyID string, beforePayload map[string]interface{}, actorKeyID *string, actorRole, clientIP, correlationID string) error
+
+	// Security event helpers
+	AuthFailure(ctx context.Context, profileID *string, entityType, entityID string, metadata map[string]interface{}, clientIP, correlationID string) error
+	CrossProfileDenied(ctx context.Context, actorProfileID, targetProfileID string, operation string, metadata map[string]interface{}, clientIP, correlationID string) error
+	RateLimited(ctx context.Context, profileID *string, operation string, metadata map[string]interface{}, clientIP, correlationID string) error
+
+	// Admin and system helpers
+	AdminQuery(ctx context.Context, queryType string, metadata map[string]interface{}, actorKeyID *string, actorRole, clientIP, correlationID string) error
+	AdminBypass(ctx context.Context, operation string, reason string, metadata map[string]interface{}, actorKeyID *string, actorRole, clientIP, correlationID string) error
+	InvariantViolation(ctx context.Context, entityType, entityID string, violation string, metadata map[string]interface{}, clientIP, correlationID string) error
+}
+
+// AuditServiceImpl implements the AuditService interface.
+type AuditServiceImpl struct {
+	db     *gorm.DB
+	logger *slog.Logger
+}
+
+// Ensure AuditServiceImpl implements AuditService
+var _ AuditService = (*AuditServiceImpl)(nil)
+
+// NewAuditService creates a new audit service instance.
+func NewAuditService(db *gorm.DB) *AuditServiceImpl {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+		Level: slog.LevelInfo,
+	}))
+	return &AuditServiceImpl{db: db, logger: logger}
+}
+
+// NewAuditServiceWithLogger creates a new audit service instance with a custom logger.
+func NewAuditServiceWithLogger(db *gorm.DB, logger *slog.Logger) *AuditServiceImpl {
+	return &AuditServiceImpl{db: db, logger: logger}
+}
+
+// sensitiveFields contains the list of fields that must be redacted from audit payloads.
+var sensitiveFields = map[string]bool{
+	"key_hash":         true,
+	"encrypted_secret": true,
+	"api_key":          true,
+	"raw_key":          true,
+	"secret":           true,
+	"password":         true,
+	"token":            true,
+	"embedding":        true,
+	"embeddings":       true,
+}
+
+// redactPayload removes sensitive fields from a payload map.
+// It returns a new map and does not modify the original.
+func redactPayload(payload map[string]interface{}) map[string]interface{} {
+	if payload == nil {
+		return nil
+	}
+
+	redacted := make(map[string]interface{}, len(payload))
+	for key, value := range payload {
+		if sensitiveFields[key] {
+			continue
+		}
+		// Recursively redact nested maps
+		if nestedMap, ok := value.(map[string]interface{}); ok {
+			redacted[key] = redactPayload(nestedMap)
+		} else {
+			redacted[key] = value
+		}
+	}
+	return redacted
+}
+
+// logAuditError logs an audit service error with structured logging.
+// This ensures audit failures are not silently swallowed and can be monitored.
+func (s *AuditServiceImpl) logAuditError(ctx context.Context, err error, operation, entityType, entityID, correlationID string) {
+	if s.logger == nil {
+		return
+	}
+	s.logger.Error("audit_log_write_failed",
+		slog.String("error", err.Error()),
+		slog.String("operation", operation),
+		slog.String("entity_type", entityType),
+		slog.String("entity_id", entityID),
+		slog.String("correlation_id", correlationID),
+	)
+}
+
+// Append writes an audit log entry to the database.
+// Payloads are automatically redacted to remove sensitive fields.
+func (s *AuditServiceImpl) Append(ctx context.Context, entry AuditLogEntry) error {
+	// Redact sensitive fields from payloads
+	beforePayload := redactPayload(entry.BeforePayload)
+	afterPayload := redactPayload(entry.AfterPayload)
+
+	// Convert payloads to JSON
+	var beforeJSON, afterJSON interface{}
+	if beforePayload != nil {
+		data, err := json.Marshal(beforePayload)
+		if err != nil {
+			return fmt.Errorf("failed to marshal before_payload: %w", err)
+		}
+		beforeJSON = data
+	}
+	if afterPayload != nil {
+		data, err := json.Marshal(afterPayload)
+		if err != nil {
+			return fmt.Errorf("failed to marshal after_payload: %w", err)
+		}
+		afterJSON = data
+	}
+
+	// Convert metadata to JSON
+	metadataJSON := []byte("{}")
+	if entry.Metadata != nil {
+		data, err := json.Marshal(entry.Metadata)
+		if err != nil {
+			return fmt.Errorf("failed to marshal metadata: %w", err)
+		}
+		metadataJSON = data
+	}
+
+	// Use the current timestamp if not provided
+	timestamp := entry.Timestamp
+	if timestamp.IsZero() {
+		timestamp = time.Now().UTC()
+	}
+
+	// Generate UUID in Go if not provided (not in SQL via COALESCE)
+	id := entry.ID
+	if id == "" {
+		id = uuid.New().String()
+	}
+
+	// Execute the insert
+	err := s.db.WithContext(ctx).Exec(`
+			INSERT INTO audit_log (
+				id, profile_id, timestamp, operation, entity_type, entity_id,
+				before_payload, after_payload, actor_key_id, actor_role,
+				client_ip, correlation_id, metadata
+			) VALUES (
+				$1, $2, $3, $4, $5, $6,
+				$7, $8, $9, $10, $11, $12, $13
+			)
+		`,
+		id,
+		entry.ProfileID,
+		timestamp,
+		entry.Operation,
+		entry.EntityType,
+		entry.EntityID,
+		beforeJSON,
+		afterJSON,
+		entry.ActorKeyID,
+		entry.ActorRole,
+		entry.ClientIP,
+		entry.CorrelationID,
+		metadataJSON,
+	).Error
+
+	if err != nil {
+		return fmt.Errorf("failed to append audit log entry: %w", err)
+	}
+
+	return nil
+}
+
+// List retrieves audit log entries for a specific profile with pagination.
+// Entries are returned in descending order by timestamp (most recent first).
+// The profileID parameter ensures profile-scoped listing - admin can only see
+// the requested profile's log on this route.
+func (s *AuditServiceImpl) List(ctx context.Context, profileID string, limit, offset int) ([]AuditLogEntry, int, error) {
+	// Query entries for the specific profile
+	rows, err := s.db.WithContext(ctx).Raw(`
+		SELECT id, profile_id, timestamp, operation, entity_type, entity_id,
+		       before_payload, after_payload, actor_key_id, actor_role,
+		       client_ip, correlation_id, metadata
+		FROM audit_log
+		WHERE profile_id = $1
+		ORDER BY timestamp DESC
+		LIMIT $2 OFFSET $3
+	`, profileID, limit, offset).Rows()
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to query audit log: %w", err)
+	}
+	defer rows.Close()
+
+	var entries []AuditLogEntry
+	for rows.Next() {
+		var entry AuditLogEntry
+		var beforePayloadJSON, afterPayloadJSON, metadataJSON []byte
+		var profileIDNullable sql.NullString
+		var actorKeyIDNullable sql.NullString
+
+		err := rows.Scan(
+			&entry.ID,
+			&profileIDNullable,
+			&entry.Timestamp,
+			&entry.Operation,
+			&entry.EntityType,
+			&entry.EntityID,
+			&beforePayloadJSON,
+			&afterPayloadJSON,
+			&actorKeyIDNullable,
+			&entry.ActorRole,
+			&entry.ClientIP,
+			&entry.CorrelationID,
+			&metadataJSON,
+		)
+		if err != nil {
+			return nil, 0, fmt.Errorf("failed to scan audit log entry: %w", err)
+		}
+
+		// Handle nullable fields
+		if profileIDNullable.Valid {
+			entry.ProfileID = &profileIDNullable.String
+		}
+		if actorKeyIDNullable.Valid {
+			entry.ActorKeyID = &actorKeyIDNullable.String
+		}
+
+		// Parse JSON payloads
+		if len(beforePayloadJSON) > 0 {
+			if err := json.Unmarshal(beforePayloadJSON, &entry.BeforePayload); err != nil {
+				entry.BeforePayload = nil
+			}
+		}
+		if len(afterPayloadJSON) > 0 {
+			if err := json.Unmarshal(afterPayloadJSON, &entry.AfterPayload); err != nil {
+				entry.AfterPayload = nil
+			}
+		}
+		if len(metadataJSON) > 0 {
+			if err := json.Unmarshal(metadataJSON, &entry.Metadata); err != nil {
+				entry.Metadata = nil
+			}
+		}
+
+		entries = append(entries, entry)
+	}
+
+	// Get total count for pagination
+	var total int
+	err = s.db.WithContext(ctx).Raw(`
+		SELECT COUNT(*) FROM audit_log WHERE profile_id = $1
+	`, profileID).Scan(&total).Error
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to count audit log entries: %w", err)
+	}
+
+	return entries, total, nil
+}
+
+// ProfileCreated logs a profile creation event.
+func (s *AuditServiceImpl) ProfileCreated(ctx context.Context, profileID string, afterPayload map[string]interface{}, actorKeyID *string, actorRole, clientIP, correlationID string) error {
+	entry := AuditLogEntry{
+		ProfileID:     &profileID,
+		Operation:     "CREATE",
+		EntityType:    "profile",
+		EntityID:      profileID,
+		AfterPayload:  afterPayload,
+		ActorKeyID:    actorKeyID,
+		ActorRole:     actorRole,
+		ClientIP:      clientIP,
+		CorrelationID: correlationID,
+	}
+	return s.Append(ctx, entry)
+}
+
+// ProfileUpdated logs a profile update event.
+func (s *AuditServiceImpl) ProfileUpdated(ctx context.Context, profileID string, beforePayload, afterPayload map[string]interface{}, actorKeyID *string, actorRole, clientIP, correlationID string) error {
+	entry := AuditLogEntry{
+		ProfileID:     &profileID,
+		Operation:     "UPDATE",
+		EntityType:    "profile",
+		EntityID:      profileID,
+		BeforePayload: beforePayload,
+		AfterPayload:  afterPayload,
+		ActorKeyID:    actorKeyID,
+		ActorRole:     actorRole,
+		ClientIP:      clientIP,
+		CorrelationID: correlationID,
+	}
+	return s.Append(ctx, entry)
+}
+
+// ProfileDeleteBlocked logs when a profile deletion was blocked.
+func (s *AuditServiceImpl) ProfileDeleteBlocked(ctx context.Context, profileID string, beforePayload map[string]interface{}, actorKeyID *string, actorRole, clientIP, correlationID string, reason string) error {
+	entry := AuditLogEntry{
+		ProfileID:     &profileID,
+		Operation:     "DELETE_BLOCKED",
+		EntityType:    "profile",
+		EntityID:      profileID,
+		BeforePayload: beforePayload,
+		ActorKeyID:    actorKeyID,
+		ActorRole:     actorRole,
+		ClientIP:      clientIP,
+		CorrelationID: correlationID,
+		Metadata: map[string]interface{}{
+			"reason": reason,
+		},
+	}
+	return s.Append(ctx, entry)
+}
+
+// ProfileDeleted logs a profile deletion event.
+func (s *AuditServiceImpl) ProfileDeleted(ctx context.Context, profileID string, beforePayload map[string]interface{}, actorKeyID *string, actorRole, clientIP, correlationID string) error {
+	entry := AuditLogEntry{
+		ProfileID:     &profileID,
+		Operation:     "DELETE",
+		EntityType:    "profile",
+		EntityID:      profileID,
+		BeforePayload: beforePayload,
+		ActorKeyID:    actorKeyID,
+		ActorRole:     actorRole,
+		ClientIP:      clientIP,
+		CorrelationID: correlationID,
+	}
+	return s.Append(ctx, entry)
+}
+
+// APIKeyCreated logs an API key creation event.
+func (s *AuditServiceImpl) APIKeyCreated(ctx context.Context, profileID *string, keyID string, afterPayload map[string]interface{}, actorKeyID *string, actorRole, clientIP, correlationID string) error {
+	entry := AuditLogEntry{
+		ProfileID:     profileID,
+		Operation:     "CREATE",
+		EntityType:    "api_key",
+		EntityID:      keyID,
+		AfterPayload:  afterPayload,
+		ActorKeyID:    actorKeyID,
+		ActorRole:     actorRole,
+		ClientIP:      clientIP,
+		CorrelationID: correlationID,
+	}
+	return s.Append(ctx, entry)
+}
+
+// APIKeyRevoked logs an API key revocation event.
+func (s *AuditServiceImpl) APIKeyRevoked(ctx context.Context, profileID *string, keyID string, beforePayload map[string]interface{}, actorKeyID *string, actorRole, clientIP, correlationID string) error {
+	entry := AuditLogEntry{
+		ProfileID:     profileID,
+		Operation:     "REVOKE",
+		EntityType:    "api_key",
+		EntityID:      keyID,
+		BeforePayload: beforePayload,
+		ActorKeyID:    actorKeyID,
+		ActorRole:     actorRole,
+		ClientIP:      clientIP,
+		CorrelationID: correlationID,
+	}
+	return s.Append(ctx, entry)
+}
+
+// AuthFailure logs an authentication failure event.
+func (s *AuditServiceImpl) AuthFailure(ctx context.Context, profileID *string, entityType, entityID string, metadata map[string]interface{}, clientIP, correlationID string) error {
+	entry := AuditLogEntry{
+		ProfileID:     profileID,
+		Operation:     "AUTH_FAILURE",
+		EntityType:    entityType,
+		EntityID:      entityID,
+		ClientIP:      clientIP,
+		CorrelationID: correlationID,
+		Metadata:      metadata,
+	}
+	return s.Append(ctx, entry)
+}
+
+// CrossProfileDenied logs a cross-profile access denial event.
+func (s *AuditServiceImpl) CrossProfileDenied(ctx context.Context, actorProfileID, targetProfileID string, operation string, metadata map[string]interface{}, clientIP, correlationID string) error {
+	if metadata == nil {
+		metadata = make(map[string]interface{})
+	}
+	metadata["actor_profile_id"] = actorProfileID
+	metadata["target_profile_id"] = targetProfileID
+	metadata["denied_operation"] = operation
+
+	entry := AuditLogEntry{
+		ProfileID:     &targetProfileID,
+		Operation:     "CROSS_PROFILE_DENIED",
+		EntityType:    "profile",
+		EntityID:      targetProfileID,
+		ClientIP:      clientIP,
+		CorrelationID: correlationID,
+		Metadata:      metadata,
+	}
+	return s.Append(ctx, entry)
+}
+
+// RateLimited logs a rate limiting event.
+func (s *AuditServiceImpl) RateLimited(ctx context.Context, profileID *string, operation string, metadata map[string]interface{}, clientIP, correlationID string) error {
+	if metadata == nil {
+		metadata = make(map[string]interface{})
+	}
+	metadata["limited_operation"] = operation
+
+	entry := AuditLogEntry{
+		ProfileID:     profileID,
+		Operation:     "RATE_LIMITED",
+		EntityType:    "request",
+		EntityID:      correlationID,
+		ClientIP:      clientIP,
+		CorrelationID: correlationID,
+		Metadata:      metadata,
+	}
+	return s.Append(ctx, entry)
+}
+
+// AdminQuery logs an admin query event.
+func (s *AuditServiceImpl) AdminQuery(ctx context.Context, queryType string, metadata map[string]interface{}, actorKeyID *string, actorRole, clientIP, correlationID string) error {
+	if metadata == nil {
+		metadata = make(map[string]interface{})
+	}
+	metadata["query_type"] = queryType
+
+	entry := AuditLogEntry{
+		Operation:     "ADMIN_QUERY",
+		EntityType:    "admin",
+		EntityID:      queryType,
+		ActorKeyID:    actorKeyID,
+		ActorRole:     actorRole,
+		ClientIP:      clientIP,
+		CorrelationID: correlationID,
+		Metadata:      metadata,
+	}
+	return s.Append(ctx, entry)
+}
+
+// AdminBypass logs an admin bypass event.
+func (s *AuditServiceImpl) AdminBypass(ctx context.Context, operation string, reason string, metadata map[string]interface{}, actorKeyID *string, actorRole, clientIP, correlationID string) error {
+	if metadata == nil {
+		metadata = make(map[string]interface{})
+	}
+	metadata["bypassed_operation"] = operation
+	metadata["bypass_reason"] = reason
+
+	entry := AuditLogEntry{
+		Operation:     "ADMIN_BYPASS",
+		EntityType:    "admin",
+		EntityID:      operation,
+		ActorKeyID:    actorKeyID,
+		ActorRole:     actorRole,
+		ClientIP:      clientIP,
+		CorrelationID: correlationID,
+		Metadata:      metadata,
+	}
+	return s.Append(ctx, entry)
+}
+
+// InvariantViolation logs an invariant violation event.
+func (s *AuditServiceImpl) InvariantViolation(ctx context.Context, entityType, entityID string, violation string, metadata map[string]interface{}, clientIP, correlationID string) error {
+	if metadata == nil {
+		metadata = make(map[string]interface{})
+	}
+	metadata["violation_description"] = violation
+
+	entry := AuditLogEntry{
+		Operation:     "INVARIANT_VIOLATION",
+		EntityType:    entityType,
+		EntityID:      entityID,
+		ClientIP:      clientIP,
+		CorrelationID: correlationID,
+		Metadata:      metadata,
+	}
+	return s.Append(ctx, entry)
+}

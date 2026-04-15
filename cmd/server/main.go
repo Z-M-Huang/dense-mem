@@ -1,0 +1,219 @@
+package main
+
+import (
+	"context"
+	"log"
+	"log/slog"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/dense-mem/dense-mem/internal/config"
+	"github.com/dense-mem/dense-mem/internal/http"
+	"github.com/dense-mem/dense-mem/internal/http/handler"
+	"github.com/dense-mem/dense-mem/internal/http/middleware"
+	"github.com/dense-mem/dense-mem/internal/http/validation"
+	"github.com/dense-mem/dense-mem/internal/observability"
+	"github.com/dense-mem/dense-mem/internal/repository"
+	"github.com/dense-mem/dense-mem/internal/service"
+	"github.com/dense-mem/dense-mem/internal/sse"
+	"github.com/dense-mem/dense-mem/internal/storage/neo4j"
+	"github.com/dense-mem/dense-mem/internal/storage/postgres"
+	"github.com/dense-mem/dense-mem/internal/storage/redis"
+	"github.com/dense-mem/dense-mem/internal/tools/admingraph"
+	"github.com/dense-mem/dense-mem/internal/tools/graphquery"
+	"github.com/dense-mem/dense-mem/internal/tools/keywordsearch"
+	"github.com/dense-mem/dense-mem/internal/tools/semanticsearch"
+)
+
+func main() {
+	// Load configuration from environment variables
+	cfg, err := config.Load()
+	if err != nil {
+		log.Fatalf("failed to load config: %v", err)
+	}
+
+	// Create logger
+	level := slog.LevelInfo
+	if os.Getenv("LOG_LEVEL") == "debug" {
+		level = slog.LevelDebug
+	}
+	logger := observability.New(level)
+
+	// Wire embedding dimension into request validator so the embedding_dim tag
+	// on dto.SemanticSearchRequest enforces the configured length at bind time.
+	validation.SetEmbeddingDimensions(cfg.GetEmbeddingDimensions())
+
+	// Create root context with timeout for startup
+	startupCtx, startupCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer startupCancel()
+
+	// Initialize Postgres connection (REQUIRED for production)
+	pgDB, err := postgres.OpenWithClient(startupCtx, &cfg)
+	if err != nil {
+		log.Fatalf("failed to connect to postgres: %v", err)
+	}
+	defer pgDB.Close()
+
+	// Initialize Redis client with 5-second timeout
+	redisClient, err := redis.NewClient(startupCtx, &cfg)
+	if err != nil {
+		log.Fatalf("failed to connect to redis: %v", err)
+	}
+	defer redisClient.Close()
+
+	// Initialize Neo4j client with 5-second timeout
+	neo4jClient, err := neo4j.NewClient(startupCtx, &cfg)
+	if err != nil {
+		log.Fatalf("failed to connect to neo4j: %v", err)
+	}
+	defer neo4jClient.Close(context.Background())
+
+	// ========================================
+	// Repository layer
+	// ========================================
+	// RLSHelper is shared across repos so every query runs with Postgres
+	// FORCE RLS session variables (app.current_profile_id / app.role) set.
+	rlsHelper := postgres.NewRLS()
+	profileRepo := repository.NewProfileRepository(pgDB.GetDB(), rlsHelper)
+	apiKeyRepo := repository.NewAPIKeyRepository(pgDB.GetDB(), rlsHelper)
+
+	// ========================================
+	// Service layer
+	// ========================================
+	auditService := service.NewAuditService(pgDB.GetDB())
+
+	// Redis cleanup satisfies both ProfileStatePurger and KeySessionInvalidator —
+	// profile soft-delete purges cache/session/stream state; key revoke invalidates
+	// matching session records. Passing nil would silently skip cleanup.
+	redisCleanup := redis.NewCleanupRepository(redisClient.GetClient())
+
+	profileService := service.NewProfileService(profileRepo, auditService, redisCleanup)
+	apiKeyService := service.NewAPIKeyService(apiKeyRepo, profileService, auditService, redisCleanup, redisCleanup)
+	rateLimitService := service.NewRateLimitService(redisClient)
+
+	// Bootstrap admin key from environment if configured
+	if err := apiKeyService.BootstrapAdminKey(startupCtx, cfg.GetBootstrapAdminKey()); err != nil {
+		logger.Error("failed to bootstrap admin key", err)
+		// Don't fail startup - this is optional bootstrap
+	}
+
+	// ========================================
+	// Neo4j profile scope enforcer and graph writer
+	// ========================================
+	profileScopeEnforcer := neo4j.NewProfileScopeEnforcer(neo4jClient)
+
+	// ========================================
+	// Tool services
+	// ========================================
+	// Graph query service
+	cypherValidator := graphquery.NewCypherValidator()
+	graphQueryService := graphquery.NewGraphQueryService(profileScopeEnforcer, cypherValidator)
+
+	// Keyword search services (fragment and fact searchers)
+	// These use the profileScopeEnforcer as their searcher interface
+	fragmentSearcher := keywordsearch.NewFragmentSearcher(profileScopeEnforcer)
+	factSearcher := keywordsearch.NewFactSearcher(profileScopeEnforcer)
+	keywordSearchService := keywordsearch.NewKeywordSearchService(fragmentSearcher, factSearcher)
+
+	// Semantic search service
+	embeddingSearcher := semanticsearch.NewEmbeddingSearcher(profileScopeEnforcer)
+	semanticSearchService := semanticsearch.NewSemanticSearchService(embeddingSearcher, cfg.GetEmbeddingDimensions())
+
+	// Admin graph service
+	adminGraphValidator := admingraph.NewAdminGraphValidator()
+	adminGraphService := admingraph.NewAdminGraphService(profileScopeEnforcer, adminGraphValidator, auditService, time.Duration(cfg.GetAdminQueryTimeoutSeconds())*time.Second)
+
+	// Invariant scan service
+	invariantScanService := service.NewInvariantScanService(neo4jClient, auditService)
+
+	// ========================================
+	// SSE lifecycle
+	// ========================================
+	concurrencyLimiter := sse.NewConcurrencyLimiter(redisClient)
+	streamCleanupRepo := sse.NewStreamCleanupRepository(redisClient)
+	streamLifecycle := sse.NewStreamLifecycle(concurrencyLimiter, streamCleanupRepo)
+
+	// ========================================
+	// Handlers
+	// ========================================
+	graphQueryHandler := handler.NewGraphQueryHandler(graphQueryService)
+	keywordSearchHandler := handler.NewKeywordSearchHandler(keywordSearchService)
+	semanticSearchHandler := handler.NewSemanticSearchHandler(semanticSearchService)
+	adminGraphHandler := handler.NewAdminGraphHandler(adminGraphService)
+	invariantScanHandler := handler.NewInvariantScanHandler(invariantScanService)
+
+	// Query stream orchestrator and handler
+	queryStreamOrchestrator := handler.NewQueryStreamOrchestrator(graphQueryService, keywordSearchService, semanticSearchService)
+	queryStreamHandler := handler.NewQueryStreamHandler(queryStreamOrchestrator, streamLifecycle)
+
+	// ========================================
+	// Health checks
+	// ========================================
+	checks := []http.HealthCheck{
+		func(ctx context.Context) error {
+			return pgDB.Ping(ctx)
+		},
+		func(ctx context.Context) error {
+			return redisClient.Ping(ctx)
+		},
+		func(ctx context.Context) error {
+			return neo4jClient.Verify(ctx)
+		},
+	}
+
+	// ========================================
+	// Create Echo server
+	// ========================================
+	e := http.NewServer(cfg, logger, checks)
+
+	// Register CorrelationIDMiddleware globally
+	e.Use(middleware.CorrelationIDMiddleware())
+
+	// ========================================
+	// Register protected routes with all handlers
+	// ========================================
+	protectedDeps := http.ProtectedDeps{
+		APIKeyRepo:       apiKeyRepo,
+		ProfileService:   profileService,
+		ProfileSvc:       profileService,
+		RateLimitService: rateLimitService,
+		AuditService:     auditService,
+		Config:           &cfg,
+		Logger:           logger,
+	}
+
+	protectedHandlers := http.ProtectedHandlers{
+		APIKeySvc:       apiKeyService,
+		GraphQuery:      graphQueryHandler.Handle,
+		KeywordSearch:   keywordSearchHandler.Handle,
+		SemanticSearch:  semanticSearchHandler.Handle,
+		QueryStream:     queryStreamHandler.Handle,
+		AdminGraphQuery: adminGraphHandler.Handle,
+		InvariantScan:   invariantScanHandler.Handle,
+	}
+
+	http.RegisterProtectedRoutesWithHandlers(e, protectedDeps, protectedHandlers)
+
+	logger.Info("starting server", observability.String("addr", cfg.HTTPAddr))
+
+	// Start server in a goroutine
+	go func() {
+		if err := e.Start(cfg.HTTPAddr); err != nil {
+			logger.Error("server error", err)
+		}
+	}()
+
+	// Wait for interrupt signal to gracefully shutdown
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+
+	logger.Info("shutting down server")
+
+	// Graceful shutdown with 10-second timeout
+	if err := http.ShutdownServer(e, logger); err != nil {
+		logger.Error("server shutdown error", err)
+	}
+}

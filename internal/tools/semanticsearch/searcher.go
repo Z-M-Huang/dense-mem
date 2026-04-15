@@ -1,0 +1,120 @@
+package semanticsearch
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
+)
+
+// ScopedReaderInterface is the interface for scoped read operations.
+// This matches neo4j.ProfileScopeEnforcer's ScopedRead method.
+type ScopedReaderInterface interface {
+	ScopedRead(ctx context.Context, profileID string, query string, params map[string]any) (neo4j.ResultSummary, []map[string]any, error)
+}
+
+// neo4jEmbeddingSearcher implements EmbeddingSearcherInterface using Neo4j.
+type neo4jEmbeddingSearcher struct {
+	reader ScopedReaderInterface
+}
+
+// Ensure neo4jEmbeddingSearcher implements EmbeddingSearcherInterface.
+var _ EmbeddingSearcherInterface = (*neo4jEmbeddingSearcher)(nil)
+
+// NewEmbeddingSearcher creates a new EmbeddingSearcherInterface using Neo4j.
+func NewEmbeddingSearcher(reader ScopedReaderInterface) EmbeddingSearcherInterface {
+	return &neo4jEmbeddingSearcher{reader: reader}
+}
+
+// QueryVectorIndex performs vector similarity search on SourceFragment embeddings.
+// Results are filtered by profile_id in the Cypher query.
+func (s *neo4jEmbeddingSearcher) QueryVectorIndex(ctx context.Context, profileID string, embedding []float32, limit int) ([]SearchHit, error) {
+	// Build the Cypher query with vector index search
+	// Uses db.index.vector.queryNodes for vector similarity search
+	cypherQuery := `
+		CALL db.index.vector.queryNodes('fragment_embedding_idx', $embedding, $limit) YIELD node AS f, score
+		WHERE f.profile_id = $profileId
+		RETURN f.id AS id, f.content AS content, score, f.labels AS labels, f.metadata AS metadata, f.profile_id AS profile_id
+	`
+
+	// Build params - convert float32 slice to any slice for Neo4j
+	embeddingAny := make([]any, len(embedding))
+	for i, v := range embedding {
+		embeddingAny[i] = v
+	}
+
+	params := map[string]any{
+		"embedding": embeddingAny,
+		"limit":     limit,
+	}
+
+	// Execute via ScopedRead
+	_, results, err := s.reader.ScopedRead(ctx, profileID, cypherQuery, params)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query vector index: %w", err)
+	}
+
+	// Convert results to SearchHit
+	hits := make([]SearchHit, len(results))
+	for i, row := range results {
+		hits[i] = SearchHit{
+			ID:        getStringVal(row, "id"),
+			Type:      "fragment",
+			Content:   getStringVal(row, "content"),
+			Score:     getFloat64Val(row, "score"),
+			Labels:    getLabelsVal(row, "labels"),
+			Metadata:  getMetadataVal(row, "metadata"),
+			ProfileID: getStringVal(row, "profile_id"),
+		}
+	}
+
+	return hits, nil
+}
+
+// Helper functions for extracting values from Neo4j result maps
+func getStringVal(row map[string]any, key string) string {
+	if val, ok := row[key]; ok {
+		if str, ok := val.(string); ok {
+			return str
+		}
+		return fmt.Sprintf("%v", val)
+	}
+	return ""
+}
+
+func getFloat64Val(row map[string]any, key string) float64 {
+	if val, ok := row[key]; ok {
+		if f, ok := val.(float64); ok {
+			return f
+		}
+		if f, ok := val.(float32); ok {
+			return float64(f)
+		}
+	}
+	return 0.0
+}
+
+func getLabelsVal(row map[string]any, key string) []string {
+	if val, ok := row[key]; ok {
+		if arr, ok := val.([]any); ok {
+			labels := make([]string, len(arr))
+			for i, v := range arr {
+				labels[i] = fmt.Sprintf("%v", v)
+			}
+			return labels
+		}
+		if arr, ok := val.([]string); ok {
+			return arr
+		}
+	}
+	return nil
+}
+
+func getMetadataVal(row map[string]any, key string) map[string]any {
+	if val, ok := row[key]; ok {
+		if m, ok := val.(map[string]any); ok {
+			return m
+		}
+	}
+	return nil
+}

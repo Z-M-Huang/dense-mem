@@ -1,0 +1,503 @@
+package middleware
+
+import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/labstack/echo/v4"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/dense-mem/dense-mem/internal/crypto"
+	"github.com/dense-mem/dense-mem/internal/domain"
+	"github.com/dense-mem/dense-mem/internal/httperr"
+	"github.com/dense-mem/dense-mem/internal/service"
+)
+
+// mockAPIKeyRepository is a mock implementation of repository.APIKeyRepository
+type mockAPIKeyRepository struct {
+	getActiveByPrefixFunc func(ctx context.Context, prefix string) (*domain.APIKey, error)
+	touchLastUsedFunc     func(ctx context.Context, id uuid.UUID) error
+	touchLastUsedCalled   bool
+	touchLastUsedID       uuid.UUID
+	touchLastUsedMu       sync.Mutex
+}
+
+func (m *mockAPIKeyRepository) CreateStandardKey(ctx context.Context, key *domain.APIKey) error {
+	return nil
+}
+
+func (m *mockAPIKeyRepository) CreateAdminKey(ctx context.Context, key *domain.APIKey) error {
+	return nil
+}
+
+func (m *mockAPIKeyRepository) ListByProfile(ctx context.Context, profileID uuid.UUID, limit, offset int) ([]*domain.APIKey, error) {
+	return nil, nil
+}
+
+func (m *mockAPIKeyRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain.APIKey, error) {
+	return nil, nil
+}
+
+func (m *mockAPIKeyRepository) GetActiveByPrefix(ctx context.Context, prefix string) (*domain.APIKey, error) {
+	if m.getActiveByPrefixFunc != nil {
+		return m.getActiveByPrefixFunc(ctx, prefix)
+	}
+	return nil, nil
+}
+
+func (m *mockAPIKeyRepository) Revoke(ctx context.Context, id uuid.UUID) error {
+	return nil
+}
+
+func (m *mockAPIKeyRepository) RevokeForProfile(ctx context.Context, profileID, id uuid.UUID) (int64, error) {
+	return 0, nil
+}
+
+func (m *mockAPIKeyRepository) GetByIDForProfile(ctx context.Context, profileID, id uuid.UUID) (*domain.APIKey, error) {
+	return nil, nil
+}
+
+func (m *mockAPIKeyRepository) CountByProfile(ctx context.Context, profileID uuid.UUID) (int64, error) {
+	return 0, nil
+}
+
+func (m *mockAPIKeyRepository) TouchLastUsed(ctx context.Context, id uuid.UUID) error {
+	m.touchLastUsedMu.Lock()
+	m.touchLastUsedCalled = true
+	m.touchLastUsedID = id
+	m.touchLastUsedMu.Unlock()
+	if m.touchLastUsedFunc != nil {
+		return m.touchLastUsedFunc(ctx, id)
+	}
+	return nil
+}
+
+func (m *mockAPIKeyRepository) AdminKeyExists(ctx context.Context) (bool, error) {
+	return false, nil
+}
+
+// mockAuditService is a mock implementation of service.AuditService
+type mockAuditService struct {
+	authFailureCalled bool
+	authFailureParams struct {
+		profileID     *string
+		entityType    string
+		entityID      string
+		metadata      map[string]interface{}
+		clientIP      string
+		correlationID string
+	}
+}
+
+func (m *mockAuditService) Append(ctx context.Context, entry service.AuditLogEntry) error {
+	return nil
+}
+
+func (m *mockAuditService) ProfileCreated(ctx context.Context, profileID string, afterPayload map[string]interface{}, actorKeyID *string, actorRole, clientIP, correlationID string) error {
+	return nil
+}
+
+func (m *mockAuditService) ProfileUpdated(ctx context.Context, profileID string, beforePayload, afterPayload map[string]interface{}, actorKeyID *string, actorRole, clientIP, correlationID string) error {
+	return nil
+}
+
+func (m *mockAuditService) ProfileDeleteBlocked(ctx context.Context, profileID string, beforePayload map[string]interface{}, actorKeyID *string, actorRole, clientIP, correlationID string, reason string) error {
+	return nil
+}
+
+func (m *mockAuditService) ProfileDeleted(ctx context.Context, profileID string, beforePayload map[string]interface{}, actorKeyID *string, actorRole, clientIP, correlationID string) error {
+	return nil
+}
+
+func (m *mockAuditService) APIKeyCreated(ctx context.Context, profileID *string, keyID string, afterPayload map[string]interface{}, actorKeyID *string, actorRole, clientIP, correlationID string) error {
+	return nil
+}
+
+func (m *mockAuditService) APIKeyRevoked(ctx context.Context, profileID *string, keyID string, beforePayload map[string]interface{}, actorKeyID *string, actorRole, clientIP, correlationID string) error {
+	return nil
+}
+
+func (m *mockAuditService) AuthFailure(ctx context.Context, profileID *string, entityType, entityID string, metadata map[string]interface{}, clientIP, correlationID string) error {
+	m.authFailureCalled = true
+	m.authFailureParams.profileID = profileID
+	m.authFailureParams.entityType = entityType
+	m.authFailureParams.entityID = entityID
+	m.authFailureParams.metadata = metadata
+	m.authFailureParams.clientIP = clientIP
+	m.authFailureParams.correlationID = correlationID
+	return nil
+}
+
+func (m *mockAuditService) CrossProfileDenied(ctx context.Context, actorProfileID, targetProfileID string, operation string, metadata map[string]interface{}, clientIP, correlationID string) error {
+	return nil
+}
+
+func (m *mockAuditService) RateLimited(ctx context.Context, profileID *string, operation string, metadata map[string]interface{}, clientIP, correlationID string) error {
+	return nil
+}
+
+func (m *mockAuditService) AdminQuery(ctx context.Context, queryType string, metadata map[string]interface{}, actorKeyID *string, actorRole, clientIP, correlationID string) error {
+	return nil
+}
+
+func (m *mockAuditService) AdminBypass(ctx context.Context, operation string, reason string, metadata map[string]interface{}, actorKeyID *string, actorRole, clientIP, correlationID string) error {
+	return nil
+}
+
+func (m *mockAuditService) InvariantViolation(ctx context.Context, entityType, entityID string, violation string, metadata map[string]interface{}, clientIP, correlationID string) error {
+	return nil
+}
+
+func (m *mockAuditService) List(ctx context.Context, profileID string, limit, offset int) ([]service.AuditLogEntry, int, error) {
+	return []service.AuditLogEntry{}, 0, nil
+}
+
+// newTestEcho creates a new Echo instance with the custom error handler
+func newTestEcho() *echo.Echo {
+	e := echo.New()
+	e.HTTPErrorHandler = httperr.ErrorHandler
+	return e
+}
+
+func TestAuthMiddleware_MissingHeader(t *testing.T) {
+	e := newTestEcho()
+	mockRepo := &mockAPIKeyRepository{}
+	mockAudit := &mockAuditService{}
+
+	e.Use(AuthMiddleware(mockRepo, mockAudit))
+
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	rec := httptest.NewRecorder()
+
+	handlerCalled := false
+	e.GET("/test", func(c echo.Context) error {
+		handlerCalled = true
+		return c.String(http.StatusOK, "ok")
+	})
+
+	e.ServeHTTP(rec, req)
+
+	assert.False(t, handlerCalled, "handler should not be called")
+	assert.Equal(t, http.StatusUnauthorized, rec.Code)
+
+	// Verify error response contains AUTH_MISSING
+	bodyStr := rec.Body.String()
+	assert.Contains(t, bodyStr, "AUTH_MISSING")
+	assert.True(t, mockAudit.authFailureCalled, "audit service should be called for auth failure")
+}
+
+func TestAuthMiddleware_MalformedHeader(t *testing.T) {
+	e := newTestEcho()
+	mockRepo := &mockAPIKeyRepository{}
+	mockAudit := &mockAuditService{}
+
+	e.Use(AuthMiddleware(mockRepo, mockAudit))
+
+	testCases := []struct {
+		name          string
+		authHeader    string
+		expectedError string
+	}{
+		{
+			name:          "no bearer prefix",
+			authHeader:    "InvalidToken",
+			expectedError: "AUTH_INVALID",
+		},
+		{
+			name:          "wrong scheme",
+			authHeader:    "Basic dXNlcjpwYXNz",
+			expectedError: "AUTH_INVALID",
+		},
+		{
+			name:          "empty bearer token",
+			authHeader:    "Bearer ",
+			expectedError: "AUTH_INVALID",
+		},
+		{
+			name:          "only bearer prefix",
+			authHeader:    "Bearer",
+			expectedError: "AUTH_INVALID",
+		},
+		{
+			name:          "key too short",
+			authHeader:    "Bearer short",
+			expectedError: "AUTH_INVALID",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			mockAudit.authFailureCalled = false
+
+			req := httptest.NewRequest(http.MethodGet, "/test", nil)
+			req.Header.Set("Authorization", tc.authHeader)
+			rec := httptest.NewRecorder()
+
+			handlerCalled := false
+			e.GET("/test", func(c echo.Context) error {
+				handlerCalled = true
+				return c.String(http.StatusOK, "ok")
+			})
+
+			e.ServeHTTP(rec, req)
+
+			assert.False(t, handlerCalled, "handler should not be called")
+			assert.Equal(t, http.StatusUnauthorized, rec.Code)
+			assert.Contains(t, rec.Body.String(), tc.expectedError)
+			assert.True(t, mockAudit.authFailureCalled, "audit service should be called for auth failure")
+		})
+	}
+}
+
+func TestAuthMiddleware_NoMatchingKey(t *testing.T) {
+	e := newTestEcho()
+	mockRepo := &mockAPIKeyRepository{
+		getActiveByPrefixFunc: func(ctx context.Context, prefix string) (*domain.APIKey, error) {
+			return nil, nil // No key found
+		},
+	}
+	mockAudit := &mockAuditService{}
+
+	e.Use(AuthMiddleware(mockRepo, mockAudit))
+
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	req.Header.Set("Authorization", "Bearer testprefix12345678901234567890")
+	rec := httptest.NewRecorder()
+
+	handlerCalled := false
+	e.GET("/test", func(c echo.Context) error {
+		handlerCalled = true
+		return c.String(http.StatusOK, "ok")
+	})
+
+	e.ServeHTTP(rec, req)
+
+	assert.False(t, handlerCalled, "handler should not be called")
+	assert.Equal(t, http.StatusUnauthorized, rec.Code)
+	assert.Contains(t, rec.Body.String(), "AUTH_INVALID")
+	assert.True(t, mockAudit.authFailureCalled, "audit service should be called for auth failure")
+}
+
+func TestAuthMiddleware_RevokedKey(t *testing.T) {
+	e := newTestEcho()
+	profileID := uuid.New()
+	keyID := uuid.New()
+	revokedAt := time.Now().UTC().Add(-time.Hour)
+
+	mockRepo := &mockAPIKeyRepository{
+		getActiveByPrefixFunc: func(ctx context.Context, prefix string) (*domain.APIKey, error) {
+			return &domain.APIKey{
+				ID:        keyID,
+				ProfileID: profileID,
+				KeyHash:   "testprefix12345678901234567890",
+				Scopes:    []string{"read"},
+				RevokedAt: &revokedAt,
+			}, nil
+		},
+	}
+	mockAudit := &mockAuditService{}
+
+	e.Use(AuthMiddleware(mockRepo, mockAudit))
+
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	req.Header.Set("Authorization", "Bearer testprefix12345678901234567890")
+	rec := httptest.NewRecorder()
+
+	handlerCalled := false
+	e.GET("/test", func(c echo.Context) error {
+		handlerCalled = true
+		return c.String(http.StatusOK, "ok")
+	})
+
+	e.ServeHTTP(rec, req)
+
+	assert.False(t, handlerCalled, "handler should not be called")
+	assert.Equal(t, http.StatusUnauthorized, rec.Code)
+	assert.Contains(t, rec.Body.String(), "AUTH_REVOKED")
+	assert.True(t, mockAudit.authFailureCalled, "audit service should be called for auth failure")
+}
+
+func TestAuthMiddleware_ExpiredKey(t *testing.T) {
+	e := newTestEcho()
+	profileID := uuid.New()
+	keyID := uuid.New()
+	expiresAt := time.Now().UTC().Add(-time.Hour)
+
+	mockRepo := &mockAPIKeyRepository{
+		getActiveByPrefixFunc: func(ctx context.Context, prefix string) (*domain.APIKey, error) {
+			return &domain.APIKey{
+				ID:        keyID,
+				ProfileID: profileID,
+				KeyHash:   "testprefix12345678901234567890",
+				Scopes:    []string{"read"},
+				ExpiresAt: &expiresAt,
+			}, nil
+		},
+	}
+	mockAudit := &mockAuditService{}
+
+	e.Use(AuthMiddleware(mockRepo, mockAudit))
+
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	req.Header.Set("Authorization", "Bearer testprefix12345678901234567890")
+	rec := httptest.NewRecorder()
+
+	handlerCalled := false
+	e.GET("/test", func(c echo.Context) error {
+		handlerCalled = true
+		return c.String(http.StatusOK, "ok")
+	})
+
+	e.ServeHTTP(rec, req)
+
+	assert.False(t, handlerCalled, "handler should not be called")
+	assert.Equal(t, http.StatusUnauthorized, rec.Code)
+	assert.Contains(t, rec.Body.String(), "AUTH_EXPIRED")
+	assert.True(t, mockAudit.authFailureCalled, "audit service should be called for auth failure")
+}
+
+func TestAuthMiddleware_ValidKey_StoresPrincipal(t *testing.T) {
+	e := newTestEcho()
+	profileID := uuid.New()
+	keyID := uuid.New()
+	rawKey := "testprefix12345678901234567890"
+	keyHash, err := crypto.HashKey(rawKey)
+	require.NoError(t, err)
+
+	mockRepo := &mockAPIKeyRepository{
+		getActiveByPrefixFunc: func(ctx context.Context, prefix string) (*domain.APIKey, error) {
+			return &domain.APIKey{
+				ID:        keyID,
+				ProfileID: profileID,
+				KeyHash:   keyHash,
+				Scopes:    []string{"read", "write"},
+				RevokedAt: nil,
+				ExpiresAt: nil,
+			}, nil
+		},
+	}
+	mockAudit := &mockAuditService{}
+
+	e.Use(AuthMiddleware(mockRepo, mockAudit))
+
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	req.Header.Set("Authorization", "Bearer "+rawKey)
+	rec := httptest.NewRecorder()
+
+	var capturedPrincipal *Principal
+	e.GET("/test", func(c echo.Context) error {
+		capturedPrincipal = GetPrincipal(c.Request().Context())
+
+		// Verify Authorization header is removed
+		authHeader := c.Request().Header.Get("Authorization")
+		assert.Empty(t, authHeader, "Authorization header should be removed")
+
+		return c.String(http.StatusOK, "ok")
+	})
+
+	e.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	require.NotNil(t, capturedPrincipal, "principal should be stored in context")
+	assert.Equal(t, keyID, capturedPrincipal.KeyID)
+	require.NotNil(t, capturedPrincipal.ProfileID)
+	assert.Equal(t, profileID, *capturedPrincipal.ProfileID)
+	assert.Equal(t, "standard", capturedPrincipal.Role)
+	assert.Equal(t, []string{"read", "write"}, capturedPrincipal.Scopes)
+	assert.Equal(t, rawKey[:12], capturedPrincipal.KeyPrefix)
+}
+
+func TestAuthMiddleware_ValidKey_AdminKey(t *testing.T) {
+	e := newTestEcho()
+	keyID := uuid.New()
+	rawKey := "adminprefix12345678901234567890"
+	keyHash, err := crypto.HashKey(rawKey)
+	require.NoError(t, err)
+
+	mockRepo := &mockAPIKeyRepository{
+		getActiveByPrefixFunc: func(ctx context.Context, prefix string) (*domain.APIKey, error) {
+			return &domain.APIKey{
+				ID:        keyID,
+				ProfileID: uuid.Nil, // Admin key has no profile
+				KeyHash:   keyHash,
+				Scopes:    []string{"admin"},
+				RevokedAt: nil,
+				ExpiresAt: nil,
+			}, nil
+		},
+	}
+	mockAudit := &mockAuditService{}
+
+	e.Use(AuthMiddleware(mockRepo, mockAudit))
+
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	req.Header.Set("Authorization", "Bearer "+rawKey)
+	rec := httptest.NewRecorder()
+
+	var capturedPrincipal *Principal
+	e.GET("/test", func(c echo.Context) error {
+		capturedPrincipal = GetPrincipal(c.Request().Context())
+		return c.String(http.StatusOK, "ok")
+	})
+
+	e.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	require.NotNil(t, capturedPrincipal, "principal should be stored in context")
+	assert.Equal(t, keyID, capturedPrincipal.KeyID)
+	assert.Nil(t, capturedPrincipal.ProfileID, "admin key should have nil ProfileID")
+	assert.Equal(t, "admin", capturedPrincipal.Role)
+	assert.Equal(t, []string{"admin"}, capturedPrincipal.Scopes)
+}
+
+func TestAuthMiddleware_TouchLastUsed_Background(t *testing.T) {
+	e := newTestEcho()
+	profileID := uuid.New()
+	keyID := uuid.New()
+	rawKey := "testprefix12345678901234567890"
+	keyHash, err := crypto.HashKey(rawKey)
+	require.NoError(t, err)
+
+	mockRepo := &mockAPIKeyRepository{
+		getActiveByPrefixFunc: func(ctx context.Context, prefix string) (*domain.APIKey, error) {
+			return &domain.APIKey{
+				ID:        keyID,
+				ProfileID: profileID,
+				KeyHash:   keyHash,
+				Scopes:    []string{"read"},
+				RevokedAt: nil,
+				ExpiresAt: nil,
+			}, nil
+		},
+	}
+	mockAudit := &mockAuditService{}
+
+	e.Use(AuthMiddleware(mockRepo, mockAudit))
+
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	req.Header.Set("Authorization", "Bearer "+rawKey)
+	rec := httptest.NewRecorder()
+
+	e.GET("/test", func(c echo.Context) error {
+		return c.String(http.StatusOK, "ok")
+	})
+
+	e.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	// Wait for the background goroutine to complete
+	time.Sleep(100 * time.Millisecond)
+
+	// Verify TouchLastUsed was called in background
+	mockRepo.touchLastUsedMu.Lock()
+	assert.True(t, mockRepo.touchLastUsedCalled, "TouchLastUsed should be called")
+	assert.Equal(t, keyID, mockRepo.touchLastUsedID, "TouchLastUsed should be called with correct key ID")
+	mockRepo.touchLastUsedMu.Unlock()
+}

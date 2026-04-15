@@ -1,0 +1,496 @@
+package service
+
+import (
+	"context"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
+
+	"github.com/dense-mem/dense-mem/internal/crypto"
+	"github.com/dense-mem/dense-mem/internal/domain"
+)
+
+// MockAPIKeyRepository is a mock implementation of repository.APIKeyRepository
+type MockAPIKeyRepository struct {
+	mock.Mock
+}
+
+func (m *MockAPIKeyRepository) CreateStandardKey(ctx context.Context, key *domain.APIKey) error {
+	args := m.Called(ctx, key)
+	return args.Error(0)
+}
+
+func (m *MockAPIKeyRepository) CreateAdminKey(ctx context.Context, key *domain.APIKey) error {
+	args := m.Called(ctx, key)
+	return args.Error(0)
+}
+
+func (m *MockAPIKeyRepository) ListByProfile(ctx context.Context, profileID uuid.UUID, limit, offset int) ([]*domain.APIKey, error) {
+	args := m.Called(ctx, profileID, limit, offset)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]*domain.APIKey), args.Error(1)
+}
+
+func (m *MockAPIKeyRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain.APIKey, error) {
+	args := m.Called(ctx, id)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*domain.APIKey), args.Error(1)
+}
+
+func (m *MockAPIKeyRepository) GetActiveByPrefix(ctx context.Context, prefix string) (*domain.APIKey, error) {
+	args := m.Called(ctx, prefix)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*domain.APIKey), args.Error(1)
+}
+
+func (m *MockAPIKeyRepository) Revoke(ctx context.Context, id uuid.UUID) error {
+	args := m.Called(ctx, id)
+	return args.Error(0)
+}
+
+func (m *MockAPIKeyRepository) RevokeForProfile(ctx context.Context, profileID, id uuid.UUID) (int64, error) {
+	args := m.Called(ctx, profileID, id)
+	return args.Get(0).(int64), args.Error(1)
+}
+
+func (m *MockAPIKeyRepository) GetByIDForProfile(ctx context.Context, profileID, id uuid.UUID) (*domain.APIKey, error) {
+	args := m.Called(ctx, profileID, id)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*domain.APIKey), args.Error(1)
+}
+
+func (m *MockAPIKeyRepository) CountByProfile(ctx context.Context, profileID uuid.UUID) (int64, error) {
+	args := m.Called(ctx, profileID)
+	return args.Get(0).(int64), args.Error(1)
+}
+
+func (m *MockAPIKeyRepository) TouchLastUsed(ctx context.Context, id uuid.UUID) error {
+	args := m.Called(ctx, id)
+	return args.Error(0)
+}
+
+func (m *MockAPIKeyRepository) AdminKeyExists(ctx context.Context) (bool, error) {
+	args := m.Called(ctx)
+	return args.Bool(0), args.Error(1)
+}
+
+// MockProfileService is a mock implementation of ProfileService
+type MockProfileService struct {
+	mock.Mock
+}
+
+func (m *MockProfileService) Create(ctx context.Context, req CreateProfileRequest, actorKeyID *string, actorRole, clientIP, correlationID string) (*domain.Profile, error) {
+	args := m.Called(ctx, req, actorKeyID, actorRole, clientIP, correlationID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*domain.Profile), args.Error(1)
+}
+
+func (m *MockProfileService) Get(ctx context.Context, id uuid.UUID) (*domain.Profile, error) {
+	args := m.Called(ctx, id)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*domain.Profile), args.Error(1)
+}
+
+func (m *MockProfileService) List(ctx context.Context, limit, offset int) ([]*domain.Profile, error) {
+	args := m.Called(ctx, limit, offset)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]*domain.Profile), args.Error(1)
+}
+
+func (m *MockProfileService) Update(ctx context.Context, id uuid.UUID, req UpdateProfileRequest, actorKeyID *string, actorRole, clientIP, correlationID string) (*domain.Profile, error) {
+	args := m.Called(ctx, id, req, actorKeyID, actorRole, clientIP, correlationID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*domain.Profile), args.Error(1)
+}
+
+func (m *MockProfileService) Delete(ctx context.Context, id uuid.UUID, actorKeyID *string, actorRole, clientIP, correlationID string) error {
+	args := m.Called(ctx, id, actorKeyID, actorRole, clientIP, correlationID)
+	return args.Error(0)
+}
+
+func (m *MockProfileService) GetByID(ctx context.Context, id uuid.UUID) (*domain.Profile, error) {
+	args := m.Called(ctx, id)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*domain.Profile), args.Error(1)
+}
+
+func (m *MockProfileService) Count(ctx context.Context) (int64, error) {
+	args := m.Called(ctx)
+	return args.Get(0).(int64), args.Error(1)
+}
+
+// MockAuditService is a mock implementation of AuditService
+type MockAuditService struct {
+	mock.Mock
+}
+
+func (m *MockAuditService) Append(ctx context.Context, entry AuditLogEntry) error {
+	args := m.Called(ctx, entry)
+	return args.Error(0)
+}
+
+func (m *MockAuditService) List(ctx context.Context, profileID string, limit, offset int) ([]AuditLogEntry, int, error) {
+	args := m.Called(ctx, profileID, limit, offset)
+	if args.Get(0) == nil {
+		return nil, args.Get(1).(int), args.Error(2)
+	}
+	return args.Get(0).([]AuditLogEntry), args.Get(1).(int), args.Error(2)
+}
+
+func (m *MockAuditService) ProfileCreated(ctx context.Context, profileID string, afterPayload map[string]interface{}, actorKeyID *string, actorRole, clientIP, correlationID string) error {
+	args := m.Called(ctx, profileID, afterPayload, actorKeyID, actorRole, clientIP, correlationID)
+	return args.Error(0)
+}
+
+func (m *MockAuditService) ProfileUpdated(ctx context.Context, profileID string, beforePayload, afterPayload map[string]interface{}, actorKeyID *string, actorRole, clientIP, correlationID string) error {
+	args := m.Called(ctx, profileID, beforePayload, afterPayload, actorKeyID, actorRole, clientIP, correlationID)
+	return args.Error(0)
+}
+
+func (m *MockAuditService) ProfileDeleteBlocked(ctx context.Context, profileID string, beforePayload map[string]interface{}, actorKeyID *string, actorRole, clientIP, correlationID string, reason string) error {
+	args := m.Called(ctx, profileID, beforePayload, actorKeyID, actorRole, clientIP, correlationID, reason)
+	return args.Error(0)
+}
+
+func (m *MockAuditService) ProfileDeleted(ctx context.Context, profileID string, beforePayload map[string]interface{}, actorKeyID *string, actorRole, clientIP, correlationID string) error {
+	args := m.Called(ctx, profileID, beforePayload, actorKeyID, actorRole, clientIP, correlationID)
+	return args.Error(0)
+}
+
+func (m *MockAuditService) APIKeyCreated(ctx context.Context, profileID *string, keyID string, afterPayload map[string]interface{}, actorKeyID *string, actorRole, clientIP, correlationID string) error {
+	args := m.Called(ctx, profileID, keyID, afterPayload, actorKeyID, actorRole, clientIP, correlationID)
+	return args.Error(0)
+}
+
+func (m *MockAuditService) APIKeyRevoked(ctx context.Context, profileID *string, keyID string, beforePayload map[string]interface{}, actorKeyID *string, actorRole, clientIP, correlationID string) error {
+	args := m.Called(ctx, profileID, keyID, beforePayload, actorKeyID, actorRole, clientIP, correlationID)
+	return args.Error(0)
+}
+
+func (m *MockAuditService) AuthFailure(ctx context.Context, profileID *string, entityType, entityID string, metadata map[string]interface{}, clientIP, correlationID string) error {
+	args := m.Called(ctx, profileID, entityType, entityID, metadata, clientIP, correlationID)
+	return args.Error(0)
+}
+
+func (m *MockAuditService) CrossProfileDenied(ctx context.Context, actorProfileID, targetProfileID string, operation string, metadata map[string]interface{}, clientIP, correlationID string) error {
+	args := m.Called(ctx, actorProfileID, targetProfileID, operation, metadata, clientIP, correlationID)
+	return args.Error(0)
+}
+
+func (m *MockAuditService) RateLimited(ctx context.Context, profileID *string, operation string, metadata map[string]interface{}, clientIP, correlationID string) error {
+	args := m.Called(ctx, profileID, operation, metadata, clientIP, correlationID)
+	return args.Error(0)
+}
+
+func (m *MockAuditService) AdminQuery(ctx context.Context, queryType string, metadata map[string]interface{}, actorKeyID *string, actorRole, clientIP, correlationID string) error {
+	args := m.Called(ctx, queryType, metadata, actorKeyID, actorRole, clientIP, correlationID)
+	return args.Error(0)
+}
+
+func (m *MockAuditService) AdminBypass(ctx context.Context, operation string, reason string, metadata map[string]interface{}, actorKeyID *string, actorRole, clientIP, correlationID string) error {
+	args := m.Called(ctx, operation, reason, metadata, actorKeyID, actorRole, clientIP, correlationID)
+	return args.Error(0)
+}
+
+func (m *MockAuditService) InvariantViolation(ctx context.Context, entityType, entityID string, violation string, metadata map[string]interface{}, clientIP, correlationID string) error {
+	args := m.Called(ctx, entityType, entityID, violation, metadata, clientIP, correlationID)
+	return args.Error(0)
+}
+
+// MockKeySessionInvalidator is a mock implementation of KeySessionInvalidator
+type MockKeySessionInvalidator struct {
+	mock.Mock
+}
+
+func (m *MockKeySessionInvalidator) InvalidateKeySessions(ctx context.Context, profileID, keyID string) error {
+	args := m.Called(ctx, profileID, keyID)
+	return args.Error(0)
+}
+
+// MockProfileStatePurger is a mock implementation of ProfileStatePurger
+type MockProfileStatePurger struct {
+	mock.Mock
+}
+
+func (m *MockProfileStatePurger) PurgeProfileState(ctx context.Context, profileID string) error {
+	args := m.Called(ctx, profileID)
+	return args.Error(0)
+}
+
+// TestGenerateAPIKeyFormat verifies the raw key format
+func TestGenerateAPIKeyFormat(t *testing.T) {
+	// Generate multiple keys to ensure consistency
+	for i := 0; i < 10; i++ {
+		key, err := crypto.GenerateRawKey()
+		require.NoError(t, err, "GenerateRawKey should not return an error")
+
+		// Check prefix
+		assert.True(t, strings.HasPrefix(key, "dm_live_"), "Key should start with 'dm_live_'")
+
+		// Check prefix extraction (first 12 chars)
+		prefix := crypto.GetKeyPrefix(key)
+		assert.Equal(t, 12, len(prefix), "Prefix should be 12 characters")
+		assert.Equal(t, key[:12], prefix, "Prefix should be first 12 characters of key")
+
+		// Check that it's valid base64url after the prefix
+		encodedPart := strings.TrimPrefix(key, "dm_live_")
+		assert.NotEmpty(t, encodedPart, "Encoded part should not be empty")
+
+		// Verify no padding characters (base64url uses no padding)
+		assert.NotContains(t, encodedPart, "=", "Base64url should not contain padding")
+	}
+}
+
+// TestVerifyAPIKeyCorrect verifies that a valid key passes verification
+func TestVerifyAPIKeyCorrect(t *testing.T) {
+	rawKey, err := crypto.GenerateRawKey()
+	require.NoError(t, err)
+
+	hash, err := crypto.HashKey(rawKey)
+	require.NoError(t, err)
+
+	// Verify the correct key passes
+	assert.True(t, crypto.VerifyKey(rawKey, hash), "Correct key should verify")
+}
+
+// TestVerifyAPIKeyWrongKey verifies that a wrong key fails verification
+func TestVerifyAPIKeyWrongKey(t *testing.T) {
+	rawKey1, err := crypto.GenerateRawKey()
+	require.NoError(t, err)
+
+	rawKey2, err := crypto.GenerateRawKey()
+	require.NoError(t, err)
+
+	hash, err := crypto.HashKey(rawKey1)
+	require.NoError(t, err)
+
+	// Verify wrong key fails
+	assert.False(t, crypto.VerifyKey(rawKey2, hash), "Wrong key should not verify")
+}
+
+// TestVerifyAPIKeyTampered verifies that a tampered hash fails verification
+func TestVerifyAPIKeyTampered(t *testing.T) {
+	rawKey, err := crypto.GenerateRawKey()
+	require.NoError(t, err)
+
+	hash, err := crypto.HashKey(rawKey)
+	require.NoError(t, err)
+
+	// Tamper with the hash
+	tamperedHash := hash[:len(hash)-1] + "X"
+
+	// Verify tampered hash fails
+	assert.False(t, crypto.VerifyKey(rawKey, tamperedHash), "Tampered hash should not verify")
+}
+
+// TestAPIKeyServiceCreate verifies that raw key is returned once and hash is stored
+func TestAPIKeyServiceCreate(t *testing.T) {
+	ctx := context.Background()
+	profileID := uuid.New()
+
+	mockRepo := new(MockAPIKeyRepository)
+	mockProfileService := new(MockProfileService)
+	mockAuditService := new(MockAuditService)
+	mockSessionInvalidator := new(MockKeySessionInvalidator)
+	mockStatePurger := new(MockProfileStatePurger)
+
+	service := NewAPIKeyService(mockRepo, mockProfileService, mockAuditService, mockSessionInvalidator, mockStatePurger)
+
+	// Setup expectations
+	mockProfileService.On("Get", ctx, profileID).Return(&domain.Profile{ID: profileID}, nil)
+	mockRepo.On("CreateStandardKey", ctx, mock.AnythingOfType("*domain.APIKey")).Run(func(args mock.Arguments) {
+		key := args.Get(1).(*domain.APIKey)
+		key.ID = uuid.New() // Simulate DB assigning ID
+	}).Return(nil)
+	mockAuditService.On("APIKeyCreated", ctx, mock.AnythingOfType("*string"), mock.AnythingOfType("string"), mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
+
+	req := CreateAPIKeyRequest{
+		Label:     "test-key",
+		Scopes:    []string{"read"},
+		RateLimit: 100,
+	}
+
+	key, rawKey, err := service.CreateStandardKey(ctx, profileID, req, nil, "admin", "127.0.0.1", "test-correlation")
+
+	require.NoError(t, err)
+	assert.NotNil(t, key)
+	assert.NotEmpty(t, rawKey)
+	assert.True(t, strings.HasPrefix(rawKey, "dm_live_"), "Raw key should have dm_live_ prefix")
+	assert.Empty(t, key.KeyHash, "KeyHash should not be returned")
+
+	// Verify the raw key is not logged or stored in the response
+	mockRepo.AssertExpectations(t)
+	mockProfileService.AssertExpectations(t)
+	mockAuditService.AssertExpectations(t)
+}
+
+// TestAPIKeyServiceListNeverReturnsHash verifies that list/get never returns key_hash
+func TestAPIKeyServiceListNeverReturnsHash(t *testing.T) {
+	ctx := context.Background()
+	profileID := uuid.New()
+
+	mockRepo := new(MockAPIKeyRepository)
+	mockProfileService := new(MockProfileService)
+	mockAuditService := new(MockAuditService)
+	mockSessionInvalidator := new(MockKeySessionInvalidator)
+	mockStatePurger := new(MockProfileStatePurger)
+
+	service := NewAPIKeyService(mockRepo, mockProfileService, mockAuditService, mockSessionInvalidator, mockStatePurger)
+
+	// Setup expectations for list
+	keyID := uuid.New()
+	now := time.Now()
+	keys := []*domain.APIKey{
+		{
+			ID:        keyID,
+			ProfileID: profileID,
+			Label:     "test-key",
+			Scopes:    []string{"read"},
+			CreatedAt: now,
+		},
+	}
+	mockRepo.On("ListByProfile", ctx, profileID, 20, 0).Return(keys, nil)
+
+	// Test list
+	result, err := service.ListByProfile(ctx, profileID, 20, 0)
+	require.NoError(t, err)
+	require.Len(t, result, 1)
+	assert.Empty(t, result[0].KeyHash, "List should not return key_hash")
+
+	// Setup expectations for get
+	mockRepo.On("GetByID", ctx, keyID).Return(keys[0], nil)
+
+	// Test get
+	key, err := service.GetByID(ctx, keyID)
+	require.NoError(t, err)
+	assert.Empty(t, key.KeyHash, "Get should not return key_hash")
+
+	mockRepo.AssertExpectations(t)
+}
+
+// TestAPIKeyServiceRevoke verifies that revoked key is marked and sessions invalidated
+func TestAPIKeyServiceRevoke(t *testing.T) {
+	ctx := context.Background()
+	keyID := uuid.New()
+	profileID := uuid.New()
+
+	mockRepo := new(MockAPIKeyRepository)
+	mockProfileService := new(MockProfileService)
+	mockAuditService := new(MockAuditService)
+	mockSessionInvalidator := new(MockKeySessionInvalidator)
+	mockStatePurger := new(MockProfileStatePurger)
+
+	service := NewAPIKeyService(mockRepo, mockProfileService, mockAuditService, mockSessionInvalidator, mockStatePurger)
+
+	// Setup expectations
+	now := time.Now()
+	key := &domain.APIKey{
+		ID:        keyID,
+		ProfileID: profileID,
+		Label:     "test-key",
+		Scopes:    []string{"read"},
+		CreatedAt: now,
+		RevokedAt: nil, // Not revoked yet
+	}
+	mockRepo.On("GetByID", ctx, keyID).Return(key, nil)
+	mockRepo.On("Revoke", ctx, keyID).Return(nil)
+	mockSessionInvalidator.On("InvalidateKeySessions", ctx, profileID.String(), keyID.String()).Return(nil)
+	mockAuditService.On("APIKeyRevoked", ctx, mock.AnythingOfType("*string"), keyID.String(), mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
+
+	err := service.Revoke(ctx, keyID, nil, "admin", "127.0.0.1", "test-correlation")
+
+	require.NoError(t, err)
+	mockRepo.AssertExpectations(t)
+	mockSessionInvalidator.AssertExpectations(t)
+	mockAuditService.AssertExpectations(t)
+}
+
+// TestAPIKeyServiceBootstrap verifies that admin key is created once (idempotent)
+func TestAPIKeyServiceBootstrap(t *testing.T) {
+	ctx := context.Background()
+
+	mockRepo := new(MockAPIKeyRepository)
+	mockProfileService := new(MockProfileService)
+	mockAuditService := new(MockAuditService)
+	mockSessionInvalidator := new(MockKeySessionInvalidator)
+	mockStatePurger := new(MockProfileStatePurger)
+
+	service := NewAPIKeyService(mockRepo, mockProfileService, mockAuditService, mockSessionInvalidator, mockStatePurger)
+
+	// First call: no admin key exists, should create one
+	mockRepo.On("AdminKeyExists", ctx).Return(false, nil).Once()
+	mockRepo.On("CreateAdminKey", ctx, mock.AnythingOfType("*domain.APIKey")).Return(nil).Once()
+
+	rawEnvKey := "dm_live_testbootstrapkey123456789"
+	err := service.BootstrapAdminKey(ctx, rawEnvKey)
+	require.NoError(t, err)
+
+	mockRepo.AssertExpectations(t)
+}
+
+// TestAPIKeyServiceBootstrapIdempotent verifies that bootstrap is idempotent
+func TestAPIKeyServiceBootstrapIdempotent(t *testing.T) {
+	ctx := context.Background()
+
+	mockRepo := new(MockAPIKeyRepository)
+	mockProfileService := new(MockProfileService)
+	mockAuditService := new(MockAuditService)
+	mockSessionInvalidator := new(MockKeySessionInvalidator)
+	mockStatePurger := new(MockProfileStatePurger)
+
+	service := NewAPIKeyService(mockRepo, mockProfileService, mockAuditService, mockSessionInvalidator, mockStatePurger)
+
+	// Admin key already exists, should skip creation
+	mockRepo.On("AdminKeyExists", ctx).Return(true, nil).Once()
+
+	rawEnvKey := "dm_live_testbootstrapkey123456789"
+	err := service.BootstrapAdminKey(ctx, rawEnvKey)
+	require.NoError(t, err)
+
+	mockRepo.AssertExpectations(t)
+	// CreateAdminKey should NOT be called
+	mockRepo.AssertNotCalled(t, "CreateAdminKey")
+}
+
+// TestAPIKeyServiceBootstrapEmptyEnvKey verifies that bootstrap skips when env key is empty
+func TestAPIKeyServiceBootstrapEmptyEnvKey(t *testing.T) {
+	ctx := context.Background()
+
+	mockRepo := new(MockAPIKeyRepository)
+	mockProfileService := new(MockProfileService)
+	mockAuditService := new(MockAuditService)
+	mockSessionInvalidator := new(MockKeySessionInvalidator)
+	mockStatePurger := new(MockProfileStatePurger)
+
+	service := NewAPIKeyService(mockRepo, mockProfileService, mockAuditService, mockSessionInvalidator, mockStatePurger)
+
+	// Empty env key should skip without any DB calls
+	err := service.BootstrapAdminKey(ctx, "")
+	require.NoError(t, err)
+
+	// No expectations were set, so any call would fail
+	mockRepo.AssertExpectations(t)
+}
