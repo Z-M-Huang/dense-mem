@@ -20,7 +20,6 @@ import (
 	"github.com/dense-mem/dense-mem/internal/sse"
 	"github.com/dense-mem/dense-mem/internal/storage/neo4j"
 	"github.com/dense-mem/dense-mem/internal/storage/postgres"
-	"github.com/dense-mem/dense-mem/internal/storage/redis"
 	"github.com/dense-mem/dense-mem/internal/tools/admingraph"
 	"github.com/dense-mem/dense-mem/internal/tools/graphquery"
 	"github.com/dense-mem/dense-mem/internal/tools/keywordsearch"
@@ -56,19 +55,24 @@ func main() {
 	}
 	defer pgDB.Close()
 
-	// Initialize Redis client with 5-second timeout
-	redisClient, err := redis.NewClient(startupCtx, &cfg)
-	if err != nil {
-		log.Fatalf("failed to connect to redis: %v", err)
-	}
-	defer redisClient.Close()
-
 	// Initialize Neo4j client with 5-second timeout
 	neo4jClient, err := neo4j.NewClient(startupCtx, &cfg)
 	if err != nil {
 		log.Fatalf("failed to connect to neo4j: %v", err)
 	}
 	defer neo4jClient.Close(context.Background())
+
+	// ========================================
+	// Build backend bundle (Redis or in-memory)
+	// ========================================
+	backend, err := buildBackendBundle(startupCtx, cfg)
+	if err != nil {
+		log.Fatalf("failed to build backend: %v", err)
+	}
+	defer backend.closeFn()
+
+	// Emit warning if running in degraded (in-memory) mode
+	logInMemoryModeWarning(logger, backend.degraded, backend.reason)
 
 	// ========================================
 	// Repository layer
@@ -84,14 +88,9 @@ func main() {
 	// ========================================
 	auditService := service.NewAuditService(pgDB.GetDB())
 
-	// Redis cleanup satisfies both ProfileStatePurger and KeySessionInvalidator —
-	// profile soft-delete purges cache/session/stream state; key revoke invalidates
-	// matching session records. Passing nil would silently skip cleanup.
-	redisCleanup := redis.NewCleanupRepository(redisClient.GetClient())
-
-	profileService := service.NewProfileService(profileRepo, auditService, redisCleanup)
-	apiKeyService := service.NewAPIKeyService(apiKeyRepo, profileService, auditService, redisCleanup, redisCleanup)
-	rateLimitService := service.NewRateLimitService(redisClient)
+	profileService := service.NewProfileService(profileRepo, auditService, backend.cleanupRepo)
+	apiKeyService := service.NewAPIKeyService(apiKeyRepo, profileService, auditService, backend.cleanupRepo, backend.cleanupRepo)
+	rateLimitService := backend.rateLimitService
 
 	// Bootstrap admin key from environment if configured
 	if err := apiKeyService.BootstrapAdminKey(startupCtx, cfg.GetBootstrapAdminKey()); err != nil {
@@ -131,9 +130,7 @@ func main() {
 	// ========================================
 	// SSE lifecycle
 	// ========================================
-	concurrencyLimiter := sse.NewConcurrencyLimiter(redisClient)
-	streamCleanupRepo := sse.NewStreamCleanupRepository(redisClient)
-	streamLifecycle := sse.NewStreamLifecycle(concurrencyLimiter, streamCleanupRepo)
+	streamLifecycle := sse.NewStreamLifecycle(backend.concurrencyLimiter, backend.streamCleanupRepo)
 
 	// ========================================
 	// Handlers
@@ -152,21 +149,30 @@ func main() {
 	// Health checks
 	// ========================================
 	checks := []http.HealthCheck{
-		func(ctx context.Context) error {
+		{Name: "postgres", Check: func(ctx context.Context) error {
 			return pgDB.Ping(ctx)
-		},
-		func(ctx context.Context) error {
-			return redisClient.Ping(ctx)
-		},
-		func(ctx context.Context) error {
+		}},
+		{Name: "neo4j", Check: func(ctx context.Context) error {
 			return neo4jClient.Verify(ctx)
-		},
+		}},
+	}
+
+	if backend.redisPingFn != nil {
+		checks = append(checks, http.HealthCheck{
+			Name:  "redis",
+			Check: backend.redisPingFn,
+		})
 	}
 
 	// ========================================
 	// Create Echo server
 	// ========================================
-	e := http.NewServer(cfg, logger, checks)
+	healthConfig := http.HealthConfig{
+		Checks:   checks,
+		Degraded: backend.degraded,
+		Reason:   backend.reason,
+	}
+	e := http.NewServer(cfg, logger, healthConfig)
 
 	// Register CorrelationIDMiddleware globally
 	e.Use(middleware.CorrelationIDMiddleware())

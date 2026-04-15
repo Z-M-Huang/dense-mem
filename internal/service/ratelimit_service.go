@@ -12,29 +12,30 @@ type RateLimitServiceInterface interface {
 	Check(ctx context.Context, profileID, routePath string, limit int) (allowed bool, remaining int, resetAt time.Time, err error)
 }
 
-// rateLimitKeyBuilder is the minimal interface for building rate limit keys.
-type rateLimitKeyBuilder interface {
-	RateLimit(profileID, identifier string) (string, error)
-}
-
-// RedisClientForRateLimit is the minimal Redis interface needed by RateLimitService.
-type RedisClientForRateLimit interface {
-	KeyBuilder() any
+// RateLimitStore is the minimal store interface for rate-limit counters.
+type RateLimitStore interface {
 	IncrWithExpire(ctx context.Context, key string, expireSeconds int64) (int64, error)
 }
 
-// RateLimitService implements rate limiting using a fixed-window algorithm with Redis.
+// RateLimitService implements rate limiting using a fixed-window algorithm.
 type RateLimitService struct {
-	redisClient RedisClientForRateLimit
+	store RateLimitStore
+	now   func() time.Time
 }
 
 // Ensure RateLimitService implements RateLimitServiceInterface
 var _ RateLimitServiceInterface = (*RateLimitService)(nil)
 
 // NewRateLimitService creates a new rate limit service instance.
-func NewRateLimitService(redisClient RedisClientForRateLimit) *RateLimitService {
+func NewRateLimitService(store RateLimitStore) *RateLimitService {
+	return newRateLimitServiceWithClock(store, time.Now)
+}
+
+// newRateLimitServiceWithClock creates a rate limit service with a controllable clock for testing.
+func newRateLimitServiceWithClock(store RateLimitStore, now func() time.Time) *RateLimitService {
 	return &RateLimitService{
-		redisClient: redisClient,
+		store: store,
+		now:   now,
 	}
 }
 
@@ -46,24 +47,16 @@ func NewRateLimitService(redisClient RedisClientForRateLimit) *RateLimitService 
 func (s *RateLimitService) Check(ctx context.Context, profileID, routePath string, limit int) (allowed bool, remaining int, resetAt time.Time, err error) {
 	// Compute window start from wall clock (Unix timestamp truncated to minute boundary)
 	// This ensures all requests within the same minute share the same bucket
-	now := time.Now().UTC()
+	now := s.now().UTC()
 	windowStartUnix := now.Unix() - (now.Unix() % 60)
 	windowStart := time.Unix(windowStartUnix, 0).UTC()
 	resetAt = windowStart.Add(60 * time.Second)
 
-	// Build the rate limit key with window bucket
-	identifier := fmt.Sprintf("%s:%d", routePath, windowStartUnix)
-	kb, ok := s.redisClient.KeyBuilder().(rateLimitKeyBuilder)
-	if !ok {
-		return false, 0, resetAt, fmt.Errorf("keybuilder does not implement RateLimit method")
-	}
-	key, err := kb.RateLimit(profileID, identifier)
-	if err != nil {
-		return false, 0, resetAt, fmt.Errorf("failed to build rate limit key: %w", err)
-	}
+	// Build the rate limit key directly
+	key := fmt.Sprintf("profile:%s:ratelimit:%s:%d", profileID, routePath, windowStartUnix)
 
 	// Increment and set expire atomically (70s expiry for 60s window to handle clock skew)
-	count, err := s.redisClient.IncrWithExpire(ctx, key, 70)
+	count, err := s.store.IncrWithExpire(ctx, key, 70)
 	if err != nil {
 		return false, 0, resetAt, fmt.Errorf("failed to increment rate limit counter: %w", err)
 	}

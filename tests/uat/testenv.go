@@ -29,7 +29,16 @@ import (
 	pgclient "github.com/dense-mem/dense-mem/internal/storage/postgres"
 	redisclient "github.com/dense-mem/dense-mem/internal/storage/redis"
 	neo4jstorage "github.com/dense-mem/dense-mem/internal/storage/neo4j"
+	"github.com/dense-mem/dense-mem/internal/storage/inmem"
 )
+
+// TestEnvOptions configures how the test environment is set up.
+type TestEnvOptions struct {
+	NoRedisMode        bool
+	// RateLimitPerMinute overrides the default tier-based rate limit (100/min) when > 0.
+	// Set to a small value (e.g. 2) to exercise rate limiting without sending hundreds of requests.
+	RateLimitPerMinute int
+}
 
 // TestEnvProvider is the companion interface for TestEnv to enable mockability
 type TestEnvProvider interface {
@@ -46,9 +55,10 @@ type TestEnvProvider interface {
 	GetProfileService() service.ProfileService
 	GetAPIKeyService() service.APIKeyService
 	GetAuditService() service.AuditService
-	GetRedisClient() *redisclient.RedisClient
+	GetRedisClient() redisclient.RedisClientInterface
 	GetNeo4jClient() *neo4jstorage.Neo4jClient
 	GetHTTPClient() *httptest.Server
+	IsNoRedisMode() bool
 }
 
 // TestEnv is a shared integration fixture that manages test containers
@@ -67,9 +77,10 @@ type TestEnv struct {
 	neo4jClient    *neo4jstorage.Neo4jClient
 
 	// Redis container
-	redisContainer testcontainers.Container
-	redisAddr      string
-	redisClient    *redisclient.RedisClient
+	redisContainer      testcontainers.Container
+	redisAddr           string
+	redisClient         redisclient.RedisClientInterface
+	redisConcreteClient *redisclient.RedisClient
 
 	// Server
 	server     *echo.Echo
@@ -83,6 +94,10 @@ type TestEnv struct {
 	profileSvc    service.ProfileService
 	apiKeySvc     service.APIKeyService
 	rateLimitSvc  *service.RateLimitService
+
+	// Options
+	noRedisMode        bool
+	rateLimitPerMinute int
 
 	// Admin key for testing
 	adminKeyID  uuid.UUID
@@ -170,30 +185,34 @@ func (te *TestEnv) Setup(ctx context.Context) error {
 		return fmt.Errorf("failed to create neo4j client: %w", err)
 	}
 
-	// Start Redis container
-	redisCont, err := rediscontainer.Run(ctx, "redis:7-alpine")
-	if err != nil {
-		return fmt.Errorf("failed to start redis container: %w", err)
-	}
-	te.redisContainer = redisCont
+	if !te.noRedisMode {
+		// Start Redis container
+		redisCont, err := rediscontainer.Run(ctx, "redis:7-alpine")
+		if err != nil {
+			return fmt.Errorf("failed to start redis container: %w", err)
+		}
+		te.redisContainer = redisCont
 
-	redisHost, err := redisCont.Host(ctx)
-	if err != nil {
-		_ = redisCont.Terminate(ctx)
-		return fmt.Errorf("failed to get redis host: %w", err)
-	}
-	redisPort, err := redisCont.MappedPort(ctx, "6379")
-	if err != nil {
-		_ = redisCont.Terminate(ctx)
-		return fmt.Errorf("failed to get redis port: %w", err)
-	}
-	te.redisAddr = fmt.Sprintf("%s:%s", redisHost, redisPort.Port())
+		redisHost, err := redisCont.Host(ctx)
+		if err != nil {
+			_ = redisCont.Terminate(ctx)
+			return fmt.Errorf("failed to get redis host: %w", err)
+		}
+		redisPort, err := redisCont.MappedPort(ctx, "6379")
+		if err != nil {
+			_ = redisCont.Terminate(ctx)
+			return fmt.Errorf("failed to get redis port: %w", err)
+		}
+		te.redisAddr = fmt.Sprintf("%s:%s", redisHost, redisPort.Port())
 
-	// Create Redis client
-	redisCfg := &redisTestConfig{addr: te.redisAddr}
-	te.redisClient, err = redisclient.NewClient(ctx, redisCfg)
-	if err != nil {
-		return fmt.Errorf("failed to create redis client: %w", err)
+		// Create Redis client
+		redisCfg := &redisTestConfig{addr: te.redisAddr}
+		concreteClient, err := redisclient.NewClient(ctx, redisCfg)
+		if err != nil {
+			return fmt.Errorf("failed to create redis client: %w", err)
+		}
+		te.redisConcreteClient = concreteClient
+		te.redisClient = concreteClient
 	}
 
 	// Initialize repositories
@@ -203,9 +222,31 @@ func (te *TestEnv) Setup(ctx context.Context) error {
 
 	// Initialize services
 	te.auditService = service.NewAuditService(te.db)
-	te.profileSvc = service.NewProfileService(te.profileRepo, te.auditService, nil)
-	te.apiKeySvc = service.NewAPIKeyService(te.apiKeyRepo, te.profileSvc, te.auditService, nil, nil)
-	te.rateLimitSvc = service.NewRateLimitService(te.redisClient)
+
+	// Wire cleanup repos — must never be nil (AC-E2).
+	// No-Redis mode: noop in-memory implementations.
+	// Redis mode: Redis-backed cleanup repository.
+	var statePurger service.ProfileStatePurger
+	var sessionInvalidator service.KeySessionInvalidator
+	if te.noRedisMode {
+		noopCleanup := inmem.NewNoopCleanupRepository()
+		statePurger = noopCleanup
+		sessionInvalidator = noopCleanup
+	} else {
+		redisCleanup := redisclient.NewCleanupRepository(te.redisConcreteClient.GetClient())
+		statePurger = redisCleanup
+		sessionInvalidator = redisCleanup
+	}
+
+	te.profileSvc = service.NewProfileService(te.profileRepo, te.auditService, statePurger)
+	te.apiKeySvc = service.NewAPIKeyService(te.apiKeyRepo, te.profileSvc, te.auditService, sessionInvalidator, statePurger)
+	if te.noRedisMode {
+		// Build in-memory rate limiting store
+		memStore := inmem.NewInMemoryRateLimitStore()
+		te.rateLimitSvc = service.NewRateLimitService(memStore)
+	} else {
+		te.rateLimitSvc = service.NewRateLimitService(te.redisClient)
+	}
 
 	// Bootstrap admin key
 	te.adminRawKey, err = crypto.GenerateRawKey()
@@ -234,23 +275,45 @@ func (te *TestEnv) Setup(ctx context.Context) error {
 	// Create server with health checks
 	logger := observability.New(slog.LevelInfo)
 
-	checks := []httpserver.HealthCheck{
-		func(ctx context.Context) error {
-			return te.redisClient.Ping(ctx)
-		},
-		func(ctx context.Context) error {
+	var checks []httpserver.HealthCheck
+
+	if !te.noRedisMode {
+		checks = append(checks, httpserver.HealthCheck{
+			Name: "redis",
+			Check: func(ctx context.Context) error {
+				return te.redisClient.Ping(ctx)
+			},
+		})
+	}
+
+	checks = append(checks, httpserver.HealthCheck{
+		Name: "neo4j",
+		Check: func(ctx context.Context) error {
 			return te.neo4jClient.Verify(ctx)
 		},
-		func(ctx context.Context) error {
+	}, httpserver.HealthCheck{
+		Name: "postgres",
+		Check: func(ctx context.Context) error {
 			sqlDB, _ := te.db.DB()
 			if sqlDB == nil {
 				return fmt.Errorf("no underlying sql.DB")
 			}
 			return sqlDB.PingContext(ctx)
 		},
+	})
+
+	var healthConfig httpserver.HealthConfig
+	if te.noRedisMode {
+		healthConfig = httpserver.HealthConfig{
+			Checks:   checks,
+			Degraded: true,
+			Reason:   "in-memory backend: no cross-instance rate limiting or session cleanup",
+		}
+	} else {
+		healthConfig = httpserver.HealthConfig{Checks: checks}
 	}
 
-	te.server = httpserver.NewServer(te.buildConfigConcrete(), logger, checks)
+	te.server = httpserver.NewServer(te.buildConfigConcrete(), logger, healthConfig)
 
 	// Build config pointer for deps
 	cfg := te.buildConfig()
@@ -291,9 +354,11 @@ func (te *TestEnv) Teardown(ctx context.Context) error {
 		_ = te.neo4jClient.Close(ctx)
 	}
 
-	// Close Redis
-	if te.redisClient != nil {
-		_ = te.redisClient.Close()
+	// Close Redis (only in Redis mode)
+	if te.redisClient != nil && !te.noRedisMode {
+		if rc, ok := te.redisClient.(interface{ Close() error }); ok {
+			_ = rc.Close()
+		}
 	}
 
 	// Close Postgres
@@ -330,9 +395,10 @@ func (te *TestEnv) GetProfileRepo() repository.ProfileRepository     { return te
 func (te *TestEnv) GetProfileService() service.ProfileService        { return te.profileSvc }
 func (te *TestEnv) GetAPIKeyService() service.APIKeyService          { return te.apiKeySvc }
 func (te *TestEnv) GetAuditService() service.AuditService            { return te.auditService }
-func (te *TestEnv) GetRedisClient() *redisclient.RedisClient         { return te.redisClient }
+func (te *TestEnv) GetRedisClient() redisclient.RedisClientInterface { return te.redisClient }
 func (te *TestEnv) GetNeo4jClient() *neo4jstorage.Neo4jClient        { return te.neo4jClient }
 func (te *TestEnv) GetHTTPClient() *httptest.Server                  { return te.httpServer }
+func (te *TestEnv) IsNoRedisMode() bool                              { return te.noRedisMode }
 
 // AdminKey returns the admin key ID and raw key for testing
 func (te *TestEnv) AdminKey() (uuid.UUID, string) {
@@ -340,15 +406,20 @@ func (te *TestEnv) AdminKey() (uuid.UUID, string) {
 }
 
 // NewTestEnv creates a new TestEnv instance
-func NewTestEnv(t *testing.T) *TestEnv {
-	return &TestEnv{t: t}
+func NewTestEnv(t *testing.T, opts ...TestEnvOptions) *TestEnv {
+	te := &TestEnv{t: t}
+	if len(opts) > 0 {
+		te.noRedisMode = opts[0].NoRedisMode
+		te.rateLimitPerMinute = opts[0].RateLimitPerMinute
+	}
+	return te
 }
 
 // SetupTestEnv is a helper function that sets up the test environment
 // and returns a cleanup function
-func SetupTestEnv(t *testing.T, ctx context.Context) (*TestEnv, func()) {
+func SetupTestEnv(t *testing.T, ctx context.Context, opts ...TestEnvOptions) (*TestEnv, func()) {
 	t.Helper()
-	env := NewTestEnv(t)
+	env := NewTestEnv(t, opts...)
 	if err := env.Setup(ctx); err != nil {
 		t.Fatalf("failed to setup test environment: %v", err)
 	}
@@ -389,6 +460,12 @@ func (c *redisTestConfig) GetRedisDB() int          { return 0 }
 
 // buildConfig creates a full config provider for the test environment
 func (te *TestEnv) buildConfig() *testConfig {
+	rateLimit := 100
+	adminRateLimit := 1000
+	if te.rateLimitPerMinute > 0 {
+		rateLimit = te.rateLimitPerMinute
+		adminRateLimit = te.rateLimitPerMinute
+	}
 	return &testConfig{
 		httpAddr:                 ":0",
 		postgresDSN:              te.postgresDSN,
@@ -399,8 +476,8 @@ func (te *TestEnv) buildConfig() *testConfig {
 		redisAddr:                te.redisAddr,
 		redisPassword:            "",
 		redisDB:                  0,
-		rateLimitPerMinute:       100,
-		adminRateLimitPerMinute:  1000,
+		rateLimitPerMinute:       rateLimit,
+		adminRateLimitPerMinute:  adminRateLimit,
 		argonMemoryKB:            65536,
 		argonTime:                1,
 		argonThreads:             4,
@@ -415,6 +492,12 @@ func (te *TestEnv) buildConfig() *testConfig {
 
 // buildConfigConcrete creates a concrete config.Config for NewServer
 func (te *TestEnv) buildConfigConcrete() config.Config {
+	rateLimit := 100
+	adminRateLimit := 1000
+	if te.rateLimitPerMinute > 0 {
+		rateLimit = te.rateLimitPerMinute
+		adminRateLimit = te.rateLimitPerMinute
+	}
 	return config.Config{
 		HTTPAddr:                 ":0",
 		PostgresDSN:              te.postgresDSN,
@@ -425,8 +508,8 @@ func (te *TestEnv) buildConfigConcrete() config.Config {
 		RedisAddr:                te.redisAddr,
 		RedisPassword:            "",
 		RedisDB:                  0,
-		RateLimitPerMinute:       100,
-		AdminRateLimitPerMinute:  1000,
+		RateLimitPerMinute:       rateLimit,
+		AdminRateLimitPerMinute:  adminRateLimit,
 		ArgonMemoryKB:            65536,
 		ArgonTime:                1,
 		ArgonThreads:             4,

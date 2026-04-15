@@ -41,7 +41,6 @@ func setRequiredEnv() {
 	os.Setenv("NEO4J_URI", "bolt://localhost:7687")
 	os.Setenv("NEO4J_USER", "neo4j")
 	os.Setenv("NEO4J_PASSWORD", "password")
-	os.Setenv("REDIS_ADDR", "localhost:6379")
 }
 
 func TestLoadDefaults(t *testing.T) {
@@ -104,7 +103,6 @@ func TestLoadValidation_MissingPostgresDSN(t *testing.T) {
 	os.Setenv("NEO4J_URI", "bolt://localhost:7687")
 	os.Setenv("NEO4J_USER", "neo4j")
 	os.Setenv("NEO4J_PASSWORD", "password")
-	os.Setenv("REDIS_ADDR", "localhost:6379")
 
 	_, err := Load()
 	if err == nil {
@@ -125,7 +123,6 @@ func TestLoadValidation_MissingNeo4jURI(t *testing.T) {
 	os.Setenv("POSTGRES_DSN", "postgres://user:pass@localhost/db?sslmode=disable")
 	os.Setenv("NEO4J_USER", "neo4j")
 	os.Setenv("NEO4J_PASSWORD", "password")
-	os.Setenv("REDIS_ADDR", "localhost:6379")
 
 	_, err := Load()
 	if err == nil {
@@ -146,7 +143,6 @@ func TestLoadValidation_MissingNeo4jUser(t *testing.T) {
 	os.Setenv("POSTGRES_DSN", "postgres://user:pass@localhost/db?sslmode=disable")
 	os.Setenv("NEO4J_URI", "bolt://localhost:7687")
 	os.Setenv("NEO4J_PASSWORD", "password")
-	os.Setenv("REDIS_ADDR", "localhost:6379")
 
 	_, err := Load()
 	if err == nil {
@@ -167,7 +163,6 @@ func TestLoadValidation_MissingNeo4jPassword(t *testing.T) {
 	os.Setenv("POSTGRES_DSN", "postgres://user:pass@localhost/db?sslmode=disable")
 	os.Setenv("NEO4J_URI", "bolt://localhost:7687")
 	os.Setenv("NEO4J_USER", "neo4j")
-	os.Setenv("REDIS_ADDR", "localhost:6379")
 
 	_, err := Load()
 	if err == nil {
@@ -180,27 +175,6 @@ func TestLoadValidation_MissingNeo4jPassword(t *testing.T) {
 	}
 	if validationErr.Field != "NEO4J_PASSWORD" {
 		t.Errorf("ValidationError.Field = %q, want %q", validationErr.Field, "NEO4J_PASSWORD")
-	}
-}
-
-func TestLoadValidation_MissingRedisAddr(t *testing.T) {
-	clearEnv()
-	os.Setenv("POSTGRES_DSN", "postgres://user:pass@localhost/db?sslmode=disable")
-	os.Setenv("NEO4J_URI", "bolt://localhost:7687")
-	os.Setenv("NEO4J_USER", "neo4j")
-	os.Setenv("NEO4J_PASSWORD", "password")
-
-	_, err := Load()
-	if err == nil {
-		t.Fatal("Load() expected error for missing REDIS_ADDR, got nil")
-	}
-
-	validationErr, ok := err.(*ValidationError)
-	if !ok {
-		t.Fatalf("expected *ValidationError, got %T", err)
-	}
-	if validationErr.Field != "REDIS_ADDR" {
-		t.Errorf("ValidationError.Field = %q, want %q", validationErr.Field, "REDIS_ADDR")
 	}
 }
 
@@ -386,5 +360,35 @@ func TestValidationError_Error(t *testing.T) {
 	expected := "config validation error for TEST_FIELD: test message"
 	if err.Error() != expected {
 		t.Errorf("ValidationError.Error() = %q, want %q", err.Error(), expected)
+	}
+}
+
+func TestLoad_WithoutRedis_Succeeds(t *testing.T) {
+	clearEnv()
+	os.Setenv("POSTGRES_DSN", "postgres://user:pass@localhost/db?sslmode=disable")
+	os.Setenv("NEO4J_URI", "bolt://localhost:7687")
+	os.Setenv("NEO4J_USER", "neo4j")
+	os.Setenv("NEO4J_PASSWORD", "password")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() returned unexpected error: %v", err)
+	}
+	if cfg.RedisAddr != "" {
+		t.Errorf("RedisAddr = %q, want %q", cfg.RedisAddr, "")
+	}
+}
+
+func TestLoad_WithRedis_Succeeds(t *testing.T) {
+	clearEnv()
+	setRequiredEnv()
+	os.Setenv("REDIS_ADDR", "localhost:6379")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() returned unexpected error: %v", err)
+	}
+	if cfg.RedisAddr != "localhost:6379" {
+		t.Errorf("RedisAddr = %q, want %q", cfg.RedisAddr, "localhost:6379")
 	}
 }

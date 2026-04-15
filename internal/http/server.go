@@ -17,7 +17,17 @@ import (
 
 // HealthCheck is a named function interface for dependency health checks.
 // Later units can register Postgres/Neo4j/Redis checks without changing the route contract.
-type HealthCheck func(ctx context.Context) error
+type HealthCheck struct {
+	Name  string
+	Check func(ctx context.Context) error
+}
+
+// HealthConfig configures the health and ready endpoints.
+type HealthConfig struct {
+	Checks   []HealthCheck
+	Degraded bool
+	Reason   string
+}
 
 // Server is the Echo server wrapper.
 // It holds the Echo instance and configuration.
@@ -56,7 +66,7 @@ func (s *Server) Shutdown(ctx context.Context) error {
 // NewServer creates a new Echo server with the given configuration and health checks.
 // It sets up the correlation ID middleware, error handler, and public routes.
 // The health and ready endpoints are not behind auth, profile, or rate-limit middleware.
-func NewServer(cfg config.Config, logger observability.LogProvider, checks []HealthCheck) *echo.Echo {
+func NewServer(cfg config.Config, logger observability.LogProvider, health HealthConfig) *echo.Echo {
 	e := echo.New()
 
 	// Set custom error handler
@@ -67,15 +77,15 @@ func NewServer(cfg config.Config, logger observability.LogProvider, checks []Hea
 	e.Use(middleware.Logger())
 
 	// Register public routes (no auth/profile/rate-limit middleware)
-	registerPublicRoutes(e, checks)
+	registerPublicRoutes(e, health)
 
 	return e
 }
 
 // NewServerWithGracefulShutdown creates a new server and returns it along with a shutdown function.
 // The shutdown function uses a 10-second timeout for graceful shutdown.
-func NewServerWithGracefulShutdown(cfg config.Config, logger observability.LogProvider, checks []HealthCheck) (*echo.Echo, func()) {
-	e := NewServer(cfg, logger, checks)
+func NewServerWithGracefulShutdown(cfg config.Config, logger observability.LogProvider, health HealthConfig) (*echo.Echo, func()) {
+	e := NewServer(cfg, logger, health)
 
 	shutdown := func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

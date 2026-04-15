@@ -475,6 +475,84 @@ func TestAPIKeyServiceBootstrapIdempotent(t *testing.T) {
 	mockRepo.AssertNotCalled(t, "CreateAdminKey")
 }
 
+// TestAPIKeyServiceRevokeForProfile_CallsSessionInvalidator proves that RevokeForProfile
+// invokes InvalidateKeySessions on the injected session invalidator (AC-03).
+func TestAPIKeyServiceRevokeForProfile_CallsSessionInvalidator(t *testing.T) {
+	ctx := context.Background()
+	keyID := uuid.New()
+	profileID := uuid.New()
+
+	mockRepo := new(MockAPIKeyRepository)
+	mockProfileService := new(MockProfileService)
+	mockAuditService := new(MockAuditService)
+	mockSessionInvalidator := new(MockKeySessionInvalidator)
+	mockStatePurger := new(MockProfileStatePurger)
+
+	service := NewAPIKeyService(mockRepo, mockProfileService, mockAuditService, mockSessionInvalidator, mockStatePurger)
+
+	now := time.Now()
+	key := &domain.APIKey{
+		ID:        keyID,
+		ProfileID: profileID,
+		Label:     "test-key",
+		Scopes:    []string{"read"},
+		CreatedAt: now,
+		RevokedAt: nil,
+	}
+
+	// GetByIDForProfile is called to verify ownership
+	mockRepo.On("GetByIDForProfile", ctx, profileID, keyID).Return(key, nil)
+	// RevokeForProfile returns 1 row affected
+	mockRepo.On("RevokeForProfile", ctx, profileID, keyID).Return(int64(1), nil)
+	// InvalidateKeySessions must be called
+	mockSessionInvalidator.On("InvalidateKeySessions", ctx, profileID.String(), keyID.String()).Return(nil)
+	mockAuditService.On("APIKeyRevoked", ctx, mock.AnythingOfType("*string"), keyID.String(), mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
+
+	err := service.RevokeForProfile(ctx, profileID, keyID, nil, "admin", "127.0.0.1", "test-correlation")
+
+	require.NoError(t, err)
+	mockSessionInvalidator.AssertCalled(t, "InvalidateKeySessions", ctx, profileID.String(), keyID.String())
+	mockRepo.AssertExpectations(t)
+	mockSessionInvalidator.AssertExpectations(t)
+	mockAuditService.AssertExpectations(t)
+}
+
+// TestAPIKeyServiceRevokeForProfile_NilInvalidatorIsSafe proves that a nil session invalidator
+// does not panic and the revoke still succeeds (AC-E2).
+func TestAPIKeyServiceRevokeForProfile_NilInvalidatorIsSafe(t *testing.T) {
+	ctx := context.Background()
+	keyID := uuid.New()
+	profileID := uuid.New()
+
+	mockRepo := new(MockAPIKeyRepository)
+	mockProfileService := new(MockProfileService)
+	mockAuditService := new(MockAuditService)
+	mockStatePurger := new(MockProfileStatePurger)
+
+	// sessionInvalidator is nil — this must not panic
+	service := NewAPIKeyService(mockRepo, mockProfileService, mockAuditService, nil, mockStatePurger)
+
+	now := time.Now()
+	key := &domain.APIKey{
+		ID:        keyID,
+		ProfileID: profileID,
+		Label:     "test-key",
+		Scopes:    []string{"read"},
+		CreatedAt: now,
+		RevokedAt: nil,
+	}
+
+	mockRepo.On("GetByIDForProfile", ctx, profileID, keyID).Return(key, nil)
+	mockRepo.On("RevokeForProfile", ctx, profileID, keyID).Return(int64(1), nil)
+	mockAuditService.On("APIKeyRevoked", ctx, mock.AnythingOfType("*string"), keyID.String(), mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
+
+	err := service.RevokeForProfile(ctx, profileID, keyID, nil, "admin", "127.0.0.1", "test-correlation")
+
+	require.NoError(t, err)
+	mockRepo.AssertExpectations(t)
+	mockAuditService.AssertExpectations(t)
+}
+
 // TestAPIKeyServiceBootstrapEmptyEnvKey verifies that bootstrap skips when env key is empty
 func TestAPIKeyServiceBootstrapEmptyEnvKey(t *testing.T) {
 	ctx := context.Background()

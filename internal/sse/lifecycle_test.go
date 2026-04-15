@@ -464,6 +464,26 @@ func TestWorkError(t *testing.T) {
 	assert.Equal(t, int64(0), limiter.GetCount())
 }
 
+// TestStreamLifecycle_ReleasesSlotOnPanic verifies that a panic in the work
+// function does not leak a concurrency slot.
+func TestStreamLifecycle_ReleasesSlotOnPanic(t *testing.T) {
+	t.Parallel()
+
+	writer := newMockSSEWriter()
+	limiter := newMockConcurrencyLimiter(10)
+	cleanupRepo := newMockCleanupRepository()
+	heartbeat := newMockHeartbeatSender()
+
+	lifecycle := NewStreamLifecycleWithConfig(limiter, heartbeat, 5*time.Second, cleanupRepo)
+
+	err := lifecycle.Start(context.Background(), "profile-1", writer, func(ctx context.Context) error {
+		panic("boom")
+	})
+
+	require.Error(t, err)
+	assert.Equal(t, int64(0), limiter.GetCount())
+}
+
 // TestSSEWriterWriteComment tests the WriteComment method.
 func TestSSEWriterWriteComment(t *testing.T) {
 	flusher := newMockSSEWriter()

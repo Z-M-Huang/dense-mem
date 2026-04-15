@@ -227,13 +227,6 @@ func Load() (Config, error) {
 		}
 	}
 
-	if cfg.RedisAddr == "" {
-		return cfg, &ValidationError{
-			Field:   "REDIS_ADDR",
-			Message: "required field is empty",
-		}
-	}
-
 	// Validate numeric limits > 0
 	numericFields := []struct {
 		name  string

@@ -1,6 +1,6 @@
 # Dense-Mem
 
-A multi-profile memory service for LLM applications. Provides polyglot persistence (Neo4j + Postgres + Redis) with profile isolation, knowledge graph, semantic search, and agent tool support.
+A multi-profile memory service for LLM applications. Provides polyglot persistence (Neo4j + Postgres + optional Redis) with profile isolation, knowledge graph, semantic search, and agent tool support. Redis is optional for single-node deployments and required for multi-instance.
 
 ## Purpose
 
@@ -29,7 +29,7 @@ flowchart TB
         
         Neo4j["Neo4j<br/>Graph + Vectors"]
         Pg["Postgres<br/>Operational Data"]
-        Redis["Redis<br/>Cache"]
+        Redis["Redis<br/>Rate limits + SSE concurrency"]
     end
 
     Clients -->|"API Key + X-Profile-ID"| HTTP
@@ -51,7 +51,7 @@ flowchart TB
 |-------|---------|
 | **Neo4j 5.11+** | Knowledge graph (fragments, claims, facts), vector indexes for semantic search |
 | **Postgres** | Profile metadata, audit logs, API keys |
-| **Redis** | Query cache, rate limiting, session state |
+| **Redis** | Rate limiting, SSE concurrency (optional for single-node, required for multi-instance) |
 
 ## Profile Isolation
 
@@ -59,7 +59,7 @@ Each profile's data is strictly isolated:
 
 - **Neo4j**: `profile_id` property on every node, filtered queries
 - **Postgres**: `profile_id` column with RLS policies
-- **Redis**: Key prefix `profile:{id}:`
+- **Redis**: Key prefix `profile:{id}:` (optional for single-node, required for multi-instance)
 
 No cross-profile data access is possible.
 
@@ -122,7 +122,7 @@ curl http://localhost:8080/health
 ### Local Go development
 
 ```bash
-# Requires Go 1.26+, and a running Postgres + Neo4j + Redis (docker or local)
+# Requires Go 1.26+, and a running Postgres + Neo4j (docker or local). Redis is optional for single-node.
 cp .env.example .env   # edit DSNs to point at your local services
 
 # Apply migrations and start the server
@@ -153,7 +153,7 @@ flowchart LR
 | Validation | `github.com/go-playground/validator/v10` |
 | Graph DB   | `github.com/neo4j/neo4j-go-driver/v5` |
 | SQL DB     | `gorm.io/gorm` + `gorm.io/driver/postgres` |
-| Cache      | `github.com/redis/go-redis/v9` |
+| Rate Limits + SSE | `github.com/redis/go-redis/v9` (optional for single-node, required for multi-instance) |
 | Migrations | `github.com/pressly/goose/v3` |
 
 ## Development

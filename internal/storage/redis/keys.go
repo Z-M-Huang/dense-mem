@@ -8,23 +8,19 @@ import (
 // Consumers and tests depend on this abstraction rather than the concrete struct.
 type KeyBuilderInterface interface {
 	RateLimit(profileID, identifier string) (string, error)
-	Cache(profileID, identifier string) (string, error)
-	Session(profileID, identifier string) (string, error)
 	Stream(profileID, identifier string) (string, error)
 }
 
 // validCategories contains the allowed key categories.
 var validCategories = map[string]bool{
 	"ratelimit": true,
-	"cache":     true,
-	"session":   true,
 	"stream":    true,
 }
 
 // Errors for key validation
 var (
 	ErrEmptyProfileID   = errors.New("profileID cannot be empty")
-	ErrInvalidCategory  = errors.New("invalid category: must be one of ratelimit, cache, session, stream")
+	ErrInvalidCategory  = errors.New("category must be one of: ratelimit, stream")
 	ErrEmptyIdentifier  = errors.New("identifier cannot be empty")
 )
 
@@ -58,16 +54,6 @@ func (kb *KeyBuilder) buildKey(profileID, category, identifier string) (string, 
 // RateLimit constructs a key for rate limiting with format: profile:{profileID}:ratelimit:{identifier}
 func (kb *KeyBuilder) RateLimit(profileID, identifier string) (string, error) {
 	return kb.buildKey(profileID, "ratelimit", identifier)
-}
-
-// Cache constructs a key for caching with format: profile:{profileID}:cache:{identifier}
-func (kb *KeyBuilder) Cache(profileID, identifier string) (string, error) {
-	return kb.buildKey(profileID, "cache", identifier)
-}
-
-// Session constructs a key for sessions with format: profile:{profileID}:session:{identifier}
-func (kb *KeyBuilder) Session(profileID, identifier string) (string, error) {
-	return kb.buildKey(profileID, "session", identifier)
 }
 
 // Stream constructs a key for streams with format: profile:{profileID}:stream:{identifier}

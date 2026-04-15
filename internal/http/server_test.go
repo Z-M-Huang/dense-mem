@@ -18,14 +18,14 @@ func TestHealthEndpointReturns200(t *testing.T) {
 	// Arrange
 	cfg := config.Config{HTTPAddr: ":8080"}
 	logger := observability.New(slog.LevelInfo)
-	e := NewServer(cfg, logger, nil)
+	e := NewServer(cfg, logger, HealthConfig{})
 
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 
 	// Act
-	err := handleHealth(c)
+	err := handleHealth(HealthConfig{})(c)
 
 	// Assert
 	if err != nil {
@@ -36,13 +36,13 @@ func TestHealthEndpointReturns200(t *testing.T) {
 		t.Errorf("expected status %d, got %d", http.StatusOK, rec.Code)
 	}
 
-	var response map[string]string
+	var response map[string]any
 	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
 		t.Fatalf("failed to unmarshal response: %v", err)
 	}
 
 	if response["status"] != "ok" {
-		t.Errorf("expected status 'ok', got '%s'", response["status"])
+		t.Errorf("expected status 'ok', got '%v'", response["status"])
 	}
 }
 
@@ -52,7 +52,7 @@ func TestReadyBypassesAuth(t *testing.T) {
 	cfg := config.Config{HTTPAddr: ":8080"}
 	logger := observability.New(slog.LevelInfo)
 	checks := []HealthCheck{}
-	e := NewServer(cfg, logger, checks)
+	e := NewServer(cfg, logger, HealthConfig{Checks: checks})
 
 	// Act - make request without any auth headers
 	req := httptest.NewRequest(http.MethodGet, "/ready", nil)
@@ -83,12 +83,15 @@ func TestReadyDegradedWhenCheckFails(t *testing.T) {
 	logger := observability.New(slog.LevelInfo)
 
 	// Create a failing health check
-	failingCheck := func(ctx context.Context) error {
-		return errors.New("database connection failed")
+	failingCheck := HealthCheck{
+		Name: "db",
+		Check: func(ctx context.Context) error {
+			return errors.New("database connection failed")
+		},
 	}
 
 	checks := []HealthCheck{failingCheck}
-	e := NewServer(cfg, logger, checks)
+	e := NewServer(cfg, logger, HealthConfig{Checks: checks})
 
 	// Act
 	req := httptest.NewRequest(http.MethodGet, "/ready", nil)
@@ -134,15 +137,17 @@ func TestReadyReadyWhenAllChecksPass(t *testing.T) {
 	logger := observability.New(slog.LevelInfo)
 
 	// Create passing health checks
-	passingCheck1 := func(ctx context.Context) error {
-		return nil
+	passingCheck1 := HealthCheck{
+		Name:  "check1",
+		Check: func(ctx context.Context) error { return nil },
 	}
-	passingCheck2 := func(ctx context.Context) error {
-		return nil
+	passingCheck2 := HealthCheck{
+		Name:  "check2",
+		Check: func(ctx context.Context) error { return nil },
 	}
 
 	checks := []HealthCheck{passingCheck1, passingCheck2}
-	e := NewServer(cfg, logger, checks)
+	e := NewServer(cfg, logger, HealthConfig{Checks: checks})
 
 	// Act
 	req := httptest.NewRequest(http.MethodGet, "/ready", nil)
@@ -187,7 +192,7 @@ func TestGracefulShutdown(t *testing.T) {
 	checks := []HealthCheck{}
 
 	// Create server with graceful shutdown
-	_, shutdown := NewServerWithGracefulShutdown(cfg, logger, checks)
+	_, shutdown := NewServerWithGracefulShutdown(cfg, logger, HealthConfig{Checks: checks})
 
 	// The shutdown function should exist and be callable
 	// In a real scenario, it would use 10-second timeout
@@ -200,19 +205,19 @@ func TestGracefulShutdown(t *testing.T) {
 	shutdown()
 }
 
-// TestNewServerAcceptsHealthChecks verifies that NewServer accepts []HealthCheck and compiles
+// TestNewServerAcceptsHealthChecks verifies that NewServer accepts HealthConfig and compiles
 func TestNewServerAcceptsHealthChecks(t *testing.T) {
 	cfg := config.Config{HTTPAddr: ":8080"}
 	logger := observability.New(slog.LevelInfo)
 
 	// Create various health checks
 	checks := []HealthCheck{
-		func(ctx context.Context) error { return nil },
-		func(ctx context.Context) error { return nil },
+		{Name: "check1", Check: func(ctx context.Context) error { return nil }},
+		{Name: "check2", Check: func(ctx context.Context) error { return nil }},
 	}
 
 	// This should compile and create a server
-	server := NewServer(cfg, logger, checks)
+	server := NewServer(cfg, logger, HealthConfig{Checks: checks})
 	if server == nil {
 		t.Error("expected Echo instance to be created")
 	}
@@ -222,7 +227,7 @@ func TestNewServerAcceptsHealthChecks(t *testing.T) {
 func TestHealthEndpointNoMiddleware(t *testing.T) {
 	cfg := config.Config{HTTPAddr: ":8080"}
 	logger := observability.New(slog.LevelInfo)
-	e := NewServer(cfg, logger, nil)
+	e := NewServer(cfg, logger, HealthConfig{})
 
 	// Make request without any headers
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
@@ -233,5 +238,116 @@ func TestHealthEndpointNoMiddleware(t *testing.T) {
 	// Should get 200 without any auth
 	if rec.Code != http.StatusOK {
 		t.Errorf("expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+}
+
+// TestHealthEndpoint_NoRedis_ReturnsDegraded200 verifies that /health returns 200
+// with degraded=true when running in in-memory mode.
+func TestHealthEndpoint_NoRedis_ReturnsDegraded200(t *testing.T) {
+	e := NewServer(config.Config{}, observability.New(slog.LevelInfo), HealthConfig{
+		Degraded: true,
+		Reason:   "in-memory backend: no cross-instance rate limiting or session cleanup",
+		Checks: []HealthCheck{
+			{Name: "postgres", Check: func(ctx context.Context) error { return nil }},
+			{Name: "neo4j", Check: func(ctx context.Context) error { return nil }},
+		},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("failed to unmarshal response: %v", err)
+	}
+
+	if body["status"] != "ok" {
+		t.Errorf("expected status 'ok', got '%v'", body["status"])
+	}
+
+	if body["degraded"] != true {
+		t.Errorf("expected degraded=true, got '%v'", body["degraded"])
+	}
+
+	reason, ok := body["reason"].(string)
+	if !ok {
+		t.Fatal("expected reason to be a string")
+	}
+	if reason != "in-memory backend: no cross-instance rate limiting or session cleanup" {
+		t.Errorf("unexpected reason: %s", reason)
+	}
+}
+
+// TestHealthEndpoint_RedisEnabled_ReturnsNonDegraded verifies /health returns 200
+// without degraded when Redis is enabled.
+func TestHealthEndpoint_RedisEnabled_ReturnsNonDegraded(t *testing.T) {
+	e := NewServer(config.Config{}, observability.New(slog.LevelInfo), HealthConfig{
+		Degraded: false,
+		Reason:   "",
+		Checks: []HealthCheck{
+			{Name: "postgres", Check: func(ctx context.Context) error { return nil }},
+			{Name: "redis", Check: func(ctx context.Context) error { return nil }},
+			{Name: "neo4j", Check: func(ctx context.Context) error { return nil }},
+		},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("failed to unmarshal response: %v", err)
+	}
+
+	if body["status"] != "ok" {
+		t.Errorf("expected status 'ok', got '%v'", body["status"])
+	}
+
+	_, hasDegraded := body["degraded"]
+	if hasDegraded {
+		t.Error("expected no 'degraded' field when Redis is enabled")
+	}
+}
+
+// TestHealthEndpoint_Degraded_ContainsChecks verifies that degraded /health includes named checks.
+func TestHealthEndpoint_Degraded_ContainsChecks(t *testing.T) {
+	e := NewServer(config.Config{}, observability.New(slog.LevelInfo), HealthConfig{
+		Degraded: true,
+		Reason:   "in-memory backend: no cross-instance rate limiting or session cleanup",
+		Checks: []HealthCheck{
+			{Name: "postgres", Check: func(ctx context.Context) error { return nil }},
+			{Name: "neo4j", Check: func(ctx context.Context) error { return nil }},
+		},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/ready", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("failed to unmarshal response: %v", err)
+	}
+
+	deps, ok := body["dependencies"].(map[string]any)
+	if !ok {
+		t.Fatal("expected dependencies to be a map")
+	}
+
+	if _, hasPostgres := deps["postgres"]; !hasPostgres {
+		t.Error("expected 'postgres' check in dependencies")
+	}
+	if _, hasNeo4j := deps["neo4j"]; !hasNeo4j {
+		t.Error("expected 'neo4j' check in dependencies")
 	}
 }

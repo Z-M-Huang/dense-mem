@@ -17,22 +17,6 @@ func TestKeyBuilder_RateLimit_Format(t *testing.T) {
 	assert.Equal(t, "profile:profile123:ratelimit:user@example.com", key)
 }
 
-// TestKeyBuilder_Cache_Format tests that Cache produces the correct key format.
-func TestKeyBuilder_Cache_Format(t *testing.T) {
-	kb := NewKeyBuilder()
-	key, err := kb.Cache("profile456", "session-abc")
-	require.NoError(t, err)
-	assert.Equal(t, "profile:profile456:cache:session-abc", key)
-}
-
-// TestKeyBuilder_Session_Format tests that Session produces the correct key format.
-func TestKeyBuilder_Session_Format(t *testing.T) {
-	kb := NewKeyBuilder()
-	key, err := kb.Session("profile789", "refresh-token-xyz")
-	require.NoError(t, err)
-	assert.Equal(t, "profile:profile789:session:refresh-token-xyz", key)
-}
-
 // TestKeyBuilder_Stream_Format tests that Stream produces the correct key format.
 func TestKeyBuilder_Stream_Format(t *testing.T) {
 	kb := NewKeyBuilder()
@@ -46,12 +30,6 @@ func TestKeyBuilder_EmptyProfileID_Rejects(t *testing.T) {
 	kb := NewKeyBuilder()
 
 	_, err := kb.RateLimit("", "identifier")
-	assert.ErrorIs(t, err, ErrEmptyProfileID)
-
-	_, err = kb.Cache("", "identifier")
-	assert.ErrorIs(t, err, ErrEmptyProfileID)
-
-	_, err = kb.Session("", "identifier")
 	assert.ErrorIs(t, err, ErrEmptyProfileID)
 
 	_, err = kb.Stream("", "identifier")
@@ -113,16 +91,6 @@ func TestRedisClient_NoRawKeyExposure(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, key, "profile:profile1:")
 	assert.Contains(t, key, ":ratelimit:")
-
-	key, err = kb.Cache("profile1", "id1")
-	require.NoError(t, err)
-	assert.Contains(t, key, "profile:profile1:")
-	assert.Contains(t, key, ":cache:")
-
-	key, err = kb.Session("profile1", "id1")
-	require.NoError(t, err)
-	assert.Contains(t, key, "profile:profile1:")
-	assert.Contains(t, key, ":session:")
 
 	key, err = kb.Stream("profile1", "id1")
 	require.NoError(t, err)

@@ -66,6 +66,8 @@ services:
     restart: unless-stopped
 
   redis:
+    # Redis is optional for single-node and required for multi-instance.
+    profiles: ["redis"]
     image: redis:7-alpine
     command: >
       redis-server
@@ -105,8 +107,6 @@ services:
       postgres:
         condition: service_healthy
       neo4j:
-        condition: service_healthy
-      redis:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully

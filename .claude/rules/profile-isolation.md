@@ -32,9 +32,10 @@ WHERE n.profile_id = $profileId
 
 ### Redis
 
+Redis is optional for single-node deployments and required for multi-instance setups.
 - All keys use prefix: `profile:{profileId}:...`
-- Cache keys: `profile:{id}:cache:search:...`
-- Rate limit keys: `profile:{id}:rate:...`
+- Rate limit keys: `profile:{id}:ratelimit:...`
+- SSE stream keys: `profile:{id}:stream:...`
 
 ## What This Means
 

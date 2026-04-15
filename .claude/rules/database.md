@@ -37,10 +37,12 @@ All repo calls that cross a trust boundary must run through those helpers.
 
 ## Redis Keys
 
-Always use prefixed keys:
+Always use prefixed keys with the current live prefixes.
+Redis is optional for single-node deployments and required for multi-instance setups.
 
 ```go
-key := fmt.Sprintf("profile:%s:cache:search:%s", profileID, queryHash)
+rateKey := fmt.Sprintf("profile:%s:ratelimit:%s", profileID, key)
+streamKey := fmt.Sprintf("profile:%s:stream:%s", profileID, requestID)
 ```
 
 Never use unprefixed keys.

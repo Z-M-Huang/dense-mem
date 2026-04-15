@@ -11,7 +11,7 @@ System architecture loaded at session start.
 | ORM | `gorm.io/gorm` + `gorm.io/driver/postgres` |
 | Validation | `github.com/go-playground/validator/v10` |
 | Neo4j | `github.com/neo4j/neo4j-go-driver/v5` |
-| Redis | `github.com/redis/go-redis/v9` |
+| Redis | `github.com/redis/go-redis/v9` — optional for single-node, required for multi-instance |
 | Config | `github.com/spf13/viper` or env vars |
 
 ## System Overview
@@ -33,7 +33,7 @@ flowchart TB
 
         Neo4j["Neo4j<br/>Graph + Vectors"]
         Pg["Postgres<br/>Operational"]
-        Redis["Redis<br/>Cache"]
+        Redis["Redis<br/>Rate limits + SSE concurrency"]
     end
 
     Clients -->|"API Key + X-Profile-ID"| HTTP
@@ -51,7 +51,7 @@ flowchart TB
 |-------|----------|------------------|
 | Neo4j | Knowledge graph, vector indexes | `profile_id` property on every node |
 | Postgres | Profiles, API keys, audit logs | `profile_id` column + RLS |
-| Redis | Cache, rate limits | Key prefix `profile:{id}:` |
+| Redis | Rate limits, SSE concurrency | Key prefix `profile:{id}:` (optional for single-node, required for multi-instance) |
 
 ## Knowledge Pipeline
 
@@ -77,7 +77,7 @@ flowchart LR
 
 1. Validate API key
 2. Extract `X-Profile-ID`
-3. Rate limit check (Redis)
+3. Rate limit check (Redis — optional for single-node, required for multi-instance)
 4. Input validation (struct validator)
 5. Service call with profileId
 6. Database queries filter by profile_id

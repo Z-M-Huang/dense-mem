@@ -159,6 +159,11 @@ func (l *streamLifecycle) Start(
 	// Start work function in goroutine
 	go func() {
 		defer close(workDone)
+		defer func() {
+			if r := recover(); r != nil {
+				workDone <- fmt.Errorf("panic in work function: %v", r)
+			}
+		}()
 		workDone <- work(workCtx)
 	}()
 
