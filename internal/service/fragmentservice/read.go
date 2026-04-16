@@ -1,0 +1,135 @@
+package fragmentservice
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"time"
+
+	"github.com/dense-mem/dense-mem/internal/domain"
+	"github.com/dense-mem/dense-mem/internal/storage/neo4j"
+)
+
+// ErrFragmentNotFound is returned when a fragment does not exist in the requested profile scope.
+// This is mapped to HTTP 404 — the same response is used for both missing fragments and
+// cross-profile reads so existence is not leaked across profiles (AC-27).
+var ErrFragmentNotFound = errors.New("fragment not found")
+
+// ScopedReader is the local interface for profile-scoped reads.
+// This mirrors neo4j.ScopedReader to avoid import cycles.
+type ScopedReader interface {
+	ScopedRead(ctx context.Context, profileID string, query string, params map[string]any) (any, []map[string]any, error)
+}
+
+// GetFragmentService retrieves a single fragment by ID within a profile scope.
+type GetFragmentService interface {
+	// GetByID returns the fragment with the given ID in the given profile.
+	// Returns ErrFragmentNotFound if the fragment does not exist OR if it
+	// belongs to a different profile (the two cases are indistinguishable
+	// to the caller by design).
+	GetByID(ctx context.Context, profileID, fragmentID string) (*domain.Fragment, error)
+}
+
+// getFragmentService implements GetFragmentService via Neo4j.
+type getFragmentService struct {
+	reader ScopedReader
+}
+
+var _ GetFragmentService = (*getFragmentService)(nil)
+
+// NewGetFragmentService constructs a GetFragmentService.
+func NewGetFragmentService(reader ScopedReader) GetFragmentService {
+	return &getFragmentService{reader: reader}
+}
+
+// GetByID executes a profile-scoped read and maps the result to a domain.Fragment.
+func (s *getFragmentService) GetByID(ctx context.Context, profileID, fragmentID string) (*domain.Fragment, error) {
+	query := `
+		MATCH (sf:SourceFragment {profile_id: $profileId, fragment_id: $fragmentId})
+		RETURN sf.fragment_id AS fragment_id,
+		       sf.profile_id AS profile_id,
+		       sf.content AS content,
+		       sf.source AS source,
+		       sf.source_type AS source_type,
+		       sf.labels AS labels,
+		       sf.metadata AS metadata,
+		       sf.content_hash AS content_hash,
+		       sf.idempotency_key AS idempotency_key,
+		       sf.embedding_model AS embedding_model,
+		       sf.embedding_dimensions AS embedding_dimensions,
+		       sf.created_at AS created_at,
+		       sf.updated_at AS updated_at
+		LIMIT 1
+	`
+	params := map[string]any{
+		"fragmentId": fragmentID,
+	}
+
+	_, results, err := s.reader.ScopedRead(ctx, profileID, query, params)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read fragment: %w", err)
+	}
+
+	if len(results) == 0 {
+		return nil, ErrFragmentNotFound
+	}
+
+	return mapRowToFragment(results[0]), nil
+}
+
+// mapRowToFragment converts a Neo4j result map to a domain.Fragment.
+// Uses neo4j.CoerceSourceType so legacy rows with missing source_type default to manual (AC-46).
+func mapRowToFragment(row map[string]any) *domain.Fragment {
+	f := &domain.Fragment{}
+
+	if v, ok := row["fragment_id"].(string); ok {
+		f.FragmentID = v
+	}
+	if v, ok := row["profile_id"].(string); ok {
+		f.ProfileID = v
+	}
+	if v, ok := row["content"].(string); ok {
+		f.Content = v
+	}
+	if v, ok := row["source"].(string); ok {
+		f.Source = v
+	}
+
+	f.SourceType = neo4j.CoerceSourceType(row["source_type"])
+
+	if v, ok := row["labels"].([]any); ok {
+		labels := make([]string, 0, len(v))
+		for _, item := range v {
+			if s, ok := item.(string); ok {
+				labels = append(labels, s)
+			}
+		}
+		f.Labels = labels
+	}
+	if v, ok := row["metadata"].(map[string]any); ok {
+		f.Metadata = v
+	}
+	if v, ok := row["content_hash"].(string); ok {
+		f.ContentHash = v
+	}
+	if v, ok := row["idempotency_key"].(string); ok {
+		f.IdempotencyKey = v
+	}
+	if v, ok := row["embedding_model"].(string); ok {
+		f.EmbeddingModel = v
+	}
+	switch dim := row["embedding_dimensions"].(type) {
+	case int64:
+		f.EmbeddingDimensions = int(dim)
+	case int:
+		f.EmbeddingDimensions = dim
+	}
+	if v, ok := row["created_at"].(time.Time); ok {
+		f.CreatedAt = v
+	}
+	if v, ok := row["updated_at"].(time.Time); ok {
+		f.UpdatedAt = v
+	}
+
+	return f
+}

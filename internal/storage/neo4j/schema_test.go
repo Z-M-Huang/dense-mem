@@ -206,7 +206,7 @@ func TestEnsureSchema_CreatesProfileIdIndexes(t *testing.T) {
 	}
 }
 
-// TestEnsureSchema_CreatesFullTextIndexes tests that full-text indexes are created.
+// TestEnsureSchema_CreatesFullTextIndexes tests that full-text indexes are created with canonical names.
 func TestEnsureSchema_CreatesFullTextIndexes(t *testing.T) {
 	ctx := context.Background()
 
@@ -218,10 +218,12 @@ func TestEnsureSchema_CreatesFullTextIndexes(t *testing.T) {
 	require.NotNil(t, client, "NewClient should return non-nil client")
 	defer client.Close(ctx)
 
-	// Clean up any existing full-text indexes first
+	// Clean up any existing full-text indexes (both legacy and canonical)
 	_, _ = client.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (interface{}, error) {
 		_, _ = tx.Run(ctx, "DROP INDEX sourcefragment_content IF EXISTS", nil)
+		_, _ = tx.Run(ctx, "DROP INDEX fragment_content_idx IF EXISTS", nil)
 		_, _ = tx.Run(ctx, "DROP INDEX fact_predicate IF EXISTS", nil)
+		_, _ = tx.Run(ctx, "DROP INDEX fact_predicate_idx IF EXISTS", nil)
 		return nil, nil
 	})
 
@@ -233,10 +235,10 @@ func TestEnsureSchema_CreatesFullTextIndexes(t *testing.T) {
 	err = bootstrapper.EnsureSchema(ctx)
 	require.NoError(t, err, "EnsureSchema should succeed")
 
-	// Verify full-text indexes exist
+	// Verify full-text indexes exist with canonical names
 	ftIndexes := []string{
-		"sourcefragment_content",
-		"fact_predicate",
+		"fragment_content_idx",
+		"fact_predicate_idx",
 	}
 
 	for _, indexName := range ftIndexes {
@@ -258,7 +260,7 @@ func TestEnsureSchema_CreatesFullTextIndexes(t *testing.T) {
 	}
 }
 
-// TestEnsureSchema_CreatesVectorIndex tests that the vector index is created.
+// TestEnsureSchema_CreatesVectorIndex tests that the vector index is created with canonical name.
 func TestEnsureSchema_CreatesVectorIndex(t *testing.T) {
 	ctx := context.Background()
 
@@ -270,9 +272,10 @@ func TestEnsureSchema_CreatesVectorIndex(t *testing.T) {
 	require.NotNil(t, client, "NewClient should return non-nil client")
 	defer client.Close(ctx)
 
-	// Clean up any existing vector index first
+	// Clean up any existing vector index (both legacy and canonical)
 	_, _ = client.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (interface{}, error) {
 		_, _ = tx.Run(ctx, "DROP INDEX sourcefragment_embedding IF EXISTS", nil)
+		_, _ = tx.Run(ctx, "DROP INDEX fragment_embedding_idx IF EXISTS", nil)
 		return nil, nil
 	})
 
@@ -284,10 +287,10 @@ func TestEnsureSchema_CreatesVectorIndex(t *testing.T) {
 	err = bootstrapper.EnsureSchema(ctx)
 	require.NoError(t, err, "EnsureSchema should succeed")
 
-	// Verify vector index exists
+	// Verify vector index exists with canonical name
 	result, err := client.ExecuteRead(ctx, func(tx neo4j.ManagedTransaction) (interface{}, error) {
 		res, err := tx.Run(ctx,
-			"SHOW INDEXES WHERE name = 'sourcefragment_embedding' AND type = 'VECTOR'",
+			"SHOW INDEXES WHERE name = 'fragment_embedding_idx' AND type = 'VECTOR'",
 			nil,
 		)
 		if err != nil {
@@ -299,7 +302,7 @@ func TestEnsureSchema_CreatesVectorIndex(t *testing.T) {
 		return nil, nil
 	})
 	require.NoError(t, err, "Should be able to query vector index")
-	assert.NotNil(t, result, "Vector index sourcefragment_embedding should exist")
+	assert.NotNil(t, result, "Vector index fragment_embedding_idx should exist")
 }
 
 // TestEnsureSchema_Idempotent tests that EnsureSchema can be run multiple times without error.
@@ -353,4 +356,300 @@ func TestEnsureSchema_Idempotent(t *testing.T) {
 // TestSchemaBootstrapper_Interface ensures SchemaBootstrapper implements SchemaBootstrapperInterface.
 func TestSchemaBootstrapper_Interface(t *testing.T) {
 	var _ SchemaBootstrapperInterface = (*SchemaBootstrapper)(nil)
+}
+
+// TestEnsureSchema_FragmentDedupeIndexes tests that composite indexes for fragment deduplication are created.
+// AC-44: Idempotency-key uniqueness and indexing — dedupe scoped to (profile_id, idempotency_key).
+// AC-45: Content-hash lookup indexing strategy — profile-scoped lookup by content hash is efficient.
+// AC-29: Created-at ordering index for list ordering.
+func TestEnsureSchema_FragmentDedupeIndexes(t *testing.T) {
+	ctx := context.Background()
+
+	cfg, cleanup := skipSchemaTestIfNoNeo4j(t, ctx)
+	defer cleanup()
+
+	client, err := NewClient(ctx, cfg)
+	require.NoError(t, err, "NewClient should succeed")
+	require.NotNil(t, client, "NewClient should return non-nil client")
+	defer client.Close(ctx)
+
+	// Clean up any existing composite indexes first
+	_, _ = client.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (interface{}, error) {
+		_, _ = tx.Run(ctx, "DROP INDEX fragment_profile_idempotency_idx IF EXISTS", nil)
+		_, _ = tx.Run(ctx, "DROP INDEX fragment_profile_content_hash_idx IF EXISTS", nil)
+		_, _ = tx.Run(ctx, "DROP INDEX fragment_profile_created_at_idx IF EXISTS", nil)
+		return nil, nil
+	})
+
+	// Create the bootstrapper
+	logger := observability.New(slog.LevelDebug)
+	bootstrapper := NewSchemaBootstrapper(client, 1536, logger)
+
+	// Ensure schema
+	err = bootstrapper.EnsureSchema(ctx)
+	require.NoError(t, err, "EnsureSchema should succeed")
+
+	// Verify composite indexes exist
+	compositeIndexes := []string{
+		"fragment_profile_idempotency_idx",
+		"fragment_profile_content_hash_idx",
+		"fragment_profile_created_at_idx",
+	}
+
+	for _, indexName := range compositeIndexes {
+		result, err := client.ExecuteRead(ctx, func(tx neo4j.ManagedTransaction) (interface{}, error) {
+			res, err := tx.Run(ctx,
+				"SHOW INDEXES WHERE name = $name",
+				map[string]interface{}{"name": indexName},
+			)
+			if err != nil {
+				return nil, err
+			}
+			if res.Next(ctx) {
+				return res.Record().Values[0], nil
+			}
+			return nil, nil
+		})
+		require.NoError(t, err, "Should be able to query indexes")
+		assert.NotNil(t, result, "Composite index %s should exist", indexName)
+	}
+}
+
+// TestEnsureSchema_FragmentDedupeIndexes_Idempotent tests that composite index creation is idempotent.
+// AC-48: Migration idempotency and data preservation — migration safe to rerun.
+func TestEnsureSchema_FragmentDedupeIndexes_Idempotent(t *testing.T) {
+	ctx := context.Background()
+
+	cfg, cleanup := skipSchemaTestIfNoNeo4j(t, ctx)
+	defer cleanup()
+
+	client, err := NewClient(ctx, cfg)
+	require.NoError(t, err, "NewClient should succeed")
+	require.NotNil(t, client, "NewClient should return non-nil client")
+	defer client.Close(ctx)
+
+	// Create the bootstrapper
+	logger := observability.New(slog.LevelDebug)
+	bootstrapper := NewSchemaBootstrapper(client, 1536, logger)
+
+	// Run EnsureSchema multiple times
+	for i := 0; i < 3; i++ {
+		err = bootstrapper.EnsureSchema(ctx)
+		require.NoError(t, err, "EnsureSchema should be idempotent - run %d should succeed", i+1)
+	}
+
+	// Verify composite indexes still exist after multiple runs
+	compositeIndexes := []string{
+		"fragment_profile_idempotency_idx",
+		"fragment_profile_content_hash_idx",
+		"fragment_profile_created_at_idx",
+	}
+
+	for _, indexName := range compositeIndexes {
+		result, err := client.ExecuteRead(ctx, func(tx neo4j.ManagedTransaction) (interface{}, error) {
+			res, err := tx.Run(ctx,
+				"SHOW INDEXES WHERE name = $name",
+				map[string]interface{}{"name": indexName},
+			)
+			if err != nil {
+				return nil, err
+			}
+			if res.Next(ctx) {
+				return res.Record().Values[0], nil
+			}
+			return nil, nil
+		})
+		require.NoError(t, err, "Should be able to query indexes")
+		assert.NotNil(t, result, "Composite index %s should still exist after multiple runs", indexName)
+	}
+}
+
+// TestEnsureSchema_CreatesCanonicalIndexNames tests that canonical index names are created.
+func TestEnsureSchema_CreatesCanonicalIndexNames(t *testing.T) {
+	ctx := context.Background()
+
+	cfg, cleanup := skipSchemaTestIfNoNeo4j(t, ctx)
+	defer cleanup()
+
+	client, err := NewClient(ctx, cfg)
+	require.NoError(t, err, "NewClient should succeed")
+	require.NotNil(t, client, "NewClient should return non-nil client")
+	defer client.Close(ctx)
+
+	// Clean up all indexes (legacy and canonical) to test from scratch
+	_, _ = client.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (interface{}, error) {
+		// Must consume results for DDL to actually execute
+		if res, err := tx.Run(ctx, "DROP INDEX sourcefragment_content IF EXISTS", nil); err == nil {
+			res.Consume(ctx)
+		}
+		if res, err := tx.Run(ctx, "DROP INDEX fragment_content_idx IF EXISTS", nil); err == nil {
+			res.Consume(ctx)
+		}
+		if res, err := tx.Run(ctx, "DROP INDEX sourcefragment_embedding IF EXISTS", nil); err == nil {
+			res.Consume(ctx)
+		}
+		if res, err := tx.Run(ctx, "DROP INDEX fragment_embedding_idx IF EXISTS", nil); err == nil {
+			res.Consume(ctx)
+		}
+		if res, err := tx.Run(ctx, "DROP INDEX fact_predicate IF EXISTS", nil); err == nil {
+			res.Consume(ctx)
+		}
+		if res, err := tx.Run(ctx, "DROP INDEX fact_predicate_idx IF EXISTS", nil); err == nil {
+			res.Consume(ctx)
+		}
+		return nil, nil
+	})
+
+	// Create the bootstrapper
+	logger := observability.New(slog.LevelDebug)
+	bootstrapper := NewSchemaBootstrapper(client, 1536, logger)
+
+	// Ensure schema
+	err = bootstrapper.EnsureSchema(ctx)
+	require.NoError(t, err, "EnsureSchema should succeed")
+
+	// Verify canonical indexes exist
+	canonicalIndexes := []string{
+		"fragment_content_idx",
+		"fragment_embedding_idx",
+		"fact_predicate_idx",
+	}
+
+	for _, indexName := range canonicalIndexes {
+		result, err := client.ExecuteRead(ctx, func(tx neo4j.ManagedTransaction) (interface{}, error) {
+			res, err := tx.Run(ctx,
+				"SHOW INDEXES WHERE name = $name",
+				map[string]interface{}{"name": indexName},
+			)
+			if err != nil {
+				return nil, err
+			}
+			if res.Next(ctx) {
+				return res.Record().Values[0], nil
+			}
+			return nil, nil
+		})
+		require.NoError(t, err, "Should be able to query index %s", indexName)
+		assert.NotNil(t, result, "Canonical index %s should exist", indexName)
+	}
+}
+
+// TestEnsureSchema_DropsLegacyIndexes tests that legacy index names are migrated to canonical names.
+func TestEnsureSchema_DropsLegacyIndexes(t *testing.T) {
+	ctx := context.Background()
+
+	cfg, cleanup := skipSchemaTestIfNoNeo4j(t, ctx)
+	defer cleanup()
+
+	client, err := NewClient(ctx, cfg)
+	require.NoError(t, err, "NewClient should succeed")
+	require.NotNil(t, client, "NewClient should return non-nil client")
+	defer client.Close(ctx)
+
+	// Clean up all indexes first (both legacy and canonical)
+	_, _ = client.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (interface{}, error) {
+		if res, err := tx.Run(ctx, "DROP INDEX sourcefragment_content IF EXISTS", nil); err == nil {
+			res.Consume(ctx)
+		}
+		if res, err := tx.Run(ctx, "DROP INDEX fragment_content_idx IF EXISTS", nil); err == nil {
+			res.Consume(ctx)
+		}
+		if res, err := tx.Run(ctx, "DROP INDEX sourcefragment_embedding IF EXISTS", nil); err == nil {
+			res.Consume(ctx)
+		}
+		if res, err := tx.Run(ctx, "DROP INDEX fragment_embedding_idx IF EXISTS", nil); err == nil {
+			res.Consume(ctx)
+		}
+		if res, err := tx.Run(ctx, "DROP INDEX fact_predicate IF EXISTS", nil); err == nil {
+			res.Consume(ctx)
+		}
+		if res, err := tx.Run(ctx, "DROP INDEX fact_predicate_idx IF EXISTS", nil); err == nil {
+			res.Consume(ctx)
+		}
+		return nil, nil
+	})
+
+	// Create legacy indexes manually (simulating a pre-existing database)
+	_, _ = client.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (interface{}, error) {
+		// Create legacy fulltext index for content
+		if res, err := tx.Run(ctx, "CREATE FULLTEXT INDEX sourcefragment_content FOR (sf:SourceFragment) ON EACH [sf.content]", nil); err == nil {
+			res.Consume(ctx)
+		}
+		// Create legacy fact_predicate index
+		if res, err := tx.Run(ctx, "CREATE FULLTEXT INDEX fact_predicate FOR (f:Fact) ON EACH [f.predicate]", nil); err == nil {
+			res.Consume(ctx)
+		}
+		return nil, nil
+	})
+
+	// Verify legacy indexes exist before migration
+	legacyIndexes := []string{"sourcefragment_content", "fact_predicate"}
+	for _, indexName := range legacyIndexes {
+		result, err := client.ExecuteRead(ctx, func(tx neo4j.ManagedTransaction) (interface{}, error) {
+			res, err := tx.Run(ctx,
+				"SHOW INDEXES WHERE name = $name",
+				map[string]interface{}{"name": indexName},
+			)
+			if err != nil {
+				return nil, err
+			}
+			if res.Next(ctx) {
+				return res.Record().Values[0], nil
+			}
+			return nil, nil
+		})
+		require.NoError(t, err, "Should be able to query legacy index %s", indexName)
+		require.NotNil(t, result, "Legacy index %s should exist before migration", indexName)
+	}
+
+	// Create the bootstrapper and run EnsureSchema
+	logger := observability.New(slog.LevelDebug)
+	bootstrapper := NewSchemaBootstrapper(client, 1536, logger)
+
+	err = bootstrapper.EnsureSchema(ctx)
+	require.NoError(t, err, "EnsureSchema should succeed")
+
+	// Verify legacy indexes are gone
+	for _, indexName := range legacyIndexes {
+		result, err := client.ExecuteRead(ctx, func(tx neo4j.ManagedTransaction) (interface{}, error) {
+			res, err := tx.Run(ctx,
+				"SHOW INDEXES WHERE name = $name",
+				map[string]interface{}{"name": indexName},
+			)
+			if err != nil {
+				return nil, err
+			}
+			if res.Next(ctx) {
+				return res.Record().Values[0], nil
+			}
+			return nil, nil
+		})
+		require.NoError(t, err, "Should be able to query index %s", indexName)
+		assert.Nil(t, result, "Legacy index %s should be dropped", indexName)
+	}
+
+	// Verify canonical indexes exist
+	canonicalIndexes := []string{
+		"fragment_content_idx",
+		"fragment_embedding_idx",
+		"fact_predicate_idx",
+	}
+
+	for _, indexName := range canonicalIndexes {
+		result, err := client.ExecuteRead(ctx, func(tx neo4j.ManagedTransaction) (interface{}, error) {
+			res, err := tx.Run(ctx,
+				"SHOW INDEXES WHERE name = $name",
+				map[string]interface{}{"name": indexName},
+			)
+			if err != nil {
+				return nil, err
+			}
+			if res.Next(ctx) {
+				return res.Record().Values[0], nil
+			}
+			return nil, nil
+		})
+		require.NoError(t, err, "Should be able to query canonical index %s", indexName)
+		assert.NotNil(t, result, "Canonical index %s should exist after migration", indexName)
+	}
 }

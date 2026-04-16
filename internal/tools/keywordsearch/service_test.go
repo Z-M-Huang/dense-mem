@@ -4,9 +4,19 @@ import (
 	"context"
 	"testing"
 
+	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// fakeScopedReader implements ScopedReaderInterface for testing the neo4j searchers directly.
+type fakeScopedReader struct {
+	rows []map[string]any
+}
+
+func (f *fakeScopedReader) ScopedRead(ctx context.Context, profileID string, query string, params map[string]any) (neo4j.ResultSummary, []map[string]any, error) {
+	return nil, f.rows, nil
+}
 
 // mockFragmentSearcher implements FragmentSearcherInterface for testing.
 type mockFragmentSearcher struct {
@@ -290,4 +300,33 @@ func TestKeywordSearchEmptyResult(t *testing.T) {
 			assert.Equal(t, 20, result.Meta.LimitApplied, "limit_applied should be set")
 		})
 	}
+}
+// TestFragmentSearcher_ScorePropagated tests that BM25 scores are propagated from the fulltext search.
+func TestFragmentSearcher_ScorePropagated(t *testing.T) {
+	reader := &fakeScopedReader{rows: []map[string]any{
+		{"fragment_id": "f1", "content": "hello", "score": 0.87, "profile_id": "p"},
+		{"fragment_id": "f2", "content": "world", "score": 0.42, "profile_id": "p"},
+	}}
+	s := NewFragmentSearcher(reader)
+	got, err := s.SearchContent(context.Background(), "p", "hello", nil, 10)
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+	assert.InDelta(t, 0.87, got[0].Score, 1e-6)
+	assert.InDelta(t, 0.42, got[1].Score, 1e-6)
+	assert.NotEqual(t, 1.0, got[0].Score, "score must not be hardcoded")
+}
+
+// TestFactSearcher_ScorePropagated tests that BM25 scores are propagated from the fulltext search.
+func TestFactSearcher_ScorePropagated(t *testing.T) {
+	reader := &fakeScopedReader{rows: []map[string]any{
+		{"fact_id": "fact-1", "predicate": "knows", "score": 0.33, "profile_id": "p"},
+		{"fact_id": "fact-2", "predicate": "likes", "score": 0.55, "profile_id": "p"},
+	}}
+	s := NewFactSearcher(reader)
+	got, err := s.SearchPredicate(context.Background(), "p", "knows", nil, 10)
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+	assert.InDelta(t, 0.33, got[0].Score, 1e-6)
+	assert.InDelta(t, 0.55, got[1].Score, 1e-6)
+	assert.NotEqual(t, 1.0, got[0].Score, "score must not be hardcoded")
 }

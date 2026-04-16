@@ -8,6 +8,18 @@ import (
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 )
 
+// Canonical index names for Neo4j schema elements.
+const (
+	IndexFragmentContent   = "fragment_content_idx"
+	IndexFragmentEmbedding = "fragment_embedding_idx"
+	IndexFactPredicate     = "fact_predicate_idx"
+
+	// Composite indexes for fragment deduplication and lookup (Unit 12)
+	IndexFragmentProfileIdempotency = "fragment_profile_idempotency_idx"
+	IndexFragmentProfileContentHash = "fragment_profile_content_hash_idx"
+	IndexFragmentProfileCreatedAt   = "fragment_profile_created_at_idx"
+)
+
 // SchemaBootstrapperInterface is the companion interface for SchemaBootstrapper.
 // Consumers and tests depend on this abstraction rather than the concrete struct.
 type SchemaBootstrapperInterface interface {
@@ -75,26 +87,55 @@ func (s *SchemaBootstrapper) EnsureSchema(ctx context.Context) error {
 		s.logger.Debug("Created index", observability.String("query", cypher))
 	}
 
-	// Create full-text indexes
-	fullTextIndexes := []string{
-		"CREATE FULLTEXT INDEX sourcefragment_content IF NOT EXISTS FOR (sf:SourceFragment) ON EACH [sf.content]",
-		"CREATE FULLTEXT INDEX fact_predicate IF NOT EXISTS FOR (f:Fact) ON EACH [f.predicate]",
+	// Drop legacy indexes before creating canonical ones
+	legacyDrops := []string{
+		"DROP INDEX sourcefragment_content IF EXISTS",
+		"DROP INDEX sourcefragment_embedding IF EXISTS",
+		"DROP INDEX fact_predicate IF EXISTS",
 	}
 
-	for _, cypher := range fullTextIndexes {
+	for _, cypher := range legacyDrops {
 		_, err := s.client.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (interface{}, error) {
 			_, err := tx.Run(ctx, cypher, nil)
 			return nil, err
 		})
 		if err != nil {
-			return fmt.Errorf("failed to create full-text index: %w", err)
+			// Soft-fail: legacy drops are opportunistic cleanups, the index may not exist
+			s.logger.Debug("could not drop legacy index (may not exist)", observability.String("query", cypher), observability.String("error", err.Error()))
+			continue
 		}
-		s.logger.Debug("Created full-text index", observability.String("query", cypher))
+		s.logger.Debug("Dropped legacy index", observability.String("query", cypher))
 	}
 
-	// Create vector index
+	// Create full-text indexes with canonical names
+	fullTextIndexes := []struct {
+		cypher string
+		name   string
+	}{
+		{
+			"CREATE FULLTEXT INDEX fragment_content_idx IF NOT EXISTS FOR (sf:SourceFragment) ON EACH [sf.content]",
+			"fragment_content_idx",
+		},
+		{
+			"CREATE FULLTEXT INDEX fact_predicate_idx IF NOT EXISTS FOR (f:Fact) ON EACH [f.predicate]",
+			"fact_predicate_idx",
+		},
+	}
+
+	for _, idx := range fullTextIndexes {
+		_, err := s.client.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (interface{}, error) {
+			_, err := tx.Run(ctx, idx.cypher, nil)
+			return nil, err
+		})
+		if err != nil {
+			return fmt.Errorf("failed to create full-text index: %w", err)
+		}
+		s.logger.Info("ensured index", observability.String("name", idx.name))
+	}
+
+	// Create vector index with canonical name
 	vectorIndex := fmt.Sprintf(
-		"CREATE VECTOR INDEX sourcefragment_embedding IF NOT EXISTS FOR (sf:SourceFragment) ON sf.embedding OPTIONS {indexConfig: {`vector.dimensions`: %d, `vector.similarity_function`: 'cosine'}}",
+		"CREATE VECTOR INDEX fragment_embedding_idx IF NOT EXISTS FOR (sf:SourceFragment) ON sf.embedding OPTIONS {indexConfig: {`vector.dimensions`: %d, `vector.similarity_function`: 'cosine'}}",
 		s.embeddingDimensions,
 	)
 
@@ -105,7 +146,41 @@ func (s *SchemaBootstrapper) EnsureSchema(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to create vector index: %w", err)
 	}
-	s.logger.Debug("Created vector index", observability.Int("dimensions", s.embeddingDimensions))
+	s.logger.Info("ensured index", observability.String("name", "fragment_embedding_idx"))
+
+	// Create composite indexes for fragment deduplication and lookup (Unit 12)
+	// These are ADDITIVE migrations - no DROP of existing indexes.
+	// AC-44: Idempotency-key uniqueness scoped to (profile_id, idempotency_key)
+	// AC-45: Content-hash lookup profile-scoped
+	// AC-29: Created-at ordering profile-scoped
+	compositeIndexes := []struct {
+		cypher string
+		name   string
+	}{
+		{
+			"CREATE INDEX fragment_profile_idempotency_idx IF NOT EXISTS FOR (sf:SourceFragment) ON (sf.profile_id, sf.idempotency_key)",
+			"fragment_profile_idempotency_idx",
+		},
+		{
+			"CREATE INDEX fragment_profile_content_hash_idx IF NOT EXISTS FOR (sf:SourceFragment) ON (sf.profile_id, sf.content_hash)",
+			"fragment_profile_content_hash_idx",
+		},
+		{
+			"CREATE INDEX fragment_profile_created_at_idx IF NOT EXISTS FOR (sf:SourceFragment) ON (sf.profile_id, sf.created_at)",
+			"fragment_profile_created_at_idx",
+		},
+	}
+
+	for _, idx := range compositeIndexes {
+		_, err := s.client.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (interface{}, error) {
+			_, err := tx.Run(ctx, idx.cypher, nil)
+			return nil, err
+		})
+		if err != nil {
+			return fmt.Errorf("failed to create composite index: %w", err)
+		}
+		s.logger.Info("ensured index", observability.String("name", idx.name))
+	}
 
 	s.logger.Info("Neo4j schema ensured successfully")
 	return nil

@@ -1,0 +1,35 @@
+package correlation
+
+import (
+	"context"
+	"testing"
+)
+
+func TestFromContext_ReturnsIDSetByWithID(t *testing.T) {
+	ctx := WithID(context.Background(), "abc-123")
+	if got := FromContext(ctx); got != "abc-123" {
+		t.Errorf("FromContext() = %q; want %q", got, "abc-123")
+	}
+}
+
+func TestFromContext_EmptyWhenUnset(t *testing.T) {
+	if got := FromContext(context.Background()); got != "" {
+		t.Errorf("FromContext() = %q; want empty string", got)
+	}
+}
+
+func TestFromContext_NilSafe(t *testing.T) {
+	// Defensive: services sometimes receive nil ctx from tests; must not panic.
+	if got := FromContext(nil); got != "" {
+		t.Errorf("FromContext(nil) = %q; want empty string", got)
+	}
+}
+
+func TestWithID_DoesNotLeakAcrossKeys(t *testing.T) {
+	// Using a different context key type must not match the correlation key.
+	type other struct{}
+	ctx := context.WithValue(context.Background(), other{}, "impostor")
+	if got := FromContext(ctx); got != "" {
+		t.Errorf("FromContext should ignore unrelated keys, got %q", got)
+	}
+}

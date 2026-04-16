@@ -33,9 +33,9 @@ func (s *neo4jFragmentSearcher) SearchContent(ctx context.Context, profileID str
 	// Build the Cypher query with full-text index search
 	// Uses db.index.fulltext.queryNodes for content search
 	cypherQuery := `
-		CALL db.index.fulltext.queryNodes('fragment_content_idx', $searchQuery) YIELD node AS f
+		CALL db.index.fulltext.queryNodes('fragment_content_idx', $searchQuery) YIELD node AS f, score
 		WHERE f.profile_id = $profileId
-		RETURN f.id AS fragment_id, f.content AS content, f.labels AS labels, f.metadata AS metadata, f.profile_id AS profile_id
+		RETURN f.id AS fragment_id, f.content AS content, f.labels AS labels, f.metadata AS metadata, f.profile_id AS profile_id, score
 		LIMIT $limit
 	`
 
@@ -67,7 +67,7 @@ func (s *neo4jFragmentSearcher) SearchContent(ctx context.Context, profileID str
 		searchResults[i] = FragmentSearchResult{
 			FragmentID: getString(row, "fragment_id"),
 			Content:    getString(row, "content"),
-			Score:      1.0, // Full-text search doesn't return scores in this query
+			Score:      getFloat64Val(row, "score"),
 			Labels:     getLabels(row, "labels"),
 			Metadata:   getMetadata(row, "metadata"),
 			ProfileID:  getString(row, "profile_id"),
@@ -96,9 +96,9 @@ func (s *neo4jFactSearcher) SearchPredicate(ctx context.Context, profileID strin
 	// Build the Cypher query with full-text index search
 	// Uses db.index.fulltext.queryRelationships for predicate search
 	cypherQuery := `
-		CALL db.index.fulltext.queryRelationships('fact_predicate_idx', $searchQuery) YIELD relationship AS r
+		CALL db.index.fulltext.queryRelationships('fact_predicate_idx', $searchQuery) YIELD relationship AS r, score
 		WHERE r.profile_id = $profileId
-		RETURN r.id AS fact_id, r.predicate AS predicate, r.labels AS labels, r.metadata AS metadata, r.profile_id AS profile_id
+		RETURN r.id AS fact_id, r.predicate AS predicate, r.labels AS labels, r.metadata AS metadata, r.profile_id AS profile_id, score
 		LIMIT $limit
 	`
 
@@ -130,7 +130,7 @@ func (s *neo4jFactSearcher) SearchPredicate(ctx context.Context, profileID strin
 		searchResults[i] = FactSearchResult{
 			FactID:    getString(row, "fact_id"),
 			Predicate: getString(row, "predicate"),
-			Score:     1.0, // Full-text search doesn't return scores in this query
+			Score:     getFloat64Val(row, "score"),
 			Labels:    getLabels(row, "labels"),
 			Metadata:  getMetadata(row, "metadata"),
 			ProfileID: getString(row, "profile_id"),
@@ -174,4 +174,16 @@ func getMetadata(row map[string]any, key string) map[string]any {
 		}
 	}
 	return nil
+}
+
+func getFloat64Val(row map[string]any, key string) float64 {
+	if val, ok := row[key]; ok {
+		if f, ok := val.(float64); ok {
+			return f
+		}
+		if f, ok := val.(float32); ok {
+			return float64(f)
+		}
+	}
+	return 0.0
 }

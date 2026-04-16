@@ -1,0 +1,41 @@
+package handler
+
+import (
+	"net/http"
+
+	"github.com/labstack/echo/v4"
+
+	"github.com/dense-mem/dense-mem/internal/openapi"
+)
+
+// OpenAPIHandler serves the generated OpenAPI document for a given variant.
+//
+// The handler does NOT decide authorization — the router binds the AI-safe
+// variant to the normal protected chain and the full variant to the admin
+// chain, so whoever reaches this handler is already authorized for the
+// requested variant.
+type OpenAPIHandler struct {
+	gen     openapi.Generator
+	variant openapi.SpecVariant
+}
+
+// OpenAPIHandlerInterface is the companion interface for OpenAPIHandler.
+type OpenAPIHandlerInterface interface {
+	Handle(c echo.Context) error
+}
+
+var _ OpenAPIHandlerInterface = (*OpenAPIHandler)(nil)
+
+// NewOpenAPIHandler constructs a handler bound to a specific spec variant.
+func NewOpenAPIHandler(gen openapi.Generator, variant openapi.SpecVariant) *OpenAPIHandler {
+	return &OpenAPIHandler{gen: gen, variant: variant}
+}
+
+// Handle returns the OpenAPI document as JSON.
+func (h *OpenAPIHandler) Handle(c echo.Context) error {
+	spec, err := h.gen.Generate(h.variant)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to generate openapi spec")
+	}
+	return c.JSON(http.StatusOK, spec)
+}

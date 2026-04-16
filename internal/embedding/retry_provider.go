@@ -1,0 +1,283 @@
+package embedding
+
+import (
+	"context"
+	"errors"
+	"math/rand"
+	"net"
+	"time"
+
+	"github.com/dense-mem/dense-mem/internal/observability"
+)
+
+// RetryEmbeddingProvider wraps an EmbeddingProviderInterface with retry logic.
+// It implements bounded exponential backoff with jitter for transient errors.
+type RetryEmbeddingProvider struct {
+	inner      EmbeddingProviderInterface
+	maxRetries int
+	baseDelay  time.Duration
+	maxDelay   time.Duration
+	logger     observability.LogProvider
+	apiKey     string
+	metrics    observability.DiscoverabilityMetrics
+}
+
+// Compile-time assertion that RetryEmbeddingProvider implements EmbeddingProviderInterface.
+var _ EmbeddingProviderInterface = (*RetryEmbeddingProvider)(nil)
+
+// NewRetryEmbeddingProvider creates a new retry wrapper around the given provider.
+// The retry configuration is fixed at:
+// - maxRetries: 3
+// - baseDelay: 200ms
+// - maxDelay: 5s
+func NewRetryEmbeddingProvider(inner EmbeddingProviderInterface, logger observability.LogProvider) *RetryEmbeddingProvider {
+	return &RetryEmbeddingProvider{
+		inner:      inner,
+		maxRetries: 3,
+		baseDelay:  200 * time.Millisecond,
+		maxDelay:   5 * time.Second,
+		logger:     logger,
+		metrics:    observability.NoopDiscoverabilityMetrics(),
+	}
+}
+
+// NewRetryEmbeddingProviderWithKey creates a new retry wrapper with the API key
+// for sanitization purposes.
+func NewRetryEmbeddingProviderWithKey(inner EmbeddingProviderInterface, logger observability.LogProvider, apiKey string) *RetryEmbeddingProvider {
+	return &RetryEmbeddingProvider{
+		inner:      inner,
+		maxRetries: 3,
+		baseDelay:  200 * time.Millisecond,
+		maxDelay:   5 * time.Second,
+		logger:     logger,
+		apiKey:     apiKey,
+		metrics:    observability.NoopDiscoverabilityMetrics(),
+	}
+}
+
+// SetMetrics attaches a DiscoverabilityMetrics recorder. A nil value is
+// normalised to the noop recorder so call sites need no nil checks.
+// Intended for bootstrap-time wiring; not safe to call mid-request.
+func (p *RetryEmbeddingProvider) SetMetrics(m observability.DiscoverabilityMetrics) {
+	if m == nil {
+		m = observability.NoopDiscoverabilityMetrics()
+	}
+	p.metrics = m
+}
+
+// Embed returns the embedding for a single text with retry logic.
+func (p *RetryEmbeddingProvider) Embed(ctx context.Context, text string) ([]float32, string, error) {
+	var lastErr error
+
+	for attempt := 0; attempt <= p.maxRetries; attempt++ {
+		attemptStart := time.Now()
+		vec, model, err := p.inner.Embed(ctx, text)
+		dur := float64(time.Since(attemptStart).Milliseconds())
+
+		if err == nil {
+			p.metrics.ObserveEmbeddingLatency(dur, "ok")
+			return vec, model, nil
+		}
+
+		code := classifyEmbeddingError(err)
+		p.metrics.ObserveEmbeddingLatency(dur, code)
+
+		lastErr = err
+
+		// Check if we should retry
+		if !p.shouldRetry(err) {
+			break
+		}
+
+		// Check if context was cancelled or deadline exceeded
+		if ctx.Err() != nil {
+			break
+		}
+
+		// Don't sleep after the last attempt
+		if attempt < p.maxRetries {
+			delay := p.calculateDelay(attempt)
+			select {
+			case <-ctx.Done():
+				break
+			case <-time.After(delay):
+				continue
+			}
+		}
+	}
+
+	// Final failure — increment error counter by classified code.
+	p.metrics.IncEmbeddingError(classifyEmbeddingError(lastErr))
+
+	// Sanitize the error before returning
+	return nil, "", SanitizeError(lastErr, p.apiKey)
+}
+
+// EmbedBatch returns embeddings for multiple texts with retry logic.
+func (p *RetryEmbeddingProvider) EmbedBatch(ctx context.Context, texts []string) ([][]float32, string, error) {
+	var lastErr error
+
+	for attempt := 0; attempt <= p.maxRetries; attempt++ {
+		attemptStart := time.Now()
+		vecs, model, err := p.inner.EmbedBatch(ctx, texts)
+		dur := float64(time.Since(attemptStart).Milliseconds())
+
+		if err == nil {
+			p.metrics.ObserveEmbeddingLatency(dur, "ok")
+			return vecs, model, nil
+		}
+
+		code := classifyEmbeddingError(err)
+		p.metrics.ObserveEmbeddingLatency(dur, code)
+
+		lastErr = err
+
+		// Check if we should retry
+		if !p.shouldRetry(err) {
+			break
+		}
+
+		// Check if context was cancelled or deadline exceeded
+		if ctx.Err() != nil {
+			break
+		}
+
+		// Don't sleep after the last attempt
+		if attempt < p.maxRetries {
+			delay := p.calculateDelay(attempt)
+			select {
+			case <-ctx.Done():
+				break
+			case <-time.After(delay):
+				continue
+			}
+		}
+	}
+
+	p.metrics.IncEmbeddingError(classifyEmbeddingError(lastErr))
+
+	// Sanitize the error before returning
+	return nil, "", SanitizeError(lastErr, p.apiKey)
+}
+
+// classifyEmbeddingError maps a provider error to a coarse-grained tag used
+// by metrics. Unknown errors fall back to "error" so the recorder always
+// sees a bounded label set — important for Prometheus cardinality.
+func classifyEmbeddingError(err error) string {
+	if err == nil {
+		return "ok"
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "timeout"
+	}
+	var timeoutErr *TimeoutError
+	if errors.As(err, &timeoutErr) {
+		return "timeout"
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return "timeout"
+	}
+	var rateErr *RateLimitError
+	if errors.As(err, &rateErr) {
+		return "rate_limited"
+	}
+	var httpErr *ProviderHTTPError
+	if errors.As(err, &httpErr) {
+		if httpErr.Status == 429 {
+			return "rate_limited"
+		}
+	}
+	return "error"
+}
+
+// ModelName returns the configured model identifier.
+func (p *RetryEmbeddingProvider) ModelName() string {
+	return p.inner.ModelName()
+}
+
+// Dimensions returns the configured vector length.
+func (p *RetryEmbeddingProvider) Dimensions() int {
+	return p.inner.Dimensions()
+}
+
+// IsAvailable returns true when the provider is configured to serve requests.
+func (p *RetryEmbeddingProvider) IsAvailable() bool {
+	return p.inner.IsAvailable()
+}
+
+// shouldRetry determines if an error should trigger a retry.
+// Retries are allowed for:
+// - HTTP 429 (rate limit)
+// - HTTP 5xx (server errors)
+// - Network timeout errors
+// - Context deadline exceeded
+// No retries for 4xx except 429.
+func (p *RetryEmbeddingProvider) shouldRetry(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	// Check for ProviderHTTPError
+	var httpErr *ProviderHTTPError
+	if errors.As(err, &httpErr) {
+		// Retry on 429 (rate limit) or 5xx (server errors)
+		if httpErr.Status == 429 || httpErr.Status >= 500 {
+			return true
+		}
+		// No retry on 4xx except 429
+		if httpErr.Status >= 400 && httpErr.Status < 500 {
+			return false
+		}
+	}
+
+	// Check for context deadline exceeded
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+
+	// Check for network timeout errors
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return true
+	}
+
+	// Check for wrapped timeout errors
+	var timeoutErr *TimeoutError
+	if errors.As(err, &timeoutErr) {
+		return true
+	}
+
+	// Check for wrapped rate limit errors
+	var rateLimitErr *RateLimitError
+	if errors.As(err, &rateLimitErr) {
+		return true
+	}
+
+	return false
+}
+
+// calculateDelay computes the backoff delay for the given attempt.
+// Uses exponential backoff with jitter: delay = min(baseDelay * 2^attempt, maxDelay) + jitter
+func (p *RetryEmbeddingProvider) calculateDelay(attempt int) time.Duration {
+	// Exponential backoff: baseDelay * 2^attempt
+	delay := p.baseDelay
+	for i := 0; i < attempt; i++ {
+		delay *= 2
+		if delay > p.maxDelay {
+			delay = p.maxDelay
+			break
+		}
+	}
+
+	// Add jitter: 0-100ms
+	jitter := time.Duration(rand.Intn(100)) * time.Millisecond
+	delay += jitter
+
+	// Cap at maxDelay
+	if delay > p.maxDelay {
+		delay = p.maxDelay
+	}
+
+	return delay
+}

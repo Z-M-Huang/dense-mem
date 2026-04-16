@@ -29,6 +29,11 @@ func clearEnv() {
 		"ADMIN_QUERY_TIMEOUT_SECONDS",
 		"ADMIN_QUERY_ROW_CAP",
 		"EMBEDDING_DIMENSIONS",
+		"AI_API_URL",
+		"AI_API_KEY",
+		"AI_API_EMBEDDING_MODEL",
+		"AI_API_EMBEDDING_DIMENSIONS",
+		"AI_API_EMBEDDING_TIMEOUT_SECONDS",
 	}
 	for _, v := range envVars {
 		os.Unsetenv(v)
@@ -349,6 +354,12 @@ func TestConfigProviderInterface(t *testing.T) {
 	_ = provider.GetAdminQueryTimeoutSeconds()
 	_ = provider.GetAdminQueryRowCap()
 	_ = provider.GetEmbeddingDimensions()
+	_ = provider.GetAIAPIURL()
+	_ = provider.GetAIAPIKey()
+	_ = provider.GetAIEmbeddingModel()
+	_ = provider.GetAIEmbeddingDimensions()
+	_ = provider.GetAIEmbeddingTimeoutSeconds()
+	_ = provider.IsEmbeddingConfigured()
 }
 
 func TestValidationError_Error(t *testing.T) {
@@ -390,5 +401,77 @@ func TestLoad_WithRedis_Succeeds(t *testing.T) {
 	}
 	if cfg.RedisAddr != "localhost:6379" {
 		t.Errorf("RedisAddr = %q, want %q", cfg.RedisAddr, "localhost:6379")
+	}
+}
+
+func TestLoad_EmbeddingConfig_AllOrNothing(t *testing.T) {
+	clearEnv()
+	os.Setenv("POSTGRES_DSN", "postgres://user:pass@localhost/db?sslmode=disable")
+	os.Setenv("NEO4J_URI", "bolt://localhost:7687")
+	os.Setenv("NEO4J_USER", "neo4j")
+	os.Setenv("NEO4J_PASSWORD", "password")
+	os.Setenv("AI_API_URL", "https://example.com/v1")
+	// Missing AI_API_KEY intentionally
+	os.Setenv("AI_API_EMBEDDING_MODEL", "text-embedding-3-small")
+	os.Setenv("AI_API_EMBEDDING_DIMENSIONS", "1536")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("Load() expected error for partial embedding config, got nil")
+	}
+
+	validationErr, ok := err.(*ValidationError)
+	if !ok {
+		t.Fatalf("expected *ValidationError, got %T", err)
+	}
+	if validationErr.Field != "AI_API_KEY" {
+		t.Errorf("ValidationError.Field = %q, want %q", validationErr.Field, "AI_API_KEY")
+	}
+}
+
+func TestLoad_EmbeddingConfig_Complete(t *testing.T) {
+	clearEnv()
+	os.Setenv("POSTGRES_DSN", "postgres://user:pass@localhost/db?sslmode=disable")
+	os.Setenv("NEO4J_URI", "bolt://localhost:7687")
+	os.Setenv("NEO4J_USER", "neo4j")
+	os.Setenv("NEO4J_PASSWORD", "password")
+	os.Setenv("AI_API_URL", "https://example.com/v1")
+	os.Setenv("AI_API_KEY", "sk-test")
+	os.Setenv("AI_API_EMBEDDING_MODEL", "text-embedding-3-small")
+	os.Setenv("AI_API_EMBEDDING_DIMENSIONS", "1536")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() returned unexpected error: %v", err)
+	}
+	if !cfg.IsEmbeddingConfigured() {
+		t.Error("IsEmbeddingConfigured() = false, want true")
+	}
+	if cfg.GetAIEmbeddingDimensions() != 1536 {
+		t.Errorf("GetAIEmbeddingDimensions() = %d, want %d", cfg.GetAIEmbeddingDimensions(), 1536)
+	}
+	if cfg.GetAIEmbeddingTimeoutSeconds() != 30 {
+		t.Errorf("GetAIEmbeddingTimeoutSeconds() = %d, want %d", cfg.GetAIEmbeddingTimeoutSeconds(), 30)
+	}
+}
+
+func TestLoad_EmbeddingConfig_NoneSet(t *testing.T) {
+	clearEnv()
+	os.Setenv("POSTGRES_DSN", "postgres://user:pass@localhost/db?sslmode=disable")
+	os.Setenv("NEO4J_URI", "bolt://localhost:7687")
+	os.Setenv("NEO4J_USER", "neo4j")
+	os.Setenv("NEO4J_PASSWORD", "password")
+	// No AI embedding vars set
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() returned unexpected error: %v", err)
+	}
+	if cfg.IsEmbeddingConfigured() {
+		t.Error("IsEmbeddingConfigured() = true, want false")
+	}
+	// Default timeout should still be applied
+	if cfg.GetAIEmbeddingTimeoutSeconds() != 30 {
+		t.Errorf("GetAIEmbeddingTimeoutSeconds() = %d, want %d", cfg.GetAIEmbeddingTimeoutSeconds(), 30)
 	}
 }

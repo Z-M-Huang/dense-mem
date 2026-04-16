@@ -1,0 +1,49 @@
+package handler
+
+import (
+	"net/http"
+
+	"github.com/labstack/echo/v4"
+
+	"github.com/dense-mem/dense-mem/internal/http/dto"
+	"github.com/dense-mem/dense-mem/internal/tools/registry"
+)
+
+// ToolCatalogHandler serves GET /api/v1/tools.
+//
+// The handler maps each registered Tool into a public ToolCatalogEntry DTO.
+// Only name, description, schemas, required scopes, and availability travel
+// over the wire — the bound invoker function and any internal Go types stay
+// on the server side (AC-32: no internal type leakage).
+type ToolCatalogHandler struct {
+	reg registry.Registry
+}
+
+// ToolCatalogHandlerInterface is the companion interface for ToolCatalogHandler.
+type ToolCatalogHandlerInterface interface {
+	Handle(c echo.Context) error
+}
+
+var _ ToolCatalogHandlerInterface = (*ToolCatalogHandler)(nil)
+
+// NewToolCatalogHandler constructs a ToolCatalogHandler over the given registry.
+func NewToolCatalogHandler(reg registry.Registry) *ToolCatalogHandler {
+	return &ToolCatalogHandler{reg: reg}
+}
+
+// Handle returns the full catalog of registered tools.
+func (h *ToolCatalogHandler) Handle(c echo.Context) error {
+	tools := h.reg.List()
+	entries := make([]dto.ToolCatalogEntry, 0, len(tools))
+	for _, t := range tools {
+		entries = append(entries, dto.ToolCatalogEntry{
+			Name:           t.Name,
+			Description:    t.Description,
+			InputSchema:    t.InputSchema,
+			OutputSchema:   t.OutputSchema,
+			RequiredScopes: t.RequiredScopes,
+			Available:      t.Available,
+		})
+	}
+	return c.JSON(http.StatusOK, dto.ToolCatalogResponse{Tools: entries})
+}

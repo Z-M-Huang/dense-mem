@@ -5,7 +5,9 @@ import (
 
 	"github.com/labstack/echo/v4"
 
+	dto "github.com/dense-mem/dense-mem/internal/http/dto"
 	"github.com/dense-mem/dense-mem/internal/http/middleware"
+	"github.com/dense-mem/dense-mem/internal/http/validation"
 	"github.com/dense-mem/dense-mem/internal/httperr"
 	"github.com/dense-mem/dense-mem/internal/tools/keywordsearch"
 )
@@ -39,14 +41,25 @@ func (h *KeywordSearchHandler) Handle(c echo.Context) error {
 		return httperr.New(httperr.PROFILE_ID_REQUIRED, "profile ID is required")
 	}
 
-	// Bind request body
-	var req keywordsearch.KeywordSearchRequest
+	// Bind request body to DTO
+	var req dto.KeywordSearchRequest
 	if err := c.Bind(&req); err != nil {
 		return httperr.New(httperr.VALIDATION_ERROR, "malformed JSON body")
 	}
 
+	// Validate DTO
+	if err := validation.ValidateStruct(&req); err != nil {
+		return httperr.New(httperr.VALIDATION_ERROR, err.Error())
+	}
+
+	// Convert DTO to service request
+	svcReq := &keywordsearch.KeywordSearchRequest{
+		Query: req.Keywords,
+		Limit: req.Limit,
+	}
+
 	// Execute search
-	result, err := h.svc.Search(ctx, profileID.String(), &req)
+	result, err := h.svc.Search(ctx, profileID.String(), svcReq)
 	if err != nil {
 		return handleKeywordSearchError(err)
 	}

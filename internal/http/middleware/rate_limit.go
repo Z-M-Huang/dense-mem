@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/labstack/echo/v4"
@@ -15,7 +16,10 @@ import (
 
 // RateLimitMiddleware creates a rate limiting middleware using the fixed-window algorithm.
 // It reads the Principal from context to determine the profile and role for tier selection.
-// Admin roles use AdminRateLimitPerMinute, standard profiles use RateLimitPerMinute.
+// Admin roles use AdminRateLimitPerMinute. Fragment writes (POST/DELETE) use
+// FragmentCreateRateLimit and fragment reads (GET) use FragmentReadRateLimit —
+// writes are stricter because they trigger an embedding call plus graph write.
+// All other standard profile traffic falls back to RateLimitPerMinute.
 func RateLimitMiddleware(svc service.RateLimitServiceInterface, cfg config.ConfigProvider, auditSvc service.AuditService) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
@@ -39,13 +43,10 @@ func RateLimitMiddleware(svc service.RateLimitServiceInterface, cfg config.Confi
 			// Get route path for stable bucket
 			routePath := c.Path()
 
-			// Select limit tier based on role
-			var limit int
-			if principal.Role == "admin" {
-				limit = cfg.GetAdminRateLimitPerMinute()
-			} else {
-				limit = cfg.GetRateLimitPerMinute()
-			}
+			// Select limit tier. Admin overrides everything; otherwise
+			// fragment routes get their write/read tier and everything else
+			// falls back to the standard per-profile tier.
+			limit := selectRateLimit(cfg, principal.Role, c.Request().Method, routePath)
 
 			// Perform rate limit check
 			ctx := c.Request().Context()
@@ -107,4 +108,32 @@ func logRateLimit(c echo.Context, auditSvc service.AuditService, profileID, rout
 	}
 
 	_ = auditSvc.RateLimited(ctx, profileIDPtr, "request", metadata, clientIP, correlationID)
+}
+
+// selectRateLimit resolves the rate-limit tier for a single request.
+// Admin callers always use the admin tier. Standard callers hit the fragment
+// write tier for POST/DELETE on /fragments, the fragment read tier for GET
+// on /fragments, and the default standard tier for everything else.
+func selectRateLimit(cfg config.ConfigProvider, role, method, routePath string) int {
+	if role == "admin" {
+		return cfg.GetAdminRateLimitPerMinute()
+	}
+
+	if isFragmentRoute(routePath) {
+		switch method {
+		case "POST", "DELETE":
+			return cfg.GetFragmentCreateRateLimit()
+		case "GET":
+			return cfg.GetFragmentReadRateLimit()
+		}
+	}
+
+	return cfg.GetRateLimitPerMinute()
+}
+
+// isFragmentRoute matches any /fragments or /fragments/:id route regardless
+// of the surrounding profile path. Echo route paths include the literal
+// ":param" markers so a simple substring check is reliable.
+func isFragmentRoute(routePath string) bool {
+	return strings.Contains(routePath, "/fragments")
 }

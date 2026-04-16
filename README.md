@@ -156,6 +156,66 @@ flowchart LR
 | Rate Limits + SSE | `github.com/redis/go-redis/v9` (optional for single-node, required for multi-instance) |
 | Migrations | `github.com/pressly/goose/v3` |
 
+## Data Egress
+
+When `AI_API_URL`, `AI_API_KEY`, and `AI_API_EMBEDDING_MODEL` are configured, fragment
+content posted to `/api/v1/profiles/:id/fragments` and recall queries posted to
+`/api/v1/tools/recall` are sent to the configured embedding provider for vectorization.
+The provider sees raw text. Operators must review their provider's data-handling terms
+before enabling embedding. Self-hosted providers (Ollama, LM Studio, vLLM) keep data
+in-process; SaaS providers (OpenAI, Azure) do not.
+
+`AI_API_KEY` is never logged. The key is redacted from error messages before propagation.
+The `embedding/sanitize.go` layer strips provider-specific URLs and tokens from outbound
+errors so callers cannot leverage dense-mem as an oracle for provider credentials.
+
+## Embedding Model Consistency
+
+The first successful fragment write records the active embedding model and vector
+dimensions in the `embedding_config` Postgres table. On subsequent boots dense-mem
+compares the configured `AI_API_EMBEDDING_MODEL` + `AI_API_EMBEDDING_DIMENSIONS` to
+the stored record. A mismatch fails startup with an actionable error.
+
+To rotate the embedding model safely:
+
+1. Plan a re-embedding of all existing fragments (future tooling).
+2. Truncate the `embedding_config` table or delete the stored row.
+3. Redeploy with the new `AI_API_EMBEDDING_MODEL` / `_DIMENSIONS` values.
+4. The next successful write seeds the table with the new configuration.
+
+Changing the model without re-embedding corrupts recall quality because the vector
+space is no longer comparable. The consistency check exists to prevent this silently.
+
+## Tool Discoverability
+
+Dense-mem exposes three discoverability surfaces, all sourced from a single internal
+tool registry so the catalog stays consistent across transports:
+
+| Surface | Path | Audience |
+|---------|------|----------|
+| JSON catalog | `GET /api/v1/tools` | Runtime agent discovery (filtered by caller scopes + config) |
+| AI-safe OpenAPI spec | `GET /openapi.json` | AI clients, code generators, traditional consumers |
+| Full OpenAPI spec | `GET /admin/openapi.json` | Operators, admin tooling, documentation portals |
+| MCP stdio server | `./bin/dense-mem-mcp` | Claude Desktop, Claude Code, OpenClaw |
+
+The MCP binary reads `DENSE_MEM_URL`, `DENSE_MEM_API_KEY`, and `DENSE_MEM_PROFILE_ID`
+from the environment and proxies tool calls to the HTTP API. Each MCP instance is
+pinned to exactly one profile — run multiple instances for multiple profiles.
+
+## Observability
+
+Metrics are emitted for the discoverability surface:
+
+| Metric | Type | Labels |
+|--------|------|--------|
+| Embedding latency | histogram | `outcome=ok\|timeout\|rate_limited\|error` |
+| Embedding errors | counter | `code=timeout\|rate_limited\|error` |
+| Recall latency | histogram | — |
+| Fragment create | counter | `outcome=created\|duplicate\|error` |
+
+`X-Correlation-ID` is threaded through every new handler and appears in structured
+logs and audit payloads for end-to-end request tracing.
+
 ## Development
 
 See [CLAUDE.md](CLAUDE.md) for coding standards.

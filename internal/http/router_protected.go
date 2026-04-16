@@ -228,6 +228,27 @@ func RegisterProtectedRoutesWithHandlers(e *echo.Echo, deps ProtectedDeps, handl
 
 	adminDeleteGroup.DELETE("", profileHandler.Delete)
 
+	// Fragment routes — canonical /api/v1/fragments (AC-50)
+	// Middleware: auth -> profile resolution(header) -> profile authorization -> rate limit
+	fragmentGroup := e.Group("/api/v1/fragments")
+	fragmentGroup.Use(middleware.AuthMiddleware(deps.APIKeyRepo, deps.AuditService))
+	fragmentGroup.Use(middleware.ProfileResolutionMiddleware(deps.ProfileService))
+	fragmentGroup.Use(middleware.AuthorizeProfile(profileAuthzSvc))
+	fragmentGroup.Use(middleware.RateLimitMiddleware(deps.RateLimitService, deps.Config, deps.AuditService))
+
+	if handlers.FragmentCreate != nil {
+		fragmentGroup.POST("", handlers.FragmentCreate, middleware.RequireScopes("write"))
+	}
+	if handlers.FragmentRead != nil {
+		fragmentGroup.GET("/:id", handlers.FragmentRead, middleware.RequireScopes("read"))
+	}
+	if handlers.FragmentList != nil {
+		fragmentGroup.GET("", handlers.FragmentList, middleware.RequireScopes("read"))
+	}
+	if handlers.FragmentDelete != nil {
+		fragmentGroup.DELETE("/:id", handlers.FragmentDelete, middleware.RequireScopes("write"))
+	}
+
 	// Tool routes
 	toolGroup := e.Group("/api/v1/tools")
 	toolGroup.Use(middleware.AuthMiddleware(deps.APIKeyRepo, deps.AuditService))
@@ -235,6 +256,9 @@ func RegisterProtectedRoutesWithHandlers(e *echo.Echo, deps ProtectedDeps, handl
 	toolGroup.Use(middleware.AuthorizeProfile(profileAuthzSvc))
 	toolGroup.Use(middleware.RateLimitMiddleware(deps.RateLimitService, deps.Config, deps.AuditService))
 
+	if handlers.ToolCatalog != nil {
+		toolGroup.GET("", handlers.ToolCatalog, middleware.RequireScopes("read"))
+	}
 	if handlers.GetTool != nil {
 		toolGroup.GET("/:id", handlers.GetTool, middleware.RequireScopes("read"))
 	}
@@ -262,6 +286,16 @@ func RegisterProtectedRoutesWithHandlers(e *echo.Echo, deps ProtectedDeps, handl
 	adminGroup.GET("/test", func(c echo.Context) error {
 		return response.SuccessOK(c, map[string]string{"status": "admin_test"})
 	})
+
+	// OpenAPI — AI-safe variant is served under the protected prefix (any
+	// authenticated caller can discover the public surface). The full admin
+	// variant lives under the admin group.
+	if handlers.OpenAPIAISafe != nil {
+		e.GET("/api/v1/openapi.json", handlers.OpenAPIAISafe, middleware.AuthMiddleware(deps.APIKeyRepo, deps.AuditService))
+	}
+	if handlers.OpenAPIFull != nil {
+		adminGroup.GET("/openapi.json", handlers.OpenAPIFull)
+	}
 
 	if handlers.GetStats != nil {
 		adminGroup.GET("/stats", handlers.GetStats)
@@ -295,5 +329,12 @@ type ProtectedHandlers struct {
 	QueryStream     echo.HandlerFunc
 	AdminGraphQuery echo.HandlerFunc
 	InvariantScan   echo.HandlerFunc
+	FragmentCreate  echo.HandlerFunc
+	FragmentRead    echo.HandlerFunc
+	FragmentList    echo.HandlerFunc
+	FragmentDelete  echo.HandlerFunc
+	ToolCatalog     echo.HandlerFunc
+	OpenAPIAISafe   echo.HandlerFunc
+	OpenAPIFull     echo.HandlerFunc
 	APIKeySvc       handler.APIKeyServiceInterface // Service for API key routes
 }

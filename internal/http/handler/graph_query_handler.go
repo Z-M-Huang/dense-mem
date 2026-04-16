@@ -3,20 +3,16 @@ package handler
 import (
 	"context"
 	"net/http"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 
+	"github.com/dense-mem/dense-mem/internal/http/dto"
 	"github.com/dense-mem/dense-mem/internal/http/middleware"
 	"github.com/dense-mem/dense-mem/internal/httperr"
 	"github.com/dense-mem/dense-mem/internal/tools/graphquery"
 )
-
-// GraphQueryRequest represents the request body for graph-query.
-type GraphQueryRequest struct {
-	Query  string         `json:"query" validate:"required"`
-	Params map[string]any `json:"params,omitempty"`
-}
 
 // GraphQueryResponse represents the response for graph-query.
 type GraphQueryResponse struct {
@@ -71,7 +67,7 @@ func (h *GraphQueryHandler) Handle(c echo.Context) error {
 	}
 
 	// Bind request body
-	var req GraphQueryRequest
+	var req dto.GraphQueryRequest
 	if err := c.Bind(&req); err != nil {
 		return httperr.New(httperr.VALIDATION_ERROR, "malformed JSON body")
 	}
@@ -81,8 +77,15 @@ func (h *GraphQueryHandler) Handle(c echo.Context) error {
 		return httperr.New(httperr.VALIDATION_ERROR, "query is required")
 	}
 
+	// Apply timeout if specified
+	if req.TimeoutSeconds > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, time.Duration(req.TimeoutSeconds)*time.Second)
+		defer cancel()
+	}
+
 	// Execute query
-	result, err := h.svc.Execute(ctx, profileID.String(), req.Query, req.Params)
+	result, err := h.svc.Execute(ctx, profileID.String(), req.Query, req.Parameters)
 	if err != nil {
 		return handleGraphQueryError(err)
 	}

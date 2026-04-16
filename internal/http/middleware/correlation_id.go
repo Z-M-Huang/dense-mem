@@ -5,13 +5,12 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
+
+	"github.com/dense-mem/dense-mem/internal/correlation"
 )
 
 // CorrelationIDHeader is the HTTP header for correlation IDs.
 const CorrelationIDHeader = "X-Correlation-ID"
-
-// CorrelationIDContextKey is the context key for correlation IDs.
-type CorrelationIDContextKey struct{}
 
 // CorrelationIDMiddleware reads or generates a correlation ID for each request.
 // It reads X-Correlation-ID from the request header if present,
@@ -20,20 +19,15 @@ type CorrelationIDContextKey struct{}
 func CorrelationIDMiddleware() echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
-			// Try to read existing correlation ID from header
-			correlationID := c.Request().Header.Get(CorrelationIDHeader)
-
-			// If not present, generate a new UUID
-			if correlationID == "" {
-				correlationID = uuid.New().String()
+			id := c.Request().Header.Get(CorrelationIDHeader)
+			if id == "" {
+				id = uuid.New().String()
 			}
 
-			// Store in context
-			ctx := context.WithValue(c.Request().Context(), CorrelationIDContextKey{}, correlationID)
+			ctx := correlation.WithID(c.Request().Context(), id)
 			c.SetRequest(c.Request().WithContext(ctx))
 
-			// Echo back in response header
-			c.Response().Header().Set(CorrelationIDHeader, correlationID)
+			c.Response().Header().Set(CorrelationIDHeader, id)
 
 			return next(c)
 		}
@@ -41,10 +35,7 @@ func CorrelationIDMiddleware() echo.MiddlewareFunc {
 }
 
 // GetCorrelationID retrieves the correlation ID from the context.
-// Returns empty string if not found.
+// Returns empty string if not found. Provided for the existing handler call sites.
 func GetCorrelationID(ctx context.Context) string {
-	if id, ok := ctx.Value(CorrelationIDContextKey{}).(string); ok {
-		return id
-	}
-	return ""
+	return correlation.FromContext(ctx)
 }

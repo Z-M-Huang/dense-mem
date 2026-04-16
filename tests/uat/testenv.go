@@ -23,14 +23,54 @@ import (
 	"github.com/dense-mem/dense-mem/internal/crypto"
 	"github.com/dense-mem/dense-mem/internal/domain"
 	httpserver "github.com/dense-mem/dense-mem/internal/http"
+	"github.com/dense-mem/dense-mem/internal/http/handler"
 	"github.com/dense-mem/dense-mem/internal/observability"
+	"github.com/dense-mem/dense-mem/internal/openapi"
 	"github.com/dense-mem/dense-mem/internal/repository"
 	"github.com/dense-mem/dense-mem/internal/service"
+	"github.com/dense-mem/dense-mem/internal/service/fragmentservice"
 	pgclient "github.com/dense-mem/dense-mem/internal/storage/postgres"
 	redisclient "github.com/dense-mem/dense-mem/internal/storage/redis"
 	neo4jstorage "github.com/dense-mem/dense-mem/internal/storage/neo4j"
 	"github.com/dense-mem/dense-mem/internal/storage/inmem"
+	"github.com/dense-mem/dense-mem/internal/tools/registry"
 )
+
+// scopedReaderAdapter bridges neo4jstorage.ScopedReader to the fragment
+// services' local ScopedReader interface (which returns `any` to avoid
+// an import cycle).
+type scopedReaderAdapter struct {
+	inner neo4jstorage.ScopedReader
+}
+
+func (a *scopedReaderAdapter) ScopedRead(ctx context.Context, profileID string, query string, params map[string]any) (any, []map[string]any, error) {
+	summary, rows, err := a.inner.ScopedRead(ctx, profileID, query, params)
+	return summary, rows, err
+}
+
+// fragmentAuditAdapter bridges fragmentservice.AuditLogEntry to the canonical
+// service.AuditLogEntry. The fragmentservice version is a structural duplicate
+// restated to avoid an import cycle; this adapter copies fields across.
+type fragmentAuditAdapter struct {
+	inner service.AuditService
+}
+
+func (a *fragmentAuditAdapter) Append(ctx context.Context, entry fragmentservice.AuditLogEntry) error {
+	return a.inner.Append(ctx, service.AuditLogEntry{
+		ID:            entry.ID,
+		ProfileID:     entry.ProfileID,
+		Timestamp:     entry.Timestamp,
+		Operation:     entry.Operation,
+		EntityType:    entry.EntityType,
+		EntityID:      entry.EntityID,
+		AfterPayload:  entry.AfterPayload,
+		ActorKeyID:    entry.ActorKeyID,
+		ActorRole:     entry.ActorRole,
+		ClientIP:      entry.ClientIP,
+		CorrelationID: entry.CorrelationID,
+		Metadata:      entry.Metadata,
+	})
+}
 
 // TestEnvOptions configures how the test environment is set up.
 type TestEnvOptions struct {
@@ -185,6 +225,14 @@ func (te *TestEnv) Setup(ctx context.Context) error {
 		return fmt.Errorf("failed to create neo4j client: %w", err)
 	}
 
+	// Bootstrap Neo4j schema (constraints, indexes, vector index).
+	// UAT uses the legacy EmbeddingDimensions (1536) since AI provider is unconfigured.
+	bootstrapLogger := observability.New(slog.LevelInfo)
+	schemaBootstrapper := neo4jstorage.NewSchemaBootstrapper(te.neo4jClient, 1536, bootstrapLogger)
+	if err := schemaBootstrapper.EnsureSchema(ctx); err != nil {
+		return fmt.Errorf("failed to bootstrap neo4j schema: %w", err)
+	}
+
 	if !te.noRedisMode {
 		// Start Redis container
 		redisCont, err := rediscontainer.Run(ctx, "redis:7-alpine")
@@ -329,9 +377,47 @@ func (te *TestEnv) Setup(ctx context.Context) error {
 		Logger:           logger,
 	}
 
+	// ========================================
+	// Discoverability wiring: fragments, registry, OpenAPI, catalog
+	// ========================================
+	// Embedding is unconfigured in UAT (IsEmbeddingConfigured() == false), so the
+	// create and recall services remain nil. The registry correctly surfaces
+	// save_memory / recall_memory as Available=false. Read/list/delete work.
+	profileScopeEnforcer := neo4jstorage.NewProfileScopeEnforcer(te.neo4jClient)
+	readerAdapter := &scopedReaderAdapter{inner: profileScopeEnforcer}
+	fragmentAuditor := &fragmentAuditAdapter{inner: te.auditService}
+
+	fragmentGetSvc := fragmentservice.NewGetFragmentService(readerAdapter)
+	fragmentListSvc := fragmentservice.NewListFragmentsService(readerAdapter)
+	fragmentDeleteSvc := fragmentservice.NewDeleteFragmentService(profileScopeEnforcer, readerAdapter, fragmentAuditor, slog.Default())
+
+	toolRegistry, err := registry.BuildDefault(registry.Dependencies{
+		FragmentGet:         fragmentGetSvc,
+		FragmentList:        fragmentListSvc,
+		EmbeddingConfigured: false,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to build tool registry: %w", err)
+	}
+
+	openAPIGen := openapi.New(toolRegistry, openapi.DefaultRoutes())
+
+	fragmentReadHandler := handler.NewFragmentReadHandler(fragmentGetSvc)
+	fragmentListHandler := handler.NewFragmentListHandler(fragmentListSvc)
+	fragmentDeleteHandler := handler.NewFragmentDeleteHandler(fragmentDeleteSvc)
+	toolCatalogHandler := handler.NewToolCatalogHandler(toolRegistry)
+	openAPIAISafeHandler := handler.NewOpenAPIHandler(openAPIGen, openapi.SpecVariantAISafe)
+	openAPIFullHandler := handler.NewOpenAPIHandler(openAPIGen, openapi.SpecVariantFull)
+
 	handlers := httpserver.ProtectedHandlers{
-			APIKeySvc: te.apiKeySvc,
-		}
+		APIKeySvc:      te.apiKeySvc,
+		FragmentRead:   fragmentReadHandler.Handle,
+		FragmentList:   fragmentListHandler.Handle,
+		FragmentDelete: fragmentDeleteHandler.Handle,
+		ToolCatalog:    toolCatalogHandler.Handle,
+		OpenAPIAISafe:  openAPIAISafeHandler.Handle,
+		OpenAPIFull:    openAPIFullHandler.Handle,
+	}
 
 	httpserver.RegisterProtectedRoutesWithHandlers(te.server, deps, handlers)
 
@@ -478,6 +564,8 @@ func (te *TestEnv) buildConfig() *testConfig {
 		redisDB:                  0,
 		rateLimitPerMinute:       rateLimit,
 		adminRateLimitPerMinute:  adminRateLimit,
+		fragmentCreateRateLimit:  60,
+		fragmentReadRateLimit:    300,
 		argonMemoryKB:            65536,
 		argonTime:                1,
 		argonThreads:             4,
@@ -487,6 +575,7 @@ func (te *TestEnv) buildConfig() *testConfig {
 		adminQueryTimeoutSeconds: 30,
 		adminQueryRowCap:         1000,
 		embeddingDimensions:      1536,
+		aiEmbeddingTimeoutSecs:   30,
 	}
 }
 
@@ -499,26 +588,29 @@ func (te *TestEnv) buildConfigConcrete() config.Config {
 		adminRateLimit = te.rateLimitPerMinute
 	}
 	return config.Config{
-		HTTPAddr:                 ":0",
-		PostgresDSN:              te.postgresDSN,
-		Neo4jURI:                 te.neo4jURI,
-		Neo4jUser:                te.neo4jUser,
-		Neo4jPassword:            te.neo4jPassword,
-		Neo4jDatabase:            "neo4j",
-		RedisAddr:                te.redisAddr,
-		RedisPassword:            "",
-		RedisDB:                  0,
-		RateLimitPerMinute:       rateLimit,
-		AdminRateLimitPerMinute:  adminRateLimit,
-		ArgonMemoryKB:            65536,
-		ArgonTime:                1,
-		ArgonThreads:             4,
-		SSEHeartbeatSeconds:      30,
-		SSEMaxDurationSeconds:    300,
-		SSEMaxConcurrentStreams:  10,
-		AdminQueryTimeoutSeconds: 30,
-		AdminQueryRowCap:         1000,
-		EmbeddingDimensions:      1536,
+		HTTPAddr:                  ":0",
+		PostgresDSN:               te.postgresDSN,
+		Neo4jURI:                  te.neo4jURI,
+		Neo4jUser:                 te.neo4jUser,
+		Neo4jPassword:             te.neo4jPassword,
+		Neo4jDatabase:             "neo4j",
+		RedisAddr:                 te.redisAddr,
+		RedisPassword:             "",
+		RedisDB:                   0,
+		RateLimitPerMinute:        rateLimit,
+		AdminRateLimitPerMinute:   adminRateLimit,
+		FragmentCreateRateLimit:   60,
+		FragmentReadRateLimit:     300,
+		ArgonMemoryKB:             65536,
+		ArgonTime:                 1,
+		ArgonThreads:              4,
+		SSEHeartbeatSeconds:       30,
+		SSEMaxDurationSeconds:     300,
+		SSEMaxConcurrentStreams:   10,
+		AdminQueryTimeoutSeconds:  30,
+		AdminQueryRowCap:          1000,
+		EmbeddingDimensions:       1536,
+		AIEmbeddingTimeoutSeconds: 30,
 	}
 }
 
@@ -535,6 +627,8 @@ type testConfig struct {
 	redisDB                  int
 	rateLimitPerMinute       int
 	adminRateLimitPerMinute  int
+	fragmentCreateRateLimit  int
+	fragmentReadRateLimit    int
 	argonMemoryKB            int
 	argonTime                int
 	argonThreads             int
@@ -544,6 +638,11 @@ type testConfig struct {
 	adminQueryTimeoutSeconds int
 	adminQueryRowCap         int
 	embeddingDimensions      int
+	aiAPIURL                 string
+	aiAPIKey                 string
+	aiEmbeddingModel         string
+	aiEmbeddingDimensions    int
+	aiEmbeddingTimeoutSecs   int
 }
 
 func (c *testConfig) GetHTTPAddr() string                 { return c.httpAddr }
@@ -561,9 +660,19 @@ func (c *testConfig) GetArgonTime() int                   { return c.argonTime }
 func (c *testConfig) GetArgonThreads() int                { return c.argonThreads }
 func (c *testConfig) GetRateLimitPerMinute() int          { return c.rateLimitPerMinute }
 func (c *testConfig) GetAdminRateLimitPerMinute() int     { return c.adminRateLimitPerMinute }
+func (c *testConfig) GetFragmentCreateRateLimit() int     { return c.fragmentCreateRateLimit }
+func (c *testConfig) GetFragmentReadRateLimit() int       { return c.fragmentReadRateLimit }
 func (c *testConfig) GetSSEHeartbeatSeconds() int         { return c.sseHeartbeatSeconds }
 func (c *testConfig) GetSSEMaxDurationSeconds() int       { return c.sseMaxDurationSeconds }
 func (c *testConfig) GetSSEMaxConcurrentStreams() int     { return c.sseMaxConcurrentStreams }
 func (c *testConfig) GetAdminQueryTimeoutSeconds() int    { return c.adminQueryTimeoutSeconds }
 func (c *testConfig) GetAdminQueryRowCap() int            { return c.adminQueryRowCap }
 func (c *testConfig) GetEmbeddingDimensions() int         { return c.embeddingDimensions }
+func (c *testConfig) GetAIAPIURL() string                 { return c.aiAPIURL }
+func (c *testConfig) GetAIAPIKey() string                 { return c.aiAPIKey }
+func (c *testConfig) GetAIEmbeddingModel() string         { return c.aiEmbeddingModel }
+func (c *testConfig) GetAIEmbeddingDimensions() int       { return c.aiEmbeddingDimensions }
+func (c *testConfig) GetAIEmbeddingTimeoutSeconds() int   { return c.aiEmbeddingTimeoutSecs }
+func (c *testConfig) IsEmbeddingConfigured() bool {
+	return c.aiAPIURL != "" && c.aiAPIKey != "" && c.aiEmbeddingModel != "" && c.aiEmbeddingDimensions > 0
+}

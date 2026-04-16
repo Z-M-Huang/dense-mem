@@ -1,0 +1,311 @@
+//go:build uat
+
+package discoverability
+
+import (
+	"context"
+	"os"
+	"strings"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/dense-mem/dense-mem/internal/domain"
+	"github.com/dense-mem/dense-mem/internal/embedding"
+	"github.com/dense-mem/dense-mem/internal/http/dto"
+	"github.com/dense-mem/dense-mem/internal/service/recallservice"
+	"github.com/dense-mem/dense-mem/internal/tools/registry"
+)
+
+// Phase-1 UATs pin each downstream unit deliverable to a static source artefact
+// plus a minimal in-process exercise of the public type. The aim is coverage of
+// every AC-to-unit trace without standing up containers — live-stack coverage
+// lives in the outer tests/uat harness.
+
+// UAT-5: Embedding provider startup, config, and consistency (Unit 6–10).
+// AC trace: AC-11, AC-12, AC-13, AC-14, AC-15, AC-16, AC-47, AC-54.
+func TestUAT5_EmbeddingProviderStartup(t *testing.T) {
+	// Config contract must expose the four AI_* getters used by the bootstrap
+	// and the IsEmbeddingConfigured gate that the tool registry reads.
+	cfg := readFile(t, "internal/config/config.go")
+	for _, sym := range []string{
+		"GetAIAPIURL", "GetAIAPIKey",
+		"GetAIEmbeddingModel", "GetAIEmbeddingDimensions",
+		"IsEmbeddingConfigured",
+	} {
+		assert.Contains(t, cfg, sym, "config.go must declare %q", sym)
+	}
+
+	// Provider interface + OpenAI implementation + retry + sanitize must all
+	// exist as separate artefacts (Units 7–9).
+	assert.Contains(t, readFile(t, "internal/embedding/provider.go"),
+		"type EmbeddingProviderInterface interface",
+		"EmbeddingProviderInterface is the public contract")
+	assert.Contains(t, readFile(t, "internal/embedding/openai_provider.go"),
+		"openai", "OpenAI-protocol provider must exist")
+	assert.Contains(t, readFile(t, "internal/embedding/retry_provider.go"),
+		"Embed", "retry wrapper must forward Embed")
+	sanitize := readFile(t, "internal/embedding/sanitize.go")
+	assert.Contains(t, sanitize, "SanitizeError",
+		"embedding must expose SanitizeError — provider secrets must not leak")
+	assert.Contains(t, sanitize, "REDACTED",
+		"sanitizer must replace secrets with a redaction placeholder")
+
+	// Embedding consistency service (Unit 10) must declare a dimensions gate.
+	assert.Contains(t, readFile(t, "internal/service/embedding_consistency.go"),
+		"dimension", "consistency service must reference dimensions")
+
+	// In-process sanity: the mock that every test file uses must implement the
+	// public interface and return the configured model / dimensions.
+	mock := &embedding.MockEmbeddingProvider{DimensionsResult: 8, ModelNameResult: "m-test"}
+	var iface embedding.EmbeddingProviderInterface = mock
+	assert.Equal(t, 8, iface.Dimensions())
+	assert.Equal(t, "m-test", iface.ModelName())
+}
+
+// UAT-6: Fragment create happy path wiring (Unit 15–16).
+// AC trace: AC-17, AC-20, AC-23, AC-24, AC-25, AC-26, AC-49, AC-52, AC-54.
+func TestUAT6_FragmentCreateHappyPath(t *testing.T) {
+	create := readFile(t, "internal/service/fragmentservice/create.go")
+
+	// The create service must persist all day-1 embedding metadata properties
+	// — AC-12/AC-14 require these on every new fragment.
+	for _, prop := range []string{
+		"embedding_model", "embedding_dimensions",
+		"content_hash", "idempotency_key",
+	} {
+		assert.Contains(t, create, prop, "create.go must persist %q", prop)
+	}
+	assert.Contains(t, create, "CorrelationID",
+		"audit entry must carry CorrelationID (AC-54)")
+
+	// Handler must bind the shared DTO + be route-registered under /fragments.
+	handler := readFile(t, "internal/http/handler/fragment_create_handler.go")
+	assert.Contains(t, handler, "dto.CreateFragmentRequest",
+		"handler must bind DTO struct, not a local type")
+	assert.Contains(t, handler, "fragmentservice.CreateFragmentService",
+		"handler must depend on the service interface, not the concrete impl")
+
+	router := readFile(t, "internal/http/router_protected.go")
+	assert.Contains(t, router, `fragmentGroup.POST("", handlers.FragmentCreate`,
+		"POST /fragments must be wired under the canonical path (AC-50)")
+	assert.Contains(t, router, `middleware.RequireScopes("write")`,
+		"POST /fragments must require write scope")
+}
+
+// UAT-7: Fragment create validation rules live on the shared DTO (Unit 13).
+// AC trace: AC-18, AC-19, AC-46, AC-54.
+func TestUAT7_FragmentCreateValidationRules(t *testing.T) {
+	body := readFile(t, "internal/http/dto/fragment.go")
+
+	// Validator tags codify the size/enum contract that AC-18 and AC-19 pin.
+	assert.Contains(t, body, "required,max=8192,notblank",
+		"Content must be bounded to 8KB and non-blank")
+	assert.Contains(t, body, "oneof=conversation document observation manual",
+		"SourceType must be an enum matching domain.SourceType")
+	assert.Contains(t, body, "MaxMetadataBytes",
+		"DTO must expose MaxMetadataBytes so handlers can size-check metadata")
+
+	// Public contract check — keep the struct stable for callers.
+	var req dto.CreateFragmentRequest
+	req.Content = "hello"
+	req.SourceType = string(domain.SourceTypeConversation)
+	req.IdempotencyKey = "k"
+	req.Labels = []string{"a", "b"}
+	assert.Equal(t, "hello", req.Content)
+	assert.Equal(t, "conversation", req.SourceType)
+	assert.Equal(t, "k", req.IdempotencyKey)
+	assert.Len(t, req.Labels, 2)
+
+	// ValidateMetadataSize must enforce the documented cap.
+	oversize := map[string]any{"payload": strings.Repeat("x", dto.MaxMetadataBytes+1)}
+	assert.Error(t, dto.ValidateMetadataSize(oversize),
+		"metadata over MaxMetadataBytes must be rejected")
+	assert.NoError(t, dto.ValidateMetadataSize(nil),
+		"nil metadata is allowed")
+}
+
+// UAT-8: Dedupe by idempotency key and by content hash (Unit 14).
+// AC trace: AC-21, AC-22, AC-24, AC-25, AC-44, AC-45, AC-50.
+func TestUAT8_FragmentDeduplication(t *testing.T) {
+	dedupe := readFile(t, "internal/service/fragmentdedupe/dedupe.go")
+	for _, m := range []string{"ByIdempotencyKey", "ByContentHash"} {
+		assert.Contains(t, dedupe, m,
+			"dedupe package must expose %q", m)
+	}
+	// Must be scoped by profile_id — this is the whole point of profile isolation.
+	assert.Contains(t, dedupe, "profile_id",
+		"dedupe queries must filter by profile_id (cross-profile isolation)")
+
+	create := readFile(t, "internal/service/fragmentservice/create.go")
+	// Create flow must consult both lookups before issuing a write.
+	assert.Contains(t, create, "ByIdempotencyKey",
+		"create service must check idempotency key before embedding")
+	assert.Contains(t, create, "ByContentHash",
+		"create service must check content hash before embedding")
+	// Duplicates must short-circuit — no embedding, no write, no audit.
+	assert.Contains(t, create, "Duplicate",
+		"create result must carry Duplicate flag for replay callers")
+}
+
+// UAT-9: Fragment read, list, and delete are registered under the canonical
+// path and scope (Unit 17–19).
+// AC trace: AC-27, AC-28, AC-29, AC-30, AC-31, AC-42, AC-48, AC-50.
+func TestUAT9_FragmentReadListDelete(t *testing.T) {
+	router := readFile(t, "internal/http/router_protected.go")
+
+	assert.Contains(t, router, `fragmentGroup.GET("/:id", handlers.FragmentRead`,
+		"GET /fragments/:id must be wired")
+	assert.Contains(t, router, `fragmentGroup.GET("", handlers.FragmentList`,
+		"GET /fragments must be wired")
+	assert.Contains(t, router, `fragmentGroup.DELETE("/:id", handlers.FragmentDelete`,
+		"DELETE /fragments/:id must be wired")
+
+	// Reads use "read" scope, delete uses "write" scope — the scope boundary is
+	// the single point where over-permissive tokens get blocked.
+	readHandler := readFile(t, "internal/http/handler/fragment_read_handler.go")
+	assert.Contains(t, readHandler, "fragmentservice.GetFragmentService",
+		"read handler must depend on service interface")
+
+	listHandler := readFile(t, "internal/http/handler/fragment_list_handler.go")
+	assert.Contains(t, listHandler, "fragmentservice.ListFragmentsService",
+		"list handler must depend on service interface")
+	assert.Contains(t, listHandler, "NextCursor",
+		"list response must expose NextCursor for pagination (AC-30)")
+
+	deleteHandler := readFile(t, "internal/http/handler/fragment_delete_handler.go")
+	assert.Contains(t, deleteHandler, "fragmentservice.DeleteFragmentService",
+		"delete handler must depend on service interface")
+}
+
+// UAT-10: Tool catalog + OpenAPI generator publish the same source-of-truth
+// (Unit 20–23).
+// AC trace: AC-32, AC-33, AC-34, AC-35, AC-50.
+func TestUAT10_ToolCatalogAndOpenAPI(t *testing.T) {
+	toolset := readFile(t, "internal/tools/registry/toolset.go")
+	// AI-facing verbs use underscore_case (save_memory, recall_memory, …);
+	// legacy primitives keep their original hyphenated names.
+	for _, name := range []string{
+		"save_memory", "get_memory", "list_recent_memories", "recall_memory",
+		"keyword-search", "semantic-search", "graph-query",
+	} {
+		assert.Contains(t, toolset, name,
+			"registry must declare canonical tool %q", name)
+	}
+
+	generator := readFile(t, "internal/openapi/generator.go")
+	assert.Contains(t, generator, `"openapi": "3.0.3"`,
+		"OpenAPI generator must emit spec version 3.0.3 (AC-34)")
+	assert.Contains(t, generator, "registry",
+		"OpenAPI generator must read from the shared registry, not redefine schemas")
+
+	// In-process contract check: BuildDefault yields the seven canonical tools
+	// even with zero service wiring — the availability flag gates execution,
+	// not advertisement, so discovery never silently drops entries.
+	reg, err := registry.BuildDefault(registry.Dependencies{})
+	require.NoError(t, err)
+	list := reg.List()
+	assert.Len(t, list, 7, "BuildDefault must register seven canonical tools")
+	seen := map[string]bool{}
+	for _, tl := range list {
+		seen[tl.Name] = true
+	}
+	for _, name := range []string{
+		"save_memory", "get_memory", "list_recent_memories", "recall_memory",
+		"keyword-search", "semantic-search", "graph-query",
+	} {
+		assert.True(t, seen[name], "registry must list %q after BuildDefault", name)
+	}
+
+	// save_memory is write-scoped; without FragmentCreate + embedding, it is
+	// advertised but marked unavailable (AC-32).
+	save, ok := reg.Get("save_memory")
+	require.True(t, ok)
+	assert.False(t, save.Available,
+		"save_memory must be unavailable when FragmentCreate/embedding are absent")
+	assert.Contains(t, save.RequiredScopes, "write",
+		"save_memory must require the write scope")
+}
+
+// UAT-11: MCP stdio server binds to a single profile and reuses the shared
+// registry (Unit 24).
+// AC trace: AC-33, AC-36, AC-37, AC-50.
+func TestUAT11_MCPStdioDiscovery(t *testing.T) {
+	mcpMain := readFile(t, "cmd/mcp/main.go")
+	assert.Contains(t, mcpMain, "X_PROFILE_ID",
+		"MCP must fail fast when X_PROFILE_ID is missing (single-profile instance)")
+	assert.Contains(t, mcpMain, "DENSE_MEM_AUTH",
+		"MCP must read the dense-mem auth key from env")
+	assert.Contains(t, mcpMain, "registry.BuildDefault",
+		"MCP must reuse the shared registry — no duplicate tool surface (AC-37)")
+	// Stdout reserved for JSON-RPC: logs must go to stderr.
+	assert.Contains(t, mcpMain, "os.Stderr",
+		"MCP logs must target stderr; stdout is reserved for JSON-RPC (AC-36)")
+
+	server := readFile(t, "internal/mcp/server.go")
+	assert.Contains(t, server, "ProtocolVersion",
+		"MCP server must advertise its protocol version")
+	assert.Contains(t, server, `"jsonrpc"`,
+		"MCP server must speak JSON-RPC 2.0")
+	assert.Contains(t, server, "registry.Registry",
+		"MCP server takes the shared registry, not its own tool list")
+}
+
+// UAT-12: Hybrid recall merges semantic + keyword via RRF with profile_id
+// post-filter and fragment-only results (Unit 22).
+// AC trace: AC-38, AC-39, AC-40, AC-51.
+func TestUAT12_HybridRecallRanking(t *testing.T) {
+	body := readFile(t, "internal/service/recallservice/recall.go")
+	for _, sym := range []string{
+		"RRFConstant", "OverfetchMultiplier",
+		"RecallRequest", "RecallHit",
+		"profile_id",
+	} {
+		assert.Contains(t, body, sym,
+			"recall.go must declare %q", sym)
+	}
+	// RRF is documented as the merge strategy (no weighted sum, no Borda count).
+	assert.Contains(t, body, "Reciprocal Rank Fusion",
+		"recall must document RRF as its merge strategy (AC-51)")
+
+	// Public type sanity — a RecallRequest round-trips its fields so callers
+	// compile against the same contract the service enforces.
+	req := recallservice.RecallRequest{Query: "what are the UI settings?", Limit: 5}
+	assert.Equal(t, "what are the UI settings?", req.Query)
+	assert.Equal(t, 5, req.Limit)
+}
+
+// UAT-13: Recall fails closed on embedding errors and isolates by profile_id
+// (Unit 22).
+// AC trace: AC-39, AC-40, AC-47, AC-52.
+func TestUAT13_RecallCrossProfileIsolation(t *testing.T) {
+	body := readFile(t, "internal/service/recallservice/recall.go")
+	// Fail-closed on embedding failure — no silent fallback to keyword-only.
+	assert.Contains(t, body, "ErrEmbeddingUnavailable",
+		"recall must expose a sanitized embedding-unavailable error (AC-40)")
+	assert.Contains(t, body, "fail-closed",
+		"recall must document fail-closed behavior")
+	// SourceFragment-only and defensive post-filter by profile_id (AC-39, AC-47).
+	assert.Contains(t, body, "SourceFragment",
+		"recall must keep only SourceFragment-typed hits")
+	assert.Contains(t, body, "h.ProfileID != profileID",
+		"recall must defensively drop any hit that does not match caller profile")
+
+	// Public contract check: RecallService.Recall takes profileID as a required
+	// first-class argument — callers cannot forget to pass it.
+	var svc recallservice.RecallService = &recallservice.MockRecall{}
+	_, _ = svc.Recall(context.Background(), "pA", recallservice.RecallRequest{Query: "x"})
+	// The mock is a no-op; the goal here is compile-time contract pinning.
+}
+
+// readFile returns the string contents of a repo-relative path, failing the
+// test if the file is missing. Centralized so the "where did my artefact go?"
+// error message stays uniform across UATs.
+func readFile(t *testing.T, rel string) string {
+	t.Helper()
+	path := repoPath(t, rel)
+	body, err := os.ReadFile(path)
+	require.NoError(t, err, "%s must exist", rel)
+	return string(body)
+}

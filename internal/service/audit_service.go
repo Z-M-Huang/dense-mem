@@ -93,6 +93,7 @@ var sensitiveFields = map[string]bool{
 	"token":            true,
 	"embedding":        true,
 	"embeddings":       true,
+	"ai_api_key":       true,
 }
 
 // redactPayload removes sensitive fields from a payload map.

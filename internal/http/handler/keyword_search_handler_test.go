@@ -18,6 +18,17 @@ import (
 	"github.com/dense-mem/dense-mem/internal/tools/keywordsearch"
 )
 
+// postJSON is a helper to post JSON and get the response recorder.
+func postJSON(t *testing.T, path, body string) (*httptest.ResponseRecorder, echo.Context) {
+	t.Helper()
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	return rec, c
+}
+
 // mockKeywordSearchService implements KeywordSearchServiceInterface for testing.
 type mockKeywordSearchService struct {
 	searchFunc func(ctx context.Context, profileID string, req *keywordsearch.KeywordSearchRequest) (*keywordsearch.KeywordSearchResult, error)
@@ -65,7 +76,7 @@ func TestKeywordSearchHandler_Handle_Success(t *testing.T) {
 
 	e.POST("/api/v1/tools/keyword-search", h.Handle)
 
-	body := `{"query": "test query", "limit": 20}`
+	body := `{"keywords": "test query", "limit": 20}`
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/tools/keyword-search", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Profile-ID", profileID.String())
@@ -106,7 +117,7 @@ func TestKeywordSearchHandler_Handle_LimitZero_422(t *testing.T) {
 
 	e.POST("/api/v1/tools/keyword-search", h.Handle)
 
-	body := `{"query": "test query", "limit": 0}`
+	body := `{"keywords": "test query", "limit": 0}`
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/tools/keyword-search", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Profile-ID", profileID.String())
@@ -149,7 +160,7 @@ func TestKeywordSearchHandler_Handle_EmptyResult_200(t *testing.T) {
 
 	e.POST("/api/v1/tools/keyword-search", h.Handle)
 
-	body := `{"query": "nonexistent", "limit": 20}`
+	body := `{"keywords": "nonexistent", "limit": 20}`
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/tools/keyword-search", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Profile-ID", profileID.String())
@@ -173,7 +184,7 @@ func TestKeywordSearchHandler_Handle_MissingProfileID(t *testing.T) {
 
 	e.POST("/api/v1/tools/keyword-search", h.Handle)
 
-	body := `{"query": "test", "limit": 20}`
+	body := `{"keywords": "test", "limit": 20}`
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/tools/keyword-search", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	// No X-Profile-ID header
@@ -186,18 +197,57 @@ func TestKeywordSearchHandler_Handle_MissingProfileID(t *testing.T) {
 	assert.NotEqual(t, http.StatusOK, rec.Code)
 }
 
-// TestKeywordSearchHandler_Handle_LimitCapped tests that limit over 100 is capped.
+// TestKeywordSearchHandler_Handle_LimitCapped tests that limit over 100 is rejected by DTO validation.
 func TestKeywordSearchHandler_Handle_LimitCapped(t *testing.T) {
+	e := newTestEcho()
+	profileID := uuid.New()
+
+	mockSvc := &mockKeywordSearchService{}
+	h := NewKeywordSearchHandler(mockSvc)
+
+	// Set resolved profile ID in context using the proper key
+	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			ctx := c.Request().Context()
+			ctx = middleware.SetResolvedProfileIDForTest(ctx, profileID)
+			c.SetRequest(c.Request().WithContext(ctx))
+			return next(c)
+		}
+	})
+
+	e.POST("/api/v1/tools/keyword-search", h.Handle)
+
+	// DTO validation enforces max=100, so limit=150 should be rejected with 422
+	body := `{"keywords": "test query", "limit": 150}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/tools/keyword-search", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Profile-ID", profileID.String())
+	rec := httptest.NewRecorder()
+
+	e.ServeHTTP(rec, req)
+
+	// Should return 422 because limit exceeds max=100
+	assert.Equal(t, http.StatusUnprocessableEntity, rec.Code)
+
+	var resp httperr.ErrorEnvelope
+	err := json.Unmarshal(rec.Body.Bytes(), &resp)
+	require.NoError(t, err)
+	assert.Equal(t, httperr.VALIDATION_ERROR, resp.Error.Code)
+}
+
+// TestKeywordSearchHandler_BindsDTO_Keywords tests that handler binds dto.KeywordSearchRequest with "keywords" field.
+func TestKeywordSearchHandler_BindsDTO_Keywords(t *testing.T) {
 	e := newTestEcho()
 	profileID := uuid.New()
 
 	mockSvc := &mockKeywordSearchService{
 		searchFunc: func(ctx context.Context, pid string, req *keywordsearch.KeywordSearchRequest) (*keywordsearch.KeywordSearchResult, error) {
-			// Limit 150 should be capped to 100
-			assert.Equal(t, 150, req.Limit) // Request limit as received
+			assert.Equal(t, profileID.String(), pid)
+			assert.Equal(t, "alpha", req.Query)
+			assert.Equal(t, 5, req.Limit)
 			return &keywordsearch.KeywordSearchResult{
 				Data: []keywordsearch.SearchHit{},
-				Meta: keywordsearch.KeywordSearchMeta{LimitApplied: 100}, // Service caps it
+				Meta: keywordsearch.KeywordSearchMeta{LimitApplied: 5},
 			}, nil
 		},
 	}
@@ -215,7 +265,7 @@ func TestKeywordSearchHandler_Handle_LimitCapped(t *testing.T) {
 
 	e.POST("/api/v1/tools/keyword-search", h.Handle)
 
-	body := `{"query": "test query", "limit": 150}`
+	body := `{"keywords": "alpha", "limit": 5}`
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/tools/keyword-search", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Profile-ID", profileID.String())
@@ -223,10 +273,37 @@ func TestKeywordSearchHandler_Handle_LimitCapped(t *testing.T) {
 
 	e.ServeHTTP(rec, req)
 
-	assert.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, http.StatusOK, rec.Code)
+}
 
-	var resp keywordsearch.KeywordSearchResult
-	err := json.Unmarshal(rec.Body.Bytes(), &resp)
-	require.NoError(t, err)
-	assert.Equal(t, 100, resp.Meta.LimitApplied, "limit should be capped to 100 in meta")
+// TestKeywordSearchHandler_RejectsLegacyQueryField tests that handler rejects "query" field (should use "keywords").
+func TestKeywordSearchHandler_RejectsLegacyQueryField(t *testing.T) {
+	e := newTestEcho()
+	profileID := uuid.New()
+
+	mockSvc := &mockKeywordSearchService{}
+	h := NewKeywordSearchHandler(mockSvc)
+
+	// Set resolved profile ID in context using the proper key
+	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			ctx := c.Request().Context()
+			ctx = middleware.SetResolvedProfileIDForTest(ctx, profileID)
+			c.SetRequest(c.Request().WithContext(ctx))
+			return next(c)
+		}
+	})
+
+	e.POST("/api/v1/tools/keyword-search", h.Handle)
+
+	body := `{"query": "alpha"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/tools/keyword-search", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Profile-ID", profileID.String())
+	rec := httptest.NewRecorder()
+
+	e.ServeHTTP(rec, req)
+
+	// Should reject because "keywords" is required, not "query"
+	assert.Contains(t, []int{http.StatusBadRequest, http.StatusUnprocessableEntity}, rec.Code)
 }

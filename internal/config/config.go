@@ -24,38 +24,53 @@ type ConfigProvider interface {
 	GetArgonThreads() int
 	GetRateLimitPerMinute() int
 	GetAdminRateLimitPerMinute() int
+	GetFragmentCreateRateLimit() int
+	GetFragmentReadRateLimit() int
 	GetSSEHeartbeatSeconds() int
 	GetSSEMaxDurationSeconds() int
 	GetSSEMaxConcurrentStreams() int
 	GetAdminQueryTimeoutSeconds() int
 	GetAdminQueryRowCap() int
 	GetEmbeddingDimensions() int
+	GetAIAPIURL() string
+	GetAIAPIKey() string
+	GetAIEmbeddingModel() string
+	GetAIEmbeddingDimensions() int
+	GetAIEmbeddingTimeoutSeconds() int
+	IsEmbeddingConfigured() bool
 }
 
 // Config holds all configuration for the application.
 // All fields are populated from environment variables with sensible defaults.
 type Config struct {
-	HTTPAddr                 string
-	PostgresDSN              string
-	Neo4jURI                 string
-	Neo4jUser                string
-	Neo4jPassword            string
-	Neo4jDatabase            string
-	RedisAddr                string
-	RedisPassword            string
-	RedisDB                  int
-	BootstrapAdminKey        string
-	ArgonMemoryKB            int
-	ArgonTime                int
-	ArgonThreads             int
-	RateLimitPerMinute       int
-	AdminRateLimitPerMinute  int
-	SSEHeartbeatSeconds      int
-	SSEMaxDurationSeconds    int
-	SSEMaxConcurrentStreams  int
-	AdminQueryTimeoutSeconds int
-	AdminQueryRowCap         int
-	EmbeddingDimensions      int
+	HTTPAddr                   string
+	PostgresDSN                string
+	Neo4jURI                   string
+	Neo4jUser                  string
+	Neo4jPassword              string
+	Neo4jDatabase              string
+	RedisAddr                  string
+	RedisPassword              string
+	RedisDB                    int
+	BootstrapAdminKey          string
+	ArgonMemoryKB              int
+	ArgonTime                  int
+	ArgonThreads               int
+	RateLimitPerMinute         int
+	AdminRateLimitPerMinute    int
+	FragmentCreateRateLimit    int
+	FragmentReadRateLimit      int
+	SSEHeartbeatSeconds        int
+	SSEMaxDurationSeconds      int
+	SSEMaxConcurrentStreams    int
+	AdminQueryTimeoutSeconds   int
+	AdminQueryRowCap           int
+	EmbeddingDimensions        int
+	AIAPIURL                   string
+	AIAPIKey                   string `json:"-"`
+	AIEmbeddingModel           string
+	AIEmbeddingDimensions      int
+	AIEmbeddingTimeoutSeconds  int
 }
 
 // Ensure Config implements ConfigProvider
@@ -77,12 +92,22 @@ func (c *Config) GetArgonTime() int                   { return c.ArgonTime }
 func (c *Config) GetArgonThreads() int                { return c.ArgonThreads }
 func (c *Config) GetRateLimitPerMinute() int          { return c.RateLimitPerMinute }
 func (c *Config) GetAdminRateLimitPerMinute() int     { return c.AdminRateLimitPerMinute }
+func (c *Config) GetFragmentCreateRateLimit() int     { return c.FragmentCreateRateLimit }
+func (c *Config) GetFragmentReadRateLimit() int       { return c.FragmentReadRateLimit }
 func (c *Config) GetSSEHeartbeatSeconds() int         { return c.SSEHeartbeatSeconds }
 func (c *Config) GetSSEMaxDurationSeconds() int       { return c.SSEMaxDurationSeconds }
 func (c *Config) GetSSEMaxConcurrentStreams() int     { return c.SSEMaxConcurrentStreams }
 func (c *Config) GetAdminQueryTimeoutSeconds() int    { return c.AdminQueryTimeoutSeconds }
 func (c *Config) GetAdminQueryRowCap() int            { return c.AdminQueryRowCap }
 func (c *Config) GetEmbeddingDimensions() int         { return c.EmbeddingDimensions }
+func (c *Config) GetAIAPIURL() string                 { return c.AIAPIURL }
+func (c *Config) GetAIAPIKey() string                 { return c.AIAPIKey }
+func (c *Config) GetAIEmbeddingModel() string         { return c.AIEmbeddingModel }
+func (c *Config) GetAIEmbeddingDimensions() int       { return c.AIEmbeddingDimensions }
+func (c *Config) GetAIEmbeddingTimeoutSeconds() int    { return c.AIEmbeddingTimeoutSeconds }
+func (c *Config) IsEmbeddingConfigured() bool {
+	return c.AIAPIURL != "" && c.AIAPIKey != "" && c.AIEmbeddingModel != "" && c.AIEmbeddingDimensions > 0
+}
 
 // ValidationError represents a configuration validation failure.
 type ValidationError struct {
@@ -168,6 +193,19 @@ func Load() (Config, error) {
 		return cfg, err
 	}
 
+	// Fragment rate-limit tiers (AC-54): writes are stricter than reads because
+	// a fragment create triggers an embedding call (external network + cost)
+	// plus a graph write, whereas a read is a single indexed lookup.
+	cfg.FragmentCreateRateLimit, err = parseIntOrDefault("FRAGMENT_CREATE_RATE_LIMIT", 60)
+	if err != nil {
+		return cfg, err
+	}
+
+	cfg.FragmentReadRateLimit, err = parseIntOrDefault("FRAGMENT_READ_RATE_LIMIT", 300)
+	if err != nil {
+		return cfg, err
+	}
+
 	cfg.SSEHeartbeatSeconds, err = parseIntOrDefault("SSE_HEARTBEAT_SECONDS", 30)
 	if err != nil {
 		return cfg, err
@@ -194,6 +232,21 @@ func Load() (Config, error) {
 	}
 
 	cfg.EmbeddingDimensions, err = parseIntOrDefault("EMBEDDING_DIMENSIONS", 1536)
+	if err != nil {
+		return cfg, err
+	}
+
+	// AI embedding configuration
+	cfg.AIAPIURL = os.Getenv("AI_API_URL")
+	cfg.AIAPIKey = os.Getenv("AI_API_KEY")
+	cfg.AIEmbeddingModel = os.Getenv("AI_API_EMBEDDING_MODEL")
+
+	cfg.AIEmbeddingDimensions, err = parseIntOrDefault("AI_API_EMBEDDING_DIMENSIONS", 0)
+	if err != nil {
+		return cfg, err
+	}
+
+	cfg.AIEmbeddingTimeoutSeconds, err = parseIntOrDefault("AI_API_EMBEDDING_TIMEOUT_SECONDS", 30)
 	if err != nil {
 		return cfg, err
 	}
@@ -250,6 +303,40 @@ func Load() (Config, error) {
 			return cfg, &ValidationError{
 				Field:   field.name,
 				Message: fmt.Sprintf("must be greater than 0, got %d", field.value),
+			}
+		}
+	}
+
+	// AI embedding configuration validation: all-or-nothing
+	// If any of URL, Key, Model, Dimensions is set, all must be set
+	hasAIAPIURL := cfg.AIAPIURL != ""
+	hasAIAPIKey := cfg.AIAPIKey != ""
+	hasAIEmbeddingModel := cfg.AIEmbeddingModel != ""
+	hasAIEmbeddingDimensions := cfg.AIEmbeddingDimensions > 0
+
+	if hasAIAPIURL || hasAIAPIKey || hasAIEmbeddingModel || hasAIEmbeddingDimensions {
+		if !hasAIAPIURL {
+			return cfg, &ValidationError{
+				Field:   "AI_API_URL",
+				Message: "required for embedding configuration (all-or-nothing)",
+			}
+		}
+		if !hasAIAPIKey {
+			return cfg, &ValidationError{
+				Field:   "AI_API_KEY",
+				Message: "required for embedding configuration (all-or-nothing)",
+			}
+		}
+		if !hasAIEmbeddingModel {
+			return cfg, &ValidationError{
+				Field:   "AI_API_EMBEDDING_MODEL",
+				Message: "required for embedding configuration (all-or-nothing)",
+			}
+		}
+		if !hasAIEmbeddingDimensions {
+			return cfg, &ValidationError{
+				Field:   "AI_API_EMBEDDING_DIMENSIONS",
+				Message: "required for embedding configuration (all-or-nothing)",
 			}
 		}
 	}

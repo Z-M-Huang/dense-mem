@@ -28,7 +28,7 @@ func TestUATHealthEndpoint(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, resp.StatusCode, "health endpoint should return 200")
 
-	var body map[string]string
+	var body map[string]interface{}
 	err = json.NewDecoder(resp.Body).Decode(&body)
 	require.NoError(t, err, "health response should be valid JSON")
 	assert.Equal(t, "ok", body["status"], "health response should have status=ok")
