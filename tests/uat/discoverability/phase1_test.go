@@ -3,7 +3,6 @@
 package discoverability
 
 import (
-	"context"
 	"os"
 	"strings"
 	"testing"
@@ -12,7 +11,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/dense-mem/dense-mem/internal/domain"
-	"github.com/dense-mem/dense-mem/internal/embedding"
 	"github.com/dense-mem/dense-mem/internal/http/dto"
 	"github.com/dense-mem/dense-mem/internal/service/recallservice"
 	"github.com/dense-mem/dense-mem/internal/tools/registry"
@@ -55,13 +53,6 @@ func TestUAT5_EmbeddingProviderStartup(t *testing.T) {
 	// Embedding consistency service (Unit 10) must declare a dimensions gate.
 	assert.Contains(t, readFile(t, "internal/service/embedding_consistency.go"),
 		"dimension", "consistency service must reference dimensions")
-
-	// In-process sanity: the mock that every test file uses must implement the
-	// public interface and return the configured model / dimensions.
-	mock := &embedding.MockEmbeddingProvider{DimensionsResult: 8, ModelNameResult: "m-test"}
-	var iface embedding.EmbeddingProviderInterface = mock
-	assert.Equal(t, 8, iface.Dimensions())
-	assert.Equal(t, "m-test", iface.ModelName())
 }
 
 // UAT-6: Fragment create happy path wiring (Unit 15–16).
@@ -291,12 +282,6 @@ func TestUAT13_RecallCrossProfileIsolation(t *testing.T) {
 		"recall must keep only SourceFragment-typed hits")
 	assert.Contains(t, body, "h.ProfileID != profileID",
 		"recall must defensively drop any hit that does not match caller profile")
-
-	// Public contract check: RecallService.Recall takes profileID as a required
-	// first-class argument — callers cannot forget to pass it.
-	var svc recallservice.RecallService = &recallservice.MockRecall{}
-	_, _ = svc.Recall(context.Background(), "pA", recallservice.RecallRequest{Query: "x"})
-	// The mock is a no-op; the goal here is compile-time contract pinning.
 }
 
 // readFile returns the string contents of a repo-relative path, failing the

@@ -102,7 +102,7 @@ func (f *fakeConsistency) RecordFirstWrite(ctx context.Context, model string, di
 // --- Tests ---
 
 func TestFragmentCreateService_HappyPath(t *testing.T) {
-	mockEmb := &embedding.MockEmbeddingProvider{DimensionsResult: 4, ModelNameResult: "m1"}
+	mockEmb := &stubEmbedding{DimensionsResult: 4, ModelNameResult: "m1"}
 	writer := &fakeScopedWriter{}
 	lookup := &fakeDedupeLookup{}
 	audit := &fakeAudit{}
@@ -144,7 +144,7 @@ func TestFragmentCreateService_HappyPath(t *testing.T) {
 
 func TestCreate_IdempotencyReplay_NoEmbedding(t *testing.T) {
 	existing := &domain.Fragment{FragmentID: "f-existing", ProfileID: "pA"}
-	mockEmb := &embedding.MockEmbeddingProvider{DimensionsResult: 4, ModelNameResult: "m1"}
+	mockEmb := &stubEmbedding{DimensionsResult: 4, ModelNameResult: "m1"}
 	lookup := &fakeDedupeLookup{ByKey: existing}
 	writer := &fakeScopedWriter{}
 	svc := NewCreateFragmentService(mockEmb, writer, lookup, &fakeAudit{}, &fakeConsistency{}, nil, nil)
@@ -171,7 +171,7 @@ func TestCreate_IdempotencyReplay_NoEmbedding(t *testing.T) {
 
 func TestCreate_ContentHashReplay_NoPersist(t *testing.T) {
 	existing := &domain.Fragment{FragmentID: "f-hash-dup", ProfileID: "pA"}
-	mockEmb := &embedding.MockEmbeddingProvider{DimensionsResult: 4, ModelNameResult: "m1"}
+	mockEmb := &stubEmbedding{DimensionsResult: 4, ModelNameResult: "m1"}
 	lookup := &fakeDedupeLookup{ByHash: existing}
 	writer := &fakeScopedWriter{}
 	svc := NewCreateFragmentService(mockEmb, writer, lookup, &fakeAudit{}, &fakeConsistency{}, nil, nil)
@@ -192,7 +192,7 @@ func TestCreate_ContentHashReplay_NoPersist(t *testing.T) {
 }
 
 func TestCreate_EmbeddingFailure_NoPersist(t *testing.T) {
-	mockEmb := &embedding.MockEmbeddingProvider{
+	mockEmb := &stubEmbedding{
 		EmbedFunc: func(context.Context, string) ([]float32, string, error) {
 			return nil, "", embedding.ErrEmbeddingProvider
 		},
@@ -217,7 +217,7 @@ func TestCreate_EmbeddingFailure_NoPersist(t *testing.T) {
 
 func TestCreate_CrossProfileIdempotency_NewFragment(t *testing.T) {
 	// Dedupe lookup scopes by profile, so same key in different profile = miss → write
-	mockEmb := &embedding.MockEmbeddingProvider{DimensionsResult: 4, ModelNameResult: "m1"}
+	mockEmb := &stubEmbedding{DimensionsResult: 4, ModelNameResult: "m1"}
 	lookup := &fakeDedupeLookup{ByKey: nil} // miss
 	writer := &fakeScopedWriter{}
 	svc := NewCreateFragmentService(mockEmb, writer, lookup, &fakeAudit{}, &fakeConsistency{}, nil, nil)
@@ -240,7 +240,7 @@ func TestCreate_CrossProfileIdempotency_NewFragment(t *testing.T) {
 }
 
 func TestCreate_VectorLengthMismatch_NoPersist(t *testing.T) {
-	mockEmb := &embedding.MockEmbeddingProvider{DimensionsResult: 4, ModelNameResult: "m1"}
+	mockEmb := &stubEmbedding{DimensionsResult: 4, ModelNameResult: "m1"}
 	writer := &fakeScopedWriter{}
 	consistency := &fakeConsistency{ValidateErr: errors.New("dimension mismatch: got 4 want 8")}
 	svc := NewCreateFragmentService(mockEmb, writer, &fakeDedupeLookup{}, &fakeAudit{}, consistency, nil, nil)
@@ -258,7 +258,7 @@ func TestCreate_VectorLengthMismatch_NoPersist(t *testing.T) {
 }
 
 func TestCreate_ExplicitSourceType_Respected(t *testing.T) {
-	mockEmb := &embedding.MockEmbeddingProvider{DimensionsResult: 4, ModelNameResult: "m1"}
+	mockEmb := &stubEmbedding{DimensionsResult: 4, ModelNameResult: "m1"}
 	writer := &fakeScopedWriter{}
 	svc := NewCreateFragmentService(mockEmb, writer, &fakeDedupeLookup{}, &fakeAudit{}, &fakeConsistency{}, nil, nil)
 
@@ -275,7 +275,7 @@ func TestCreate_ExplicitSourceType_Respected(t *testing.T) {
 }
 
 func TestCreate_WriteFailure_PropagatesError(t *testing.T) {
-	mockEmb := &embedding.MockEmbeddingProvider{DimensionsResult: 4, ModelNameResult: "m1"}
+	mockEmb := &stubEmbedding{DimensionsResult: 4, ModelNameResult: "m1"}
 	writer := &fakeScopedWriter{WriteErr: errors.New("neo4j down")}
 	audit := &fakeAudit{}
 	svc := NewCreateFragmentService(mockEmb, writer, &fakeDedupeLookup{}, audit, &fakeConsistency{}, nil, nil)
@@ -290,7 +290,7 @@ func TestCreate_WriteFailure_PropagatesError(t *testing.T) {
 }
 
 func TestCreate_AuditPayload_ExcludesContentAndEmbedding(t *testing.T) {
-	mockEmb := &embedding.MockEmbeddingProvider{DimensionsResult: 4, ModelNameResult: "m1"}
+	mockEmb := &stubEmbedding{DimensionsResult: 4, ModelNameResult: "m1"}
 	writer := &fakeScopedWriter{}
 	audit := &fakeAudit{}
 	svc := NewCreateFragmentService(mockEmb, writer, &fakeDedupeLookup{}, audit, &fakeConsistency{}, nil, nil)
@@ -317,7 +317,7 @@ func TestCreate_AuditPayload_ExcludesContentAndEmbedding(t *testing.T) {
 // TestCreate_AuditCarriesCorrelationID proves the create audit row is stamped with
 // the upstream X-Correlation-ID that middleware threads into the context (AC-54).
 func TestCreate_AuditCarriesCorrelationID(t *testing.T) {
-	mockEmb := &embedding.MockEmbeddingProvider{DimensionsResult: 4, ModelNameResult: "m1"}
+	mockEmb := &stubEmbedding{DimensionsResult: 4, ModelNameResult: "m1"}
 	writer := &fakeScopedWriter{}
 	audit := &fakeAudit{}
 	svc := NewCreateFragmentService(mockEmb, writer, &fakeDedupeLookup{}, audit, &fakeConsistency{}, nil, nil)

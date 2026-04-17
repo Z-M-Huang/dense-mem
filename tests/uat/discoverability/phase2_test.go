@@ -12,9 +12,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/dense-mem/dense-mem/internal/observability"
-	"github.com/dense-mem/dense-mem/internal/service/fragmentservice"
-	"github.com/dense-mem/dense-mem/internal/service/recallservice"
-	"github.com/dense-mem/dense-mem/internal/tools/registry"
 )
 
 // UAT-14: Phase 2 migration and backfill (Unit 11–12).
@@ -56,9 +53,12 @@ func TestUAT14_Phase2MigrationAndBackfill(t *testing.T) {
 // This test exercises the invariants Unit 25 owns and that can be verified
 // without a live backend:
 //   - README.md documents data egress + model consistency + discoverability.
-//   - Companion interface pattern holds for every new service and mock.
 //   - Metrics recorder captures embedding + recall outcomes.
 //   - Rate-limit configuration differentiates fragment write vs read tiers.
+//
+// Companion-interface compile assertions live next to each mock in that mock's
+// own package (`var _ Interface = (*Mock)(nil)` in internal/.../mock_test.go),
+// so they fire during `go test` of each owning package rather than here.
 func TestUAT15_NonFunctionalSafeguards(t *testing.T) {
 	t.Run("README documents data egress and discoverability", func(t *testing.T) {
 		path := repoPath(t, "README.md")
@@ -73,19 +73,6 @@ func TestUAT15_NonFunctionalSafeguards(t *testing.T) {
 			"README must point at tool catalog + OpenAPI + MCP")
 		assert.NotContains(t, content, "sk-",
 			"README must never embed an API key sample")
-	})
-
-	t.Run("Companion interfaces and mocks compile together", func(t *testing.T) {
-		// Instantiating each mock proves the var _ assertions compile and
-		// the interface set advertised by Unit 25 stays stable.
-		var (
-			_ fragmentservice.CreateFragmentService = (*fragmentservice.MockCreate)(nil)
-			_ fragmentservice.GetFragmentService    = (*fragmentservice.MockGet)(nil)
-			_ fragmentservice.ListFragmentsService  = (*fragmentservice.MockList)(nil)
-			_ fragmentservice.DeleteFragmentService = (*fragmentservice.MockDelete)(nil)
-			_ recallservice.RecallService           = (*recallservice.MockRecall)(nil)
-			_ registry.Registry                     = (*registry.MockRegistry)(nil)
-		)
 	})
 
 	t.Run("Discoverability metrics record outcomes", func(t *testing.T) {

@@ -112,7 +112,7 @@ func TestRecallService_HybridMergesFragmentOnly(t *testing.T) {
 			{FragmentID: "f3"},
 		},
 	}
-	emb := &embedding.MockEmbeddingProvider{DimensionsResult: 4}
+	emb := &stubEmbedding{DimensionsResult: 4}
 	svc := NewRecallService(emb, sem, kw, &fakeHydrator{}, nil, nil)
 
 	out, err := svc.Recall(context.Background(), "pA", RecallRequest{Query: "test", Limit: 10})
@@ -149,7 +149,7 @@ func TestRecallService_HybridMergesFragmentOnly(t *testing.T) {
 func TestRecallService_OverfetchesVectorBranch(t *testing.T) {
 	sem := &fakeSemanticSearcher{}
 	kw := &fakeKeywordSearcher{}
-	emb := &embedding.MockEmbeddingProvider{DimensionsResult: 4}
+	emb := &stubEmbedding{DimensionsResult: 4}
 	svc := NewRecallService(emb, sem, kw, &fakeHydrator{}, nil, nil)
 
 	_, err := svc.Recall(context.Background(), "pA", RecallRequest{Query: "q", Limit: 3})
@@ -166,7 +166,7 @@ func TestRecallService_OverfetchesVectorBranch(t *testing.T) {
 
 // TestRecallService_EmbeddingFailureReturnsSanitizedError — AC-40 fail-closed.
 func TestRecallService_EmbeddingFailureReturnsSanitizedError(t *testing.T) {
-	emb := &embedding.MockEmbeddingProvider{
+	emb := &stubEmbedding{
 		EmbedFunc: func(context.Context, string) ([]float32, string, error) {
 			return nil, "", &embedding.ProviderError{Provider: "openai", Message: "auth failed for sk-secret-123"}
 		},
@@ -204,7 +204,7 @@ func TestRecallService_RunsBranchesInParallel(t *testing.T) {
 			<-release
 		},
 	}
-	emb := &embedding.MockEmbeddingProvider{DimensionsResult: 4}
+	emb := &stubEmbedding{DimensionsResult: 4}
 	svc := NewRecallService(emb, sem, kw, &fakeHydrator{}, nil, nil)
 
 	done := make(chan error, 1)
@@ -241,7 +241,7 @@ func TestRecallService_ClampsAndDefaultsLimit(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			sem := &fakeSemanticSearcher{}
 			kw := &fakeKeywordSearcher{}
-			emb := &embedding.MockEmbeddingProvider{DimensionsResult: 4}
+			emb := &stubEmbedding{DimensionsResult: 4}
 			svc := NewRecallService(emb, sem, kw, &fakeHydrator{}, nil, nil)
 			_, err := svc.Recall(context.Background(), "pA", RecallRequest{Query: "q", Limit: tc.input})
 			if err != nil {
@@ -258,7 +258,7 @@ func TestRecallService_ClampsAndDefaultsLimit(t *testing.T) {
 // TestRecallService_RejectsBlankQuery defends AC-38 at the service boundary.
 func TestRecallService_RejectsBlankQuery(t *testing.T) {
 	svc := NewRecallService(
-		&embedding.MockEmbeddingProvider{DimensionsResult: 4},
+		&stubEmbedding{DimensionsResult: 4},
 		&fakeSemanticSearcher{}, &fakeKeywordSearcher{}, &fakeHydrator{}, nil, nil,
 	)
 	_, err := svc.Recall(context.Background(), "pA", RecallRequest{Query: "   ", Limit: 3})
@@ -270,7 +270,7 @@ func TestRecallService_RejectsBlankQuery(t *testing.T) {
 // TestRecallService_RejectsEmptyProfileID enforces profile isolation input.
 func TestRecallService_RejectsEmptyProfileID(t *testing.T) {
 	svc := NewRecallService(
-		&embedding.MockEmbeddingProvider{DimensionsResult: 4},
+		&stubEmbedding{DimensionsResult: 4},
 		&fakeSemanticSearcher{}, &fakeKeywordSearcher{}, &fakeHydrator{}, nil, nil,
 	)
 	_, err := svc.Recall(context.Background(), "", RecallRequest{Query: "q", Limit: 3})
@@ -295,7 +295,7 @@ func TestRecallService_PostFiltersCrossProfileHits(t *testing.T) {
 		},
 	}
 	kw := &fakeKeywordSearcher{}
-	emb := &embedding.MockEmbeddingProvider{DimensionsResult: 4}
+	emb := &stubEmbedding{DimensionsResult: 4}
 	svc := NewRecallService(emb, mixed, kw, &fakeHydrator{}, nil, nil)
 
 	out, err := svc.Recall(context.Background(), "pA", RecallRequest{Query: "q", Limit: 10})
@@ -340,7 +340,7 @@ func TestRecallService_RRFScoreOrdering(t *testing.T) {
 			{FragmentID: "f-mid"},
 		},
 	}
-	emb := &embedding.MockEmbeddingProvider{DimensionsResult: 4}
+	emb := &stubEmbedding{DimensionsResult: 4}
 	svc := NewRecallService(emb, sem, kw, &fakeHydrator{}, nil, nil)
 
 	out, err := svc.Recall(context.Background(), "pA", RecallRequest{Query: "q", Limit: 50})
@@ -380,7 +380,7 @@ func TestRecallService_TruncatesToLimit(t *testing.T) {
 		sem.hits = append(sem.hits, semanticsearch.SearchHit{ID: "f" + itoa(i), Type: "fragment"})
 	}
 	kw := &fakeKeywordSearcher{}
-	emb := &embedding.MockEmbeddingProvider{DimensionsResult: 4}
+	emb := &stubEmbedding{DimensionsResult: 4}
 	svc := NewRecallService(emb, sem, kw, &fakeHydrator{}, nil, nil)
 
 	out, err := svc.Recall(context.Background(), "pA", RecallRequest{Query: "q", Limit: 5})
