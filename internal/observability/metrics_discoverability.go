@@ -18,6 +18,30 @@ type DiscoverabilityMetrics interface {
 	// IncFragmentCreate bumps the fragment-create outcome counter.
 	// outcome must be one of: "created" | "duplicate" | "error".
 	IncFragmentCreate(outcome string)
+
+	// IncClaimCreate bumps the claim-create outcome counter.
+	// outcome must be one of: "created" | "duplicate" | "error".
+	// dedupeReason is the reason for deduplication (empty string if not a duplicate).
+	IncClaimCreate(outcome string, dedupeReason string)
+	// IncVerifyVerdict bumps the verify-verdict counter.
+	// outcome must be one of: "verified" | "refuted" | "inconclusive" | "error".
+	IncVerifyVerdict(outcome string)
+	// IncPromotionOutcome bumps the claim-to-fact promotion outcome counter.
+	// outcome must be one of: "promoted" | "skipped" | "error".
+	IncPromotionOutcome(outcome string)
+	// ObservePromoteLockWait records how long a promotion waited for the row lock.
+	ObservePromoteLockWait(seconds float64)
+	// IncFragmentRetract bumps the fragment-retract counter.
+	IncFragmentRetract()
+	// IncFactNeedsRevalidation bumps the counter for facts that are queued
+	// for revalidation after a contradicting fragment is ingested.
+	IncFactNeedsRevalidation()
+	// IncCommunityDetect bumps the community-detection run counter.
+	// outcome must be one of: "ok" | "error".
+	IncCommunityDetect(outcome string)
+	// ObserveCommunityDetect records the duration and projected node count of
+	// one community-detection run.
+	ObserveCommunityDetect(durationSeconds float64, projectedNodes int)
 }
 
 // NoopDiscoverabilityMetrics returns a DiscoverabilityMetrics that discards
@@ -29,20 +53,48 @@ type noopMetrics struct{}
 
 var _ DiscoverabilityMetrics = noopMetrics{}
 
-func (noopMetrics) ObserveEmbeddingLatency(float64, string) {}
-func (noopMetrics) IncEmbeddingError(string)                {}
-func (noopMetrics) ObserveRecallLatency(float64)            {}
-func (noopMetrics) IncFragmentCreate(string)                {}
+func (noopMetrics) ObserveEmbeddingLatency(float64, string)   {}
+func (noopMetrics) IncEmbeddingError(string)                  {}
+func (noopMetrics) ObserveRecallLatency(float64)              {}
+func (noopMetrics) IncFragmentCreate(string)                  {}
+func (noopMetrics) IncClaimCreate(string, string)             {}
+func (noopMetrics) IncVerifyVerdict(string)                   {}
+func (noopMetrics) IncPromotionOutcome(string)                {}
+func (noopMetrics) ObservePromoteLockWait(float64)            {}
+func (noopMetrics) IncFragmentRetract()                       {}
+func (noopMetrics) IncFactNeedsRevalidation()                 {}
+func (noopMetrics) IncCommunityDetect(string)                 {}
+func (noopMetrics) ObserveCommunityDetect(float64, int)       {}
 
 // InMemoryDiscoverabilityMetrics is a test-friendly recorder. Tests can
 // inspect the captured samples to assert that a code path actually emitted
 // the expected metric without standing up Prometheus.
 type InMemoryDiscoverabilityMetrics struct {
-	mu                sync.Mutex
-	embeddingSamples  []EmbeddingSample
-	embeddingErrors   map[string]int
-	recallLatencies   []float64
-	fragmentOutcomes  map[string]int
+	mu                    sync.Mutex
+	embeddingSamples      []EmbeddingSample
+	embeddingErrors       map[string]int
+	recallLatencies       []float64
+	fragmentOutcomes      map[string]int
+	claimCreateSamples    []ClaimCreateSample
+	verifyVerdicts        map[string]int
+	promotionOutcomes     map[string]int
+	promoteLockWaits      []float64
+	fragmentRetracts      int
+	factNeedsRevalidation int
+	communityDetectOuts   map[string]int
+	communityDetectSamples []CommunityDetectSample
+}
+
+// ClaimCreateSample is one recorded claim-create event.
+type ClaimCreateSample struct {
+	Outcome      string
+	DedupeReason string
+}
+
+// CommunityDetectSample is one recorded community-detection run.
+type CommunityDetectSample struct {
+	DurationSeconds float64
+	ProjectedNodes  int
 }
 
 // EmbeddingSample is one recorded embedding latency observation.
@@ -56,8 +108,11 @@ var _ DiscoverabilityMetrics = (*InMemoryDiscoverabilityMetrics)(nil)
 // NewInMemoryDiscoverabilityMetrics constructs a fresh recorder.
 func NewInMemoryDiscoverabilityMetrics() *InMemoryDiscoverabilityMetrics {
 	return &InMemoryDiscoverabilityMetrics{
-		embeddingErrors:  make(map[string]int),
-		fragmentOutcomes: make(map[string]int),
+		embeddingErrors:     make(map[string]int),
+		fragmentOutcomes:    make(map[string]int),
+		verifyVerdicts:      make(map[string]int),
+		promotionOutcomes:   make(map[string]int),
+		communityDetectOuts: make(map[string]int),
 	}
 }
 
@@ -119,4 +174,122 @@ func (m *InMemoryDiscoverabilityMetrics) FragmentCreateCount(outcome string) int
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.fragmentOutcomes[outcome]
+}
+
+// IncClaimCreate records one claim-create event.
+func (m *InMemoryDiscoverabilityMetrics) IncClaimCreate(outcome string, dedupeReason string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.claimCreateSamples = append(m.claimCreateSamples, ClaimCreateSample{Outcome: outcome, DedupeReason: dedupeReason})
+}
+
+// IncVerifyVerdict bumps the verify-verdict counter.
+func (m *InMemoryDiscoverabilityMetrics) IncVerifyVerdict(outcome string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.verifyVerdicts[outcome]++
+}
+
+// IncPromotionOutcome bumps the promotion-outcome counter.
+func (m *InMemoryDiscoverabilityMetrics) IncPromotionOutcome(outcome string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.promotionOutcomes[outcome]++
+}
+
+// ObservePromoteLockWait records one promotion lock-wait duration.
+func (m *InMemoryDiscoverabilityMetrics) ObservePromoteLockWait(seconds float64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.promoteLockWaits = append(m.promoteLockWaits, seconds)
+}
+
+// IncFragmentRetract bumps the fragment-retract counter.
+func (m *InMemoryDiscoverabilityMetrics) IncFragmentRetract() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.fragmentRetracts++
+}
+
+// IncFactNeedsRevalidation bumps the fact-needs-revalidation counter.
+func (m *InMemoryDiscoverabilityMetrics) IncFactNeedsRevalidation() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.factNeedsRevalidation++
+}
+
+// IncCommunityDetect bumps the community-detection outcome counter.
+func (m *InMemoryDiscoverabilityMetrics) IncCommunityDetect(outcome string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.communityDetectOuts[outcome]++
+}
+
+// ObserveCommunityDetect records one community-detection run duration and node count.
+func (m *InMemoryDiscoverabilityMetrics) ObserveCommunityDetect(durationSeconds float64, projectedNodes int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.communityDetectSamples = append(m.communityDetectSamples, CommunityDetectSample{DurationSeconds: durationSeconds, ProjectedNodes: projectedNodes})
+}
+
+// ClaimCreateSamples returns a copy of the recorded claim-create samples.
+func (m *InMemoryDiscoverabilityMetrics) ClaimCreateSamples() []ClaimCreateSample {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]ClaimCreateSample, len(m.claimCreateSamples))
+	copy(out, m.claimCreateSamples)
+	return out
+}
+
+// VerifyVerdictCount returns the recorded count for `outcome`.
+func (m *InMemoryDiscoverabilityMetrics) VerifyVerdictCount(outcome string) int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.verifyVerdicts[outcome]
+}
+
+// PromotionOutcomeCount returns the recorded count for `outcome`.
+func (m *InMemoryDiscoverabilityMetrics) PromotionOutcomeCount(outcome string) int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.promotionOutcomes[outcome]
+}
+
+// PromoteLockWaits returns a copy of the recorded promotion lock-wait durations.
+func (m *InMemoryDiscoverabilityMetrics) PromoteLockWaits() []float64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]float64, len(m.promoteLockWaits))
+	copy(out, m.promoteLockWaits)
+	return out
+}
+
+// FragmentRetractCount returns the total number of fragment-retract events.
+func (m *InMemoryDiscoverabilityMetrics) FragmentRetractCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.fragmentRetracts
+}
+
+// FactNeedsRevalidationCount returns the total number of fact-needs-revalidation events.
+func (m *InMemoryDiscoverabilityMetrics) FactNeedsRevalidationCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.factNeedsRevalidation
+}
+
+// CommunityDetectCount returns the recorded count for `outcome`.
+func (m *InMemoryDiscoverabilityMetrics) CommunityDetectCount(outcome string) int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.communityDetectOuts[outcome]
+}
+
+// CommunityDetectSamples returns a copy of the recorded community-detection samples.
+func (m *InMemoryDiscoverabilityMetrics) CommunityDetectSamples() []CommunityDetectSample {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]CommunityDetectSample, len(m.communityDetectSamples))
+	copy(out, m.communityDetectSamples)
+	return out
 }

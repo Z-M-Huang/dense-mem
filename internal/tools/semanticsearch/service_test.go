@@ -4,9 +4,94 @@ import (
 	"context"
 	"testing"
 
+	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// mockScopedReader implements ScopedReaderInterface for unit testing the searcher.
+type mockScopedReader struct {
+	scopedReadFunc func(ctx context.Context, profileID string, query string, params map[string]any) (neo4j.ResultSummary, []map[string]any, error)
+}
+
+func (m *mockScopedReader) ScopedRead(ctx context.Context, profileID string, query string, params map[string]any) (neo4j.ResultSummary, []map[string]any, error) {
+	if m.scopedReadFunc != nil {
+		return m.scopedReadFunc(ctx, profileID, query, params)
+	}
+	return nil, nil, nil
+}
+
+// TestQueryVectorIndex tests that QueryVectorIndex returns f.fragment_id as the hit ID.
+// This is the red-test gate for Unit 11: the searcher must use fragment_id, not f.id.
+func TestQueryVectorIndex(t *testing.T) {
+	ctx := context.Background()
+	profileID := "test-profile-id"
+	fragID := "frag-uuid-1234"
+
+	embedding := make([]float32, 3)
+	for i := range embedding {
+		embedding[i] = 0.1
+	}
+
+	mockReader := &mockScopedReader{
+		scopedReadFunc: func(ctx context.Context, pid string, query string, params map[string]any) (neo4j.ResultSummary, []map[string]any, error) {
+			// Verify the profileID is passed through to enforce the profile_id WHERE filter.
+			require.Equal(t, profileID, pid, "ScopedRead must receive the requesting profileID")
+			rows := []map[string]any{
+				{
+					"id":         fragID, // searcher aliases f.fragment_id AS id
+					"content":    "test content",
+					"score":      float64(0.9),
+					"labels":     []any{},
+					"metadata":   map[string]any{},
+					"profile_id": profileID,
+				},
+			}
+			return nil, rows, nil
+		},
+	}
+
+	searcher := NewEmbeddingSearcher(mockReader)
+	hits, err := searcher.QueryVectorIndex(ctx, profileID, embedding, 10)
+	require.NoError(t, err)
+	require.Len(t, hits, 1)
+	// The hit ID must come from f.fragment_id, not f.id.
+	require.Equal(t, fragID, hits[0].ID, "SearchHit.ID must equal the fragment_id property")
+	require.Equal(t, profileID, hits[0].ProfileID)
+}
+
+// TestQueryVectorIndex_CrossProfileIsolation verifies that the searcher passes
+// the requesting profileID to ScopedRead so the Cypher WHERE clause scopes
+// results to the correct profile (profile A must not see profile B's data).
+func TestQueryVectorIndex_CrossProfileIsolation(t *testing.T) {
+	ctx := context.Background()
+	profileA := "profile-a-id"
+	profileB := "profile-b-id"
+
+	embedding := make([]float32, 3)
+	for i := range embedding {
+		embedding[i] = 0.1
+	}
+
+	var capturedProfileID string
+	mockReader := &mockScopedReader{
+		scopedReadFunc: func(ctx context.Context, pid string, query string, params map[string]any) (neo4j.ResultSummary, []map[string]any, error) {
+			capturedProfileID = pid
+			return nil, nil, nil
+		},
+	}
+
+	searcher := NewEmbeddingSearcher(mockReader)
+
+	_, err := searcher.QueryVectorIndex(ctx, profileA, embedding, 10)
+	require.NoError(t, err)
+	require.Equal(t, profileA, capturedProfileID, "ScopedRead must receive profile A's ID")
+
+	_, err = searcher.QueryVectorIndex(ctx, profileB, embedding, 10)
+	require.NoError(t, err)
+	require.Equal(t, profileB, capturedProfileID, "ScopedRead must receive profile B's ID — not profile A's")
+	require.NotEqual(t, profileA, capturedProfileID, "profile B query must not pass profile A's ID to ScopedRead")
+}
 
 // mockEmbeddingSearcher implements EmbeddingSearcherInterface for testing.
 type mockEmbeddingSearcher struct {

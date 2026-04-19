@@ -7,23 +7,50 @@ import (
 // ErrorCode represents a typed error code for API errors.
 type ErrorCode string
 
-// Error code constants
+// Error code constants — generic surface codes (kept for backward compatibility)
 const (
-	AUTH_MISSING                    ErrorCode = "AUTH_MISSING"
-	AUTH_INVALID                    ErrorCode = "AUTH_INVALID"
-	AUTH_EXPIRED                    ErrorCode = "AUTH_EXPIRED"
-	AUTH_REVOKED                    ErrorCode = "AUTH_REVOKED"
-	FORBIDDEN                       ErrorCode = "FORBIDDEN"
-	NOT_FOUND                       ErrorCode = "NOT_FOUND"
-	VALIDATION_ERROR                ErrorCode = "VALIDATION_ERROR"
-	PROFILE_ID_REQUIRED             ErrorCode = "PROFILE_ID_REQUIRED"
-	INVALID_UUID                    ErrorCode = "INVALID_UUID"
-	CONFLICT                        ErrorCode = "CONFLICT"
-	PROFILE_HAS_ACTIVE_KEYS         ErrorCode = "PROFILE_HAS_ACTIVE_KEYS"
-	RATE_LIMITED                    ErrorCode = "RATE_LIMITED"
-	SERVICE_UNAVAILABLE             ErrorCode = "SERVICE_UNAVAILABLE"
-	INTERNAL_ERROR                  ErrorCode = "INTERNAL_ERROR"
+	AUTH_MISSING                        ErrorCode = "AUTH_MISSING"
+	AUTH_INVALID                        ErrorCode = "AUTH_INVALID"
+	AUTH_EXPIRED                        ErrorCode = "AUTH_EXPIRED"
+	AUTH_REVOKED                        ErrorCode = "AUTH_REVOKED"
+	FORBIDDEN                           ErrorCode = "FORBIDDEN"
+	NOT_FOUND                           ErrorCode = "NOT_FOUND"
+	VALIDATION_ERROR                    ErrorCode = "VALIDATION_ERROR"
+	PROFILE_ID_REQUIRED                 ErrorCode = "PROFILE_ID_REQUIRED"
+	INVALID_UUID                        ErrorCode = "INVALID_UUID"
+	CONFLICT                            ErrorCode = "CONFLICT"
+	PROFILE_HAS_ACTIVE_KEYS             ErrorCode = "PROFILE_HAS_ACTIVE_KEYS"
+	RATE_LIMITED                        ErrorCode = "RATE_LIMITED"
+	SERVICE_UNAVAILABLE                 ErrorCode = "SERVICE_UNAVAILABLE"
+	INTERNAL_ERROR                      ErrorCode = "INTERNAL_ERROR"
 	EMBEDDING_GENERATION_NOT_CONFIGURED ErrorCode = "EMBEDDING_GENERATION_NOT_CONFIGURED"
+)
+
+// Knowledge-pipeline domain error codes — stable external lowercase codes (AC-X6).
+// These represent specific failure modes in the claim/fact promotion pipeline and
+// are intended to be part of the public API contract for clients.
+const (
+	// Fragment / lookup errors (404)
+	ErrSupportingFragmentMissing ErrorCode = "supporting_fragment_missing"
+	ErrClaimNotFound             ErrorCode = "claim_not_found"
+	ErrFactNotFound              ErrorCode = "fact_not_found"
+
+	// Verifier back-pressure (429 / 50x)
+	ErrVerifierRateLimit         ErrorCode = "verifier_rate_limit"
+	ErrVerifierTimeout           ErrorCode = "verifier_timeout"
+	ErrVerifierProvider          ErrorCode = "verifier_provider"
+	ErrVerifierMalformedResponse ErrorCode = "verifier_malformed_response"
+
+	// Policy / predicate violations (422)
+	ErrPredicateNotPoliced   ErrorCode = "predicate_not_policed"
+	ErrUnsupportedPolicy     ErrorCode = "unsupported_policy"
+	ErrCommunityGraphTooLarge ErrorCode = "community_graph_too_large"
+
+	// State-machine conflicts (409)
+	ErrNeedsClaimValidated ErrorCode = "needs_claim_validated"
+	ErrGateRejected        ErrorCode = "gate_rejected"
+	ErrComparableDisputed  ErrorCode = "comparable_disputed"
+	ErrRejectedWeaker      ErrorCode = "rejected_weaker"
 )
 
 // ErrorDetail represents a single validation error detail.

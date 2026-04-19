@@ -207,6 +207,8 @@ func (s *createFragmentService) Create(ctx context.Context, profileID string, re
 		IdempotencyKey:      req.IdempotencyKey,
 		EmbeddingModel:      model,
 		EmbeddingDimensions: dims,
+		SourceQuality:       req.SourceQuality,
+		Classification:      req.Classification,
 		CreatedAt:           now,
 		UpdatedAt:           now,
 	}
@@ -227,6 +229,8 @@ func (s *createFragmentService) Create(ctx context.Context, profileID string, re
 			embedding: $embedding,
 			embedding_model: $embeddingModel,
 			embedding_dimensions: $embeddingDimensions,
+			source_quality: $sourceQuality,
+			classification: $classification,
 			created_at: $createdAt,
 			updated_at: $updatedAt
 		})
@@ -244,6 +248,8 @@ func (s *createFragmentService) Create(ctx context.Context, profileID string, re
 		"embedding":           vec,
 		"embeddingModel":      fragment.EmbeddingModel,
 		"embeddingDimensions": fragment.EmbeddingDimensions,
+		"sourceQuality":       fragment.SourceQuality,
+		"classification":      fragment.Classification,
 		"createdAt":           fragment.CreatedAt,
 		"updatedAt":           fragment.UpdatedAt,
 	}

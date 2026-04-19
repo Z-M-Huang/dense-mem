@@ -248,6 +248,51 @@ func RegisterProtectedRoutesWithHandlers(e *echo.Echo, deps ProtectedDeps, handl
 	if handlers.FragmentDelete != nil {
 		fragmentGroup.DELETE("/:id", handlers.FragmentDelete, middleware.RequireScopes("write"))
 	}
+	if handlers.FragmentRetract != nil {
+		fragmentGroup.POST("/:id/retract", handlers.FragmentRetract, middleware.RequireScopes("write"))
+	}
+
+	// Claim routes — canonical /api/v1/claims (AC-16, knowledge pipeline Phase 2)
+	// Middleware: auth -> profile resolution(header) -> profile authorization -> rate limit
+	claimGroup := e.Group("/api/v1/claims")
+	claimGroup.Use(middleware.AuthMiddleware(deps.APIKeyRepo, deps.AuditService))
+	claimGroup.Use(middleware.ProfileResolutionMiddleware(deps.ProfileService))
+	claimGroup.Use(middleware.AuthorizeProfile(profileAuthzSvc))
+	claimGroup.Use(middleware.RateLimitMiddleware(deps.RateLimitService, deps.Config, deps.AuditService))
+
+	if handlers.ClaimCreate != nil {
+		claimGroup.POST("", handlers.ClaimCreate, middleware.RequireScopes("write"))
+	}
+	if handlers.ClaimRead != nil {
+		claimGroup.GET("/:id", handlers.ClaimRead, middleware.RequireScopes("read"))
+	}
+	if handlers.ClaimList != nil {
+		claimGroup.GET("", handlers.ClaimList, middleware.RequireScopes("read"))
+	}
+	if handlers.ClaimDelete != nil {
+		claimGroup.DELETE("/:id", handlers.ClaimDelete, middleware.RequireScopes("write"))
+	}
+	if handlers.ClaimVerify != nil {
+		claimGroup.POST("/:id/verify", handlers.ClaimVerify, middleware.RequireScopes("write"))
+	}
+	if handlers.ClaimPromote != nil {
+		claimGroup.POST("/:id/promote", handlers.ClaimPromote, middleware.RequireScopes("write"))
+	}
+
+	// Fact routes — canonical /api/v1/facts (AC-41, knowledge pipeline Phase 4)
+	// Middleware: auth -> profile resolution(header) -> profile authorization -> rate limit
+	factGroup := e.Group("/api/v1/facts")
+	factGroup.Use(middleware.AuthMiddleware(deps.APIKeyRepo, deps.AuditService))
+	factGroup.Use(middleware.ProfileResolutionMiddleware(deps.ProfileService))
+	factGroup.Use(middleware.AuthorizeProfile(profileAuthzSvc))
+	factGroup.Use(middleware.RateLimitMiddleware(deps.RateLimitService, deps.Config, deps.AuditService))
+
+	if handlers.FactGet != nil {
+		factGroup.GET("/:id", handlers.FactGet, middleware.RequireScopes("read"))
+	}
+	if handlers.FactList != nil {
+		factGroup.GET("", handlers.FactList, middleware.RequireScopes("read"))
+	}
 
 	// Tool routes
 	toolGroup := e.Group("/api/v1/tools")
@@ -309,6 +354,21 @@ func RegisterProtectedRoutesWithHandlers(e *echo.Echo, deps ProtectedDeps, handl
 	if handlers.InvariantScan != nil {
 		adminGroup.POST("/invariant-scan", handlers.InvariantScan)
 	}
+	if handlers.CommunityDetect != nil {
+		adminGroup.POST("/profiles/:profileId/community/detect", handlers.CommunityDetect)
+	}
+
+	// Recall route — canonical GET /api/v1/recall (AC-55, AC-62)
+	// Middleware: auth -> profile resolution(header) -> profile authorization -> rate limit
+	recallGroup := e.Group("/api/v1/recall")
+	recallGroup.Use(middleware.AuthMiddleware(deps.APIKeyRepo, deps.AuditService))
+	recallGroup.Use(middleware.ProfileResolutionMiddleware(deps.ProfileService))
+	recallGroup.Use(middleware.AuthorizeProfile(profileAuthzSvc))
+	recallGroup.Use(middleware.RateLimitMiddleware(deps.RateLimitService, deps.Config, deps.AuditService))
+
+	if handlers.Recall != nil {
+		recallGroup.GET("", handlers.Recall, middleware.RequireScopes("read"))
+	}
 }
 
 // ProtectedHandlers holds handler functions for protected routes.
@@ -337,4 +397,23 @@ type ProtectedHandlers struct {
 	OpenAPIAISafe   echo.HandlerFunc
 	OpenAPIFull     echo.HandlerFunc
 	APIKeySvc       handler.APIKeyServiceInterface // Service for API key routes
+	// Claim handlers — knowledge pipeline Phase 2 (AC-16)
+	ClaimCreate echo.HandlerFunc
+	ClaimRead   echo.HandlerFunc
+	ClaimList   echo.HandlerFunc
+	ClaimDelete echo.HandlerFunc
+	// ClaimVerify handles POST /api/v1/claims/:id/verify (Phase 3 entailment verification)
+	ClaimVerify echo.HandlerFunc
+	// ClaimPromote handles POST /api/v1/claims/:id/promote (Phase 4 fact promotion)
+	ClaimPromote echo.HandlerFunc
+	// FactGet handles GET /api/v1/facts/:id (Phase 4 fact retrieval)
+	FactGet echo.HandlerFunc
+	// FactList handles GET /api/v1/facts (Phase 4 fact listing)
+	FactList echo.HandlerFunc
+	// FragmentRetract handles POST /api/v1/fragments/:id/retract (Phase 6 soft tombstone)
+	FragmentRetract echo.HandlerFunc
+	// CommunityDetect handles POST /api/v1/admin/profiles/:profileId/community/detect (Phase 7)
+	CommunityDetect echo.HandlerFunc
+	// Recall handles GET /api/v1/recall?q=...&limit=... (Phase 9 hybrid recall)
+	Recall echo.HandlerFunc
 }

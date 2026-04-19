@@ -7,6 +7,9 @@ import (
 	"fmt"
 
 	"github.com/dense-mem/dense-mem/internal/http/dto"
+	"github.com/dense-mem/dense-mem/internal/service/claimservice"
+	"github.com/dense-mem/dense-mem/internal/service/communityservice"
+	"github.com/dense-mem/dense-mem/internal/service/factservice"
 	"github.com/dense-mem/dense-mem/internal/service/fragmentservice"
 	"github.com/dense-mem/dense-mem/internal/service/recallservice"
 	"github.com/dense-mem/dense-mem/internal/tools/graphquery"
@@ -18,13 +21,28 @@ import (
 // canonical v1 tool catalog. Any optional service left nil produces a tool
 // entry with Available=false and an invoker that returns ErrToolUnavailable.
 type Dependencies struct {
-	FragmentCreate      fragmentservice.CreateFragmentService
-	FragmentGet         fragmentservice.GetFragmentService
-	FragmentList        fragmentservice.ListFragmentsService
-	Recall              recallservice.RecallService
-	KeywordSearch       keywordsearch.KeywordSearchService
-	SemanticSearch      semanticsearch.SemanticSearchService
-	GraphQuery          graphquery.GraphQueryService
+	// Fragment tools (v1)
+	FragmentCreate fragmentservice.CreateFragmentService
+	FragmentGet    fragmentservice.GetFragmentService
+	FragmentList   fragmentservice.ListFragmentsService
+	Recall         recallservice.RecallService
+
+	// Search / graph tools (v1)
+	KeywordSearch  keywordsearch.KeywordSearchService
+	SemanticSearch semanticsearch.SemanticSearchService
+	GraphQuery     graphquery.GraphQueryService
+
+	// Knowledge pipeline tools
+	ClaimCreate     claimservice.CreateClaimService
+	ClaimGet        claimservice.GetClaimService
+	ClaimList       claimservice.ListClaimsService
+	ClaimVerify     claimservice.VerifyClaimService
+	FactPromote     factservice.PromoteClaimService
+	FactGet         factservice.GetFactService
+	FactList        factservice.ListFactsService
+	FragmentRetract fragmentservice.RetractFragmentService
+	CommunityDetect communityservice.DetectCommunityService
+
 	EmbeddingConfigured bool
 }
 
@@ -46,6 +64,7 @@ func BuildDefault(deps Dependencies) (Registry, error) {
 
 func defaultTools(deps Dependencies) []Tool {
 	return []Tool{
+		// v1 fragment + search tools
 		saveMemoryTool(deps),
 		getMemoryTool(deps),
 		listRecentMemoriesTool(deps),
@@ -53,6 +72,16 @@ func defaultTools(deps Dependencies) []Tool {
 		keywordSearchTool(deps),
 		semanticSearchTool(deps),
 		graphQueryTool(deps),
+		// knowledge pipeline tools
+		postClaimTool(deps),
+		getClaimTool(deps),
+		listClaimsTool(deps),
+		verifyClaimTool(deps),
+		promoteClaimTool(deps),
+		getFactTool(deps),
+		listFactsTool(deps),
+		retractFragmentTool(deps),
+		detectCommunityTool(deps),
 	}
 }
 

@@ -222,3 +222,70 @@ func TestFragmentModel_HasAllRequiredFields(t *testing.T) {
 	assert.True(t, SourceTypeObservation.IsValid())
 	assert.True(t, SourceTypeManual.IsValid())
 }
+
+// TestFragmentStatus is the red-test gate for Unit 45.
+// It verifies that FragmentStatus type constants exist and that
+// Fragment carries Status and RecordedTo fields per AC-43.
+func TestFragmentStatus(t *testing.T) {
+	t.Run("constant values are correct strings", func(t *testing.T) {
+		assert.Equal(t, FragmentStatus("active"), FragmentStatusActive)
+		assert.Equal(t, FragmentStatus("retracted"), FragmentStatusRetracted)
+	})
+
+	t.Run("fragment status field accepts active", func(t *testing.T) {
+		f := Fragment{Status: FragmentStatusActive}
+		assert.Equal(t, FragmentStatusActive, f.Status)
+	})
+
+	t.Run("fragment status field accepts retracted", func(t *testing.T) {
+		f := Fragment{Status: FragmentStatusRetracted}
+		assert.Equal(t, FragmentStatusRetracted, f.Status)
+	})
+
+	t.Run("fragment recorded_to field is nil by default", func(t *testing.T) {
+		f := Fragment{}
+		assert.Nil(t, f.RecordedTo)
+	})
+
+	t.Run("fragment recorded_to field accepts a time pointer", func(t *testing.T) {
+		now := time.Now().UTC()
+		f := Fragment{RecordedTo: &now}
+		require.NotNil(t, f.RecordedTo)
+		assert.True(t, now.Equal(*f.RecordedTo))
+	})
+
+	t.Run("status serializes to json", func(t *testing.T) {
+		f := Fragment{
+			FragmentID: "test-id",
+			Status:     FragmentStatusRetracted,
+		}
+		b, err := json.Marshal(f)
+		require.NoError(t, err)
+		assert.Contains(t, string(b), `"status":"retracted"`)
+	})
+
+	t.Run("status omitted from json when zero value", func(t *testing.T) {
+		f := Fragment{FragmentID: "test-id"}
+		b, err := json.Marshal(f)
+		require.NoError(t, err)
+		assert.NotContains(t, string(b), `"status"`)
+	})
+
+	t.Run("recorded_to omitted from json when nil", func(t *testing.T) {
+		f := Fragment{FragmentID: "test-id"}
+		b, err := json.Marshal(f)
+		require.NoError(t, err)
+		assert.NotContains(t, string(b), `"recorded_to"`)
+	})
+
+	t.Run("recorded_to serializes to json when set", func(t *testing.T) {
+		ts := time.Date(2025, 6, 1, 12, 0, 0, 0, time.UTC)
+		f := Fragment{
+			FragmentID: "test-id",
+			RecordedTo: &ts,
+		}
+		b, err := json.Marshal(f)
+		require.NoError(t, err)
+		assert.Contains(t, string(b), `"recorded_to"`)
+	})
+}

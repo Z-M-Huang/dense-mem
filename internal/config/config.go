@@ -38,6 +38,14 @@ type ConfigProvider interface {
 	GetAIEmbeddingDimensions() int
 	GetAIEmbeddingTimeoutSeconds() int
 	IsEmbeddingConfigured() bool
+	// Knowledge-pipeline knobs (AC-X3)
+	GetAIVerifierModel() string
+	GetAIVerifierMaxConcurrency() int
+	GetClaimWriteRateLimit() int
+	GetClaimReadRateLimit() int
+	GetRecallValidatedClaimWeight() float64
+	GetPromoteTxTimeoutSeconds() int
+	GetAICommunityMaxNodes() int
 }
 
 // Config holds all configuration for the application.
@@ -71,6 +79,14 @@ type Config struct {
 	AIEmbeddingModel           string
 	AIEmbeddingDimensions      int
 	AIEmbeddingTimeoutSeconds  int
+	// Knowledge-pipeline knobs (AC-X3)
+	AIVerifierModel              string
+	AIVerifierMaxConcurrency     int
+	ClaimWriteRateLimit          int
+	ClaimReadRateLimit           int
+	RecallValidatedClaimWeight   float64
+	PromoteTxTimeoutSeconds      int
+	AICommunityMaxNodes          int
 }
 
 // Ensure Config implements ConfigProvider
@@ -109,6 +125,15 @@ func (c *Config) IsEmbeddingConfigured() bool {
 	return c.AIAPIURL != "" && c.AIAPIKey != "" && c.AIEmbeddingModel != "" && c.AIEmbeddingDimensions > 0
 }
 
+// Knowledge-pipeline getters (AC-X3)
+func (c *Config) GetAIVerifierModel() string            { return c.AIVerifierModel }
+func (c *Config) GetAIVerifierMaxConcurrency() int      { return c.AIVerifierMaxConcurrency }
+func (c *Config) GetClaimWriteRateLimit() int           { return c.ClaimWriteRateLimit }
+func (c *Config) GetClaimReadRateLimit() int            { return c.ClaimReadRateLimit }
+func (c *Config) GetRecallValidatedClaimWeight() float64 { return c.RecallValidatedClaimWeight }
+func (c *Config) GetPromoteTxTimeoutSeconds() int       { return c.PromoteTxTimeoutSeconds }
+func (c *Config) GetAICommunityMaxNodes() int           { return c.AICommunityMaxNodes }
+
 // ValidationError represents a configuration validation failure.
 type ValidationError struct {
 	Field   string
@@ -139,6 +164,22 @@ func parseIntOrDefault(key string, defaultValue int) (int, error) {
 		return 0, &ValidationError{
 			Field:   key,
 			Message: fmt.Sprintf("invalid integer value: %s", value),
+		}
+	}
+	return parsed, nil
+}
+
+// parseFloatOrDefault parses an environment variable as float64 or returns the default.
+func parseFloatOrDefault(key string, defaultValue float64) (float64, error) {
+	value := os.Getenv(key)
+	if value == "" {
+		return defaultValue, nil
+	}
+	parsed, err := strconv.ParseFloat(value, 64)
+	if err != nil {
+		return 0, &ValidationError{
+			Field:   key,
+			Message: fmt.Sprintf("invalid float value: %s", value),
 		}
 	}
 	return parsed, nil
@@ -251,6 +292,39 @@ func Load() (Config, error) {
 		return cfg, err
 	}
 
+	// Knowledge-pipeline knobs (AC-X3)
+	cfg.AIVerifierModel = getEnvOrDefault("AI_VERIFIER_MODEL", "gpt-4o-mini")
+
+	cfg.AIVerifierMaxConcurrency, err = parseIntOrDefault("AI_VERIFIER_MAX_CONCURRENCY", 5)
+	if err != nil {
+		return cfg, err
+	}
+
+	cfg.ClaimWriteRateLimit, err = parseIntOrDefault("CLAIM_WRITE_RATE_LIMIT", 60)
+	if err != nil {
+		return cfg, err
+	}
+
+	cfg.ClaimReadRateLimit, err = parseIntOrDefault("CLAIM_READ_RATE_LIMIT", 300)
+	if err != nil {
+		return cfg, err
+	}
+
+	cfg.RecallValidatedClaimWeight, err = parseFloatOrDefault("RECALL_VALIDATED_CLAIM_WEIGHT", 0.5)
+	if err != nil {
+		return cfg, err
+	}
+
+	cfg.PromoteTxTimeoutSeconds, err = parseIntOrDefault("PROMOTE_TX_TIMEOUT_SECONDS", 10)
+	if err != nil {
+		return cfg, err
+	}
+
+	cfg.AICommunityMaxNodes, err = parseIntOrDefault("AI_COMMUNITY_MAX_NODES", 500000)
+	if err != nil {
+		return cfg, err
+	}
+
 	// Validation
 	if cfg.PostgresDSN == "" {
 		return cfg, &ValidationError{
@@ -296,6 +370,11 @@ func Load() (Config, error) {
 		{"ADMIN_QUERY_TIMEOUT_SECONDS", cfg.AdminQueryTimeoutSeconds},
 		{"ADMIN_QUERY_ROW_CAP", cfg.AdminQueryRowCap},
 		{"EMBEDDING_DIMENSIONS", cfg.EmbeddingDimensions},
+		{"AI_VERIFIER_MAX_CONCURRENCY", cfg.AIVerifierMaxConcurrency},
+		{"CLAIM_WRITE_RATE_LIMIT", cfg.ClaimWriteRateLimit},
+		{"CLAIM_READ_RATE_LIMIT", cfg.ClaimReadRateLimit},
+		{"PROMOTE_TX_TIMEOUT_SECONDS", cfg.PromoteTxTimeoutSeconds},
+		{"AI_COMMUNITY_MAX_NODES", cfg.AICommunityMaxNodes},
 	}
 
 	for _, field := range numericFields {
@@ -304,6 +383,14 @@ func Load() (Config, error) {
 				Field:   field.name,
 				Message: fmt.Sprintf("must be greater than 0, got %d", field.value),
 			}
+		}
+	}
+
+	// RecallValidatedClaimWeight must be in [0, 1]
+	if cfg.RecallValidatedClaimWeight < 0 || cfg.RecallValidatedClaimWeight > 1 {
+		return cfg, &ValidationError{
+			Field:   "RECALL_VALIDATED_CLAIM_WEIGHT",
+			Message: fmt.Sprintf("must be between 0 and 1, got %f", cfg.RecallValidatedClaimWeight),
 		}
 	}
 

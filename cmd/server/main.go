@@ -295,6 +295,14 @@ func main() {
 	openAPIAISafeHandler := handler.NewOpenAPIHandler(openAPIGen, openapi.SpecVariantAISafe)
 	openAPIFullHandler := handler.NewOpenAPIHandler(openAPIGen, openapi.SpecVariantFull)
 
+	// Recall handler — only wired when recall service is available (requires
+	// embedding to be configured). Follows the same conditional pattern as
+	// fragmentCreateHandler.
+	var recallHandler *handler.RecallHandler
+	if recallSvc != nil {
+		recallHandler = handler.NewRecallHandler(recallSvc)
+	}
+
 	// ========================================
 	// Health checks
 	// ========================================
@@ -357,6 +365,9 @@ func main() {
 	}
 	if fragmentCreateHandler != nil {
 		protectedHandlers.FragmentCreate = fragmentCreateHandler.Handle
+	}
+	if recallHandler != nil {
+		protectedHandlers.Recall = recallHandler.Handle
 	}
 
 	http.RegisterProtectedRoutesWithHandlers(e, protectedDeps, protectedHandlers)

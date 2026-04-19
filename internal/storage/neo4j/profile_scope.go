@@ -18,11 +18,31 @@ type ScopedWriter interface {
 	ScopedWrite(ctx context.Context, profileID string, query string, params map[string]any) (neo4j.ResultSummary, error)
 }
 
-// ProfileScopeEnforcer composes ScopedReader and ScopedWriter for profile-scoped operations.
+// ScopedTx is the query-execution surface of a profile-scoped managed transaction.
+// Consumers call RunScoped rather than tx.Run directly so every statement in a
+// multi-query transaction carries the $profileId guard.
+// The interface is defined here so callers and tests can depend on the abstraction
+// rather than the concrete neo4j driver type.
+type ScopedTx interface {
+	Run(ctx context.Context, cypher string, params map[string]any) (neo4j.ResultWithContext, error)
+}
+
+// ProfileScopeEnforcer composes ScopedReader, ScopedWriter, and ScopedWriteTx
+// for all profile-scoped Neo4j operations.
 type ProfileScopeEnforcer interface {
 	ScopedReader
 	ScopedWriter
+	// ScopedWriteTx opens a write transaction scoped to profileID.
+	// The caller-supplied fn receives the underlying neo4j.ManagedTransaction;
+	// every query inside fn MUST be executed via RunScoped to maintain the guard.
+	ScopedWriteTx(ctx context.Context, profileID string, fn func(tx neo4j.ManagedTransaction) error) error
 }
+
+// FragmentActiveFilter is the Cypher WHERE-clause expression that excludes
+// retracted SourceFragment nodes from all read/dedupe queries. It uses
+// coalesce so that legacy nodes with no status property are treated as active
+// (AC-44).
+const FragmentActiveFilter = "coalesce(sf.status,'active') <> 'retracted'"
 
 // profileScopeEnforcer enforces profile_id scoping on all Neo4j operations.
 // It injects profileId into queries and validates that queries contain the required placeholder.
@@ -126,6 +146,38 @@ func (e *profileScopeEnforcer) ScopedWrite(ctx context.Context, profileID string
 	}
 
 	return summary, nil
+}
+
+// ScopedWriteTx opens a profile-scoped write transaction.
+// profileID must be non-empty; the executor's ExecuteWrite is called and fn
+// receives the raw neo4j.ManagedTransaction. Every Cypher statement inside fn
+// must be run through RunScoped to enforce the $profileId guard per query.
+// Any error returned by fn is propagated as the return value of ScopedWriteTx.
+func (e *profileScopeEnforcer) ScopedWriteTx(ctx context.Context, profileID string, fn func(tx neo4j.ManagedTransaction) error) error {
+	if profileID == "" {
+		return ErrEmptyProfileID
+	}
+
+	_, err := e.executor.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
+		return nil, fn(tx)
+	})
+	return err
+}
+
+// RunScoped validates profile scoping and executes a single Cypher query within
+// an existing managed transaction, reusing validateAndPrepare semantics:
+//   - profileID must be non-empty
+//   - params must not already contain "profileId"
+//   - query must contain the "$profileId" placeholder
+//
+// profileId is injected automatically; the caller must never supply it.
+// Returns the raw neo4j.ResultWithContext so callers can collect records inside a multi-query tx.
+func RunScoped(ctx context.Context, tx neo4j.ManagedTransaction, profileID string, query string, params map[string]any) (neo4j.ResultWithContext, error) {
+	prepared, err := (&profileScopeEnforcer{}).validateAndPrepare(profileID, query, params)
+	if err != nil {
+		return nil, err
+	}
+	return tx.Run(ctx, query, prepared)
 }
 
 // validateAndPrepare performs common validation and parameter injection.

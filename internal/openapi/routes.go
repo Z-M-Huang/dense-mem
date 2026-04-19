@@ -21,6 +21,30 @@ type RouteDescriptor struct {
 	// AdminOnly routes appear in the full variant only.
 	AdminOnly   bool
 	Description string
+
+	// RequestSchema is an explicit component-schema name for the request body.
+	// When set, it takes priority over any ToolName-derived input schema.
+	// This allows routes that ship before MCP tool registration to declare
+	// their schemas directly.
+	RequestSchema string
+
+	// ResponseSchema is an explicit component-schema name for the success
+	// response body. When set, it takes priority over any ToolName-derived
+	// output schema.
+	ResponseSchema string
+
+	// SuccessStatus is the HTTP status code for the success response. Defaults
+	// to 200 when zero. Use 201 for resource-creation routes.
+	SuccessStatus int
+
+	// ExtraResponses maps additional HTTP status codes to their descriptions.
+	// These are merged into the operation's responses block alongside the
+	// standard error codes.
+	ExtraResponses map[string]string
+
+	// Tags overrides the auto-inferred operation tags when non-empty. If
+	// empty, tags are derived from the route path and flags as before.
+	Tags []string
 }
 
 // DefaultRoutes returns the canonical route table for the v1 surface. New
@@ -28,16 +52,44 @@ type RouteDescriptor struct {
 // surface in the generated OpenAPI doc.
 func DefaultRoutes() []RouteDescriptor {
 	return []RouteDescriptor{
+		// --- Claims (AI-safe, knowledge pipeline Phase 2 & 3) ---
+		{Method: "POST", Path: "/api/v1/claims", OperationID: "createClaim", RequestSchema: "ClaimRequest", ResponseSchema: "ClaimResponse", SuccessStatus: 201, AISafe: true, Tags: []string{"knowledge"}, Description: "Create a new candidate claim derived from a source fragment."},
+		{Method: "GET", Path: "/api/v1/claims/{id}", OperationID: "getClaim", ResponseSchema: "ClaimResponse", AISafe: true, Tags: []string{"knowledge"}, Description: "Fetch a single claim by id."},
+		{Method: "GET", Path: "/api/v1/claims", OperationID: "listClaims", AISafe: true, Tags: []string{"knowledge"}, Description: "List claims (keyset pagination)."},
+		{Method: "DELETE", Path: "/api/v1/claims/{id}", OperationID: "deleteClaim", AISafe: true, Tags: []string{"knowledge"}, Description: "Hard-delete a claim."},
+		// Phase 3: entailment verification (AC-28, AC-30)
+		{Method: "POST", Path: "/api/v1/claims/{id}/verify", OperationID: "verifyClaim", ResponseSchema: "VerifyClaimResponse", AISafe: true, Tags: []string{"knowledge"}, Description: "Run entailment verification for a candidate claim.", ExtraResponses: map[string]string{
+			"429": "Verifier rate-limited; retry after Retry-After seconds.",
+			"502": "Verifier returned a malformed response.",
+			"503": "Verifier provider unavailable.",
+			"504": "Verifier request timed out.",
+		}},
+		// Phase 4: fact promotion (AC-41, AC-42)
+		{Method: "POST", Path: "/api/v1/claims/{id}/promote", OperationID: "promoteClaim", ResponseSchema: "FactResponse", SuccessStatus: 201, AISafe: true, Tags: []string{"knowledge"}, Description: "Promote a validated claim to an authoritative fact.", ExtraResponses: map[string]string{
+			"409": "Claim not validated, gate rejected, comparable fact disputed, or claim weaker than existing fact.",
+			"422": "Predicate not policed or unsupported promotion policy.",
+		}},
+
+		// --- Facts (AI-safe, knowledge pipeline Phase 4) ---
+		{Method: "GET", Path: "/api/v1/facts/{id}", OperationID: "getFact", ResponseSchema: "FactResponse", AISafe: true, Tags: []string{"knowledge"}, Description: "Fetch a single promoted fact by id."},
+		{Method: "GET", Path: "/api/v1/facts", OperationID: "listFacts", AISafe: true, Tags: []string{"knowledge"}, Description: "List promoted facts (keyset pagination)."},
+
 		// --- Fragments (AI-safe) ---
 		{Method: "POST", Path: "/api/v1/fragments", OperationID: "createFragment", ToolName: "save_memory", AISafe: true, Description: "Save a new memory fragment."},
 		{Method: "GET", Path: "/api/v1/fragments", OperationID: "listFragments", ToolName: "list_recent_memories", AISafe: true, Description: "List recent fragments (keyset pagination)."},
 		{Method: "GET", Path: "/api/v1/fragments/{id}", OperationID: "getFragment", ToolName: "get_memory", AISafe: true, Description: "Fetch a single fragment by id."},
 		{Method: "DELETE", Path: "/api/v1/fragments/{id}", OperationID: "deleteFragment", AISafe: true, Description: "Hard-delete a fragment."},
+		// Phase 6: soft tombstone (AC-48)
+		{Method: "POST", Path: "/api/v1/fragments/{id}/retract", OperationID: "retractFragment", ResponseSchema: "RetractFragmentResponse", AISafe: true, Tags: []string{"knowledge"}, Description: "Soft-tombstone a fragment; preserves graph lineage and triggers fact revalidation."},
 
 		// --- Tool catalog (AI-safe) ---
 		{Method: "GET", Path: "/api/v1/tools", OperationID: "listTools", AISafe: true, Description: "List all registered tools."},
 
 		// --- Recall (AI-safe) ---
+		{Method: "GET", Path: "/api/v1/recall", OperationID: "recallKnowledge", ResponseSchema: "RecallResponse", AISafe: true, Tags: []string{"knowledge"}, Description: "Hybrid semantic + keyword recall spanning all knowledge-pipeline tiers (facts, claims, fragments).", ExtraResponses: map[string]string{
+			"422": "Missing or invalid q parameter.",
+			"503": "Embedding provider unavailable.",
+		}},
 		{Method: "POST", Path: "/api/v1/tools/recall-memory", OperationID: "recallMemory", ToolName: "recall_memory", AISafe: true, Description: "Hybrid semantic + keyword recall over fragments."},
 
 		// --- Advanced tool routes (full variant only) ---
@@ -68,5 +120,7 @@ func DefaultRoutes() []RouteDescriptor {
 		{Method: "GET", Path: "/api/v1/admin/keys", OperationID: "adminListKeys", AdminOnly: true, Description: "List all API keys across profiles (admin)."},
 		{Method: "POST", Path: "/api/v1/admin/graph/query", OperationID: "adminGraphQuery", AdminOnly: true, Description: "Admin: raw Cypher with profile-scope injection."},
 		{Method: "POST", Path: "/api/v1/admin/invariant-scan", OperationID: "adminInvariantScan", AdminOnly: true, Description: "Admin: scan for invariant violations."},
+		// Phase 7: community detection (AC-49, AC-50, AC-52, AC-53, AC-54)
+		{Method: "POST", Path: "/api/v1/admin/profiles/{profileId}/community/detect", OperationID: "adminDetectCommunity", RequestSchema: "CommunityDetectRequest", AdminOnly: true, Tags: []string{"community"}, Description: "Admin: trigger community detection for a profile's knowledge graph using the Neo4j GDS plugin."},
 	}
 }

@@ -155,10 +155,572 @@ func TestGenerator_PathParamsDeclared(t *testing.T) {
 	}
 }
 
+// TestGenerateIncludesRetractRoute verifies that the Phase 6 retract endpoint
+// surfaces in the AI-safe spec with the correct operationId (retractFragment)
+// and a reference to the RetractFragmentResponse schema.
+// This is the red-test gate for Unit 50.
+func TestGenerateIncludesRetractRoute(t *testing.T) {
+	g := New(testRegistry(t), DefaultRoutes())
+	spec, err := g.Generate(SpecVariantAISafe)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	paths, ok := spec["paths"].(map[string]any)
+	if !ok {
+		t.Fatalf("paths missing or wrong type")
+	}
+
+	// The retract path must be present in the AI-safe spec.
+	const retractPath = "/api/v1/fragments/{id}/retract"
+	pathItem, present := paths[retractPath]
+	if !present {
+		t.Fatalf("retract route %q missing from ai-safe spec; have: %v", retractPath, keysOf(paths))
+	}
+
+	pathMap, ok := pathItem.(map[string]any)
+	if !ok {
+		t.Fatalf("%s path item is wrong type: %T", retractPath, pathItem)
+	}
+
+	// Must be a POST operation.
+	postOp, ok := pathMap["post"].(map[string]any)
+	if !ok {
+		t.Fatalf("POST %s missing from spec", retractPath)
+	}
+	if postOp["operationId"] != "retractFragment" {
+		t.Errorf("operationId = %v; want retractFragment", postOp["operationId"])
+	}
+
+	// Response must reference RetractFragmentResponse schema.
+	responses, ok := postOp["responses"].(map[string]any)
+	if !ok {
+		t.Fatalf("responses missing or wrong type")
+	}
+	resp200, ok := responses["200"].(map[string]any)
+	if !ok {
+		t.Fatalf("200 response missing from POST %s", retractPath)
+	}
+	content, ok := resp200["content"].(map[string]any)
+	if !ok {
+		t.Fatalf("200 response content missing")
+	}
+	appJSON, ok := content["application/json"].(map[string]any)
+	if !ok {
+		t.Fatalf("200 response application/json missing")
+	}
+	schema, ok := appJSON["schema"].(map[string]any)
+	if !ok {
+		t.Fatalf("200 response schema missing")
+	}
+	if got := schema["$ref"]; got != "#/components/schemas/RetractFragmentResponse" {
+		t.Errorf("200 response $ref = %v; want #/components/schemas/RetractFragmentResponse", got)
+	}
+
+	// RetractFragmentResponse schema must be present in components.
+	components, ok := spec["components"].(map[string]any)
+	if !ok {
+		t.Fatalf("components missing")
+	}
+	schemas, ok := components["schemas"].(map[string]any)
+	if !ok {
+		t.Fatalf("schemas missing")
+	}
+	if _, has := schemas["RetractFragmentResponse"]; !has {
+		t.Errorf("RetractFragmentResponse schema missing from components; have: %v", keysOf(schemas))
+	}
+}
+
 func keysOf(m map[string]any) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {
 		out = append(out, k)
 	}
 	return out
+}
+
+// TestGeneratorRespectsExplicitSchemaRefs verifies that when a RouteDescriptor
+// carries explicit RequestSchema / ResponseSchema / SuccessStatus / Tags, those
+// values are used in preference to any ToolName-derived schemas and the default
+// 200 status. This is the red-test gate for Unit 2.
+func TestGeneratorRespectsExplicitSchemaRefs(t *testing.T) {
+	route := RouteDescriptor{
+		Method:         "POST",
+		Path:           "/api/v1/claims",
+		OperationID:    "createClaim",
+		RequestSchema:  "ClaimRequest",
+		ResponseSchema: "ClaimResponse",
+		SuccessStatus:  201,
+		Tags:           []string{"knowledge"},
+		AISafe:         true,
+		Description:    "Create a new claim.",
+	}
+
+	g := New(testRegistry(t), []RouteDescriptor{route})
+	spec, err := g.Generate(SpecVariantAISafe)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	paths, ok := spec["paths"].(map[string]any)
+	if !ok {
+		t.Fatalf("paths missing or wrong type")
+	}
+	pathItem, ok := paths["/api/v1/claims"].(map[string]any)
+	if !ok {
+		t.Fatalf("/api/v1/claims missing from paths; have: %v", keysOf(paths))
+	}
+	op, ok := pathItem["post"].(map[string]any)
+	if !ok {
+		t.Fatalf("POST operation missing from /api/v1/claims")
+	}
+
+	// --- Tags must reflect the explicit Tags field, not path inference ---
+	tags, ok := op["tags"].([]string)
+	if !ok {
+		t.Fatalf("tags missing or wrong type: %T", op["tags"])
+	}
+	foundKnowledge := false
+	for _, tag := range tags {
+		if tag == "knowledge" {
+			foundKnowledge = true
+		}
+	}
+	if !foundKnowledge {
+		t.Errorf("tags = %v; want to contain \"knowledge\"", tags)
+	}
+
+	// --- Success response must use 201, not 200 ---
+	responses, ok := op["responses"].(map[string]any)
+	if !ok {
+		t.Fatalf("responses missing or wrong type")
+	}
+	if _, has := responses["201"]; !has {
+		t.Errorf("expected 201 response; got keys: %v", keysOf(responses))
+	}
+	if _, has := responses["200"]; has {
+		t.Errorf("expected no 200 response when SuccessStatus=201; got keys: %v", keysOf(responses))
+	}
+
+	// --- Request body must reference the explicit ClaimRequest schema ---
+	reqBody, ok := op["requestBody"].(map[string]any)
+	if !ok {
+		t.Fatalf("requestBody missing or wrong type")
+	}
+	content, ok := reqBody["content"].(map[string]any)
+	if !ok {
+		t.Fatalf("requestBody.content missing")
+	}
+	appJSON, ok := content["application/json"].(map[string]any)
+	if !ok {
+		t.Fatalf("requestBody.content[application/json] missing")
+	}
+	reqSchema, ok := appJSON["schema"].(map[string]any)
+	if !ok {
+		t.Fatalf("requestBody schema missing")
+	}
+	if got := reqSchema["$ref"]; got != "#/components/schemas/ClaimRequest" {
+		t.Errorf("requestBody $ref = %v; want #/components/schemas/ClaimRequest", got)
+	}
+
+	// --- 201 response must reference the explicit ClaimResponse schema ---
+	resp201, ok := responses["201"].(map[string]any)
+	if !ok {
+		t.Fatalf("201 response wrong type: %T", responses["201"])
+	}
+	resp201Content, ok := resp201["content"].(map[string]any)
+	if !ok {
+		t.Fatalf("201 response content missing")
+	}
+	resp201AppJSON, ok := resp201Content["application/json"].(map[string]any)
+	if !ok {
+		t.Fatalf("201 response application/json missing")
+	}
+	resp201Schema, ok := resp201AppJSON["schema"].(map[string]any)
+	if !ok {
+		t.Fatalf("201 response schema missing")
+	}
+	if got := resp201Schema["$ref"]; got != "#/components/schemas/ClaimResponse" {
+		t.Errorf("201 response $ref = %v; want #/components/schemas/ClaimResponse", got)
+	}
+}
+
+// TestGenerateIncludesClaimRoutes verifies that the four claim routes (POST,
+// GET /{id}, GET list, DELETE /{id}) surface in the AI-safe spec with correct
+// operationIds and that POST /api/v1/claims references the ClaimRequest schema.
+// This is the red-test gate for Unit 27.
+func TestGenerateIncludesClaimRoutes(t *testing.T) {
+	g := New(testRegistry(t), DefaultRoutes())
+	spec, err := g.Generate(SpecVariantAISafe)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	paths, ok := spec["paths"].(map[string]any)
+	if !ok {
+		t.Fatalf("paths missing or wrong type")
+	}
+
+	// All four claim paths must be present in the AI-safe spec.
+	for _, p := range []string{"/api/v1/claims", "/api/v1/claims/{id}"} {
+		if _, present := paths[p]; !present {
+			t.Errorf("claim path %q missing from ai-safe spec; have: %v", p, keysOf(paths))
+		}
+	}
+
+	claimsPath, ok := paths["/api/v1/claims"].(map[string]any)
+	if !ok {
+		t.Fatalf("/api/v1/claims is not a path item")
+	}
+
+	// POST must have createClaim operationId and reference ClaimRequest.
+	postOp, ok := claimsPath["post"].(map[string]any)
+	if !ok {
+		t.Fatalf("POST /api/v1/claims missing")
+	}
+	if postOp["operationId"] != "createClaim" {
+		t.Errorf("operationId = %v; want createClaim", postOp["operationId"])
+	}
+	reqBody, ok := postOp["requestBody"].(map[string]any)
+	if !ok {
+		t.Fatalf("POST /api/v1/claims requestBody missing")
+	}
+	content, ok := reqBody["content"].(map[string]any)
+	if !ok {
+		t.Fatalf("requestBody.content missing")
+	}
+	appJSON, ok := content["application/json"].(map[string]any)
+	if !ok {
+		t.Fatalf("requestBody application/json missing")
+	}
+	schema, ok := appJSON["schema"].(map[string]any)
+	if !ok {
+		t.Fatalf("requestBody schema missing")
+	}
+	if got := schema["$ref"]; got != "#/components/schemas/ClaimRequest" {
+		t.Errorf("POST /api/v1/claims requestBody $ref = %v; want #/components/schemas/ClaimRequest", got)
+	}
+
+	// GET list must have listClaims operationId.
+	getListOp, ok := claimsPath["get"].(map[string]any)
+	if !ok {
+		t.Fatalf("GET /api/v1/claims missing")
+	}
+	if getListOp["operationId"] != "listClaims" {
+		t.Errorf("list operationId = %v; want listClaims", getListOp["operationId"])
+	}
+
+	claimByIDPath, ok := paths["/api/v1/claims/{id}"].(map[string]any)
+	if !ok {
+		t.Fatalf("/api/v1/claims/{id} is not a path item")
+	}
+
+	// GET /{id} must have getClaim operationId.
+	getOp, ok := claimByIDPath["get"].(map[string]any)
+	if !ok {
+		t.Fatalf("GET /api/v1/claims/{id} missing")
+	}
+	if getOp["operationId"] != "getClaim" {
+		t.Errorf("get operationId = %v; want getClaim", getOp["operationId"])
+	}
+
+	// DELETE /{id} must have deleteClaim operationId.
+	deleteOp, ok := claimByIDPath["delete"].(map[string]any)
+	if !ok {
+		t.Fatalf("DELETE /api/v1/claims/{id} missing")
+	}
+	if deleteOp["operationId"] != "deleteClaim" {
+		t.Errorf("delete operationId = %v; want deleteClaim", deleteOp["operationId"])
+	}
+
+	// ClaimRequest schema must be present in components.
+	components, ok := spec["components"].(map[string]any)
+	if !ok {
+		t.Fatalf("components missing")
+	}
+	schemas, ok := components["schemas"].(map[string]any)
+	if !ok {
+		t.Fatalf("schemas missing")
+	}
+	if _, has := schemas["ClaimRequest"]; !has {
+		t.Errorf("ClaimRequest schema missing from components; have: %v", keysOf(schemas))
+	}
+	if _, has := schemas["ClaimResponse"]; !has {
+		t.Errorf("ClaimResponse schema missing from components")
+	}
+}
+
+// TestGenerator_CrossProfileIsolation verifies that spec generation is
+// profile-agnostic: two invocations produce identical output (no per-profile
+// state leaks into the static spec) and no hardcoded profile identifiers
+// appear in the generated document.
+func TestGenerator_CrossProfileIsolation(t *testing.T) {
+	g := New(testRegistry(t), DefaultRoutes())
+
+	spec1, err := g.Generate(SpecVariantFull)
+	if err != nil {
+		t.Fatalf("first Generate: %v", err)
+	}
+	spec2, err := g.Generate(SpecVariantFull)
+	if err != nil {
+		t.Fatalf("second Generate: %v", err)
+	}
+
+	b1, err := json.Marshal(spec1)
+	if err != nil {
+		t.Fatalf("marshal spec1: %v", err)
+	}
+	b2, err := json.Marshal(spec2)
+	if err != nil {
+		t.Fatalf("marshal spec2: %v", err)
+	}
+
+	// Idempotent output proves no mutable per-call state bleeds through.
+	if string(b1) != string(b2) {
+		t.Error("spec generation is not idempotent — per-profile state may be leaking")
+	}
+
+	// No hardcoded profile IDs should appear in the spec.
+	specStr := string(b1)
+	for _, needle := range []string{"profile_A", "profile_B", "profileA", "profileB"} {
+		if strings.Contains(specStr, needle) {
+			t.Errorf("spec contains hardcoded profile identifier %q", needle)
+		}
+	}
+}
+
+// TestGenerateIncludesVerifyRoute verifies that the Phase 3 verify endpoint
+// surfaces in the AI-safe spec with the correct operationId and references
+// the VerifyClaimResponse schema. This is the red-test gate for Unit 33.
+func TestGenerateIncludesVerifyRoute(t *testing.T) {
+	g := New(testRegistry(t), DefaultRoutes())
+	spec, err := g.Generate(SpecVariantAISafe)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	paths, ok := spec["paths"].(map[string]any)
+	if !ok {
+		t.Fatalf("paths missing or wrong type")
+	}
+
+	// The verify path must be present in the AI-safe spec.
+	const verifyPath = "/api/v1/claims/{id}/verify"
+	pathItem, present := paths[verifyPath]
+	if !present {
+		t.Fatalf("verify route %q missing from ai-safe spec; have: %v", verifyPath, keysOf(paths))
+	}
+
+	pathMap, ok := pathItem.(map[string]any)
+	if !ok {
+		t.Fatalf("%s path item is wrong type: %T", verifyPath, pathItem)
+	}
+
+	// Must be a POST operation.
+	postOp, ok := pathMap["post"].(map[string]any)
+	if !ok {
+		t.Fatalf("POST %s missing from spec", verifyPath)
+	}
+	if postOp["operationId"] != "verifyClaim" {
+		t.Errorf("operationId = %v; want verifyClaim", postOp["operationId"])
+	}
+
+	// Response must reference VerifyClaimResponse schema.
+	responses, ok := postOp["responses"].(map[string]any)
+	if !ok {
+		t.Fatalf("responses missing or wrong type")
+	}
+	resp200, ok := responses["200"].(map[string]any)
+	if !ok {
+		t.Fatalf("200 response missing from POST %s", verifyPath)
+	}
+	content, ok := resp200["content"].(map[string]any)
+	if !ok {
+		t.Fatalf("200 response content missing")
+	}
+	appJSON, ok := content["application/json"].(map[string]any)
+	if !ok {
+		t.Fatalf("200 response application/json missing")
+	}
+	schema, ok := appJSON["schema"].(map[string]any)
+	if !ok {
+		t.Fatalf("200 response schema missing")
+	}
+	if got := schema["$ref"]; got != "#/components/schemas/VerifyClaimResponse" {
+		t.Errorf("200 response $ref = %v; want #/components/schemas/VerifyClaimResponse", got)
+	}
+
+	// VerifyClaimResponse schema must be present in components.
+	components, ok := spec["components"].(map[string]any)
+	if !ok {
+		t.Fatalf("components missing")
+	}
+	schemas, ok := components["schemas"].(map[string]any)
+	if !ok {
+		t.Fatalf("schemas missing")
+	}
+	if _, has := schemas["VerifyClaimResponse"]; !has {
+		t.Errorf("VerifyClaimResponse schema missing from components; have: %v", keysOf(schemas))
+	}
+}
+
+// TestGenerateIncludesPromoteRoute verifies that the Phase 4 promote endpoint
+// surfaces in the AI-safe spec with the correct operationId (promoteClaim),
+// a 201 success status, and a reference to the FactResponse schema.
+// This is the red-test gate for Unit 43.
+func TestGenerateIncludesPromoteRoute(t *testing.T) {
+	g := New(testRegistry(t), DefaultRoutes())
+	spec, err := g.Generate(SpecVariantAISafe)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	paths, ok := spec["paths"].(map[string]any)
+	if !ok {
+		t.Fatalf("paths missing or wrong type")
+	}
+
+	// The promote path must be present in the AI-safe spec.
+	const promotePath = "/api/v1/claims/{id}/promote"
+	pathItem, present := paths[promotePath]
+	if !present {
+		t.Fatalf("promote route %q missing from ai-safe spec; have: %v", promotePath, keysOf(paths))
+	}
+
+	pathMap, ok := pathItem.(map[string]any)
+	if !ok {
+		t.Fatalf("%s path item is wrong type: %T", promotePath, pathItem)
+	}
+
+	// Must be a POST operation.
+	postOp, ok := pathMap["post"].(map[string]any)
+	if !ok {
+		t.Fatalf("POST %s missing from spec", promotePath)
+	}
+	if postOp["operationId"] != "promoteClaim" {
+		t.Errorf("operationId = %v; want promoteClaim", postOp["operationId"])
+	}
+
+	// Success status must be 201 (resource creation).
+	responses, ok := postOp["responses"].(map[string]any)
+	if !ok {
+		t.Fatalf("responses missing or wrong type")
+	}
+	resp201, ok := responses["201"].(map[string]any)
+	if !ok {
+		t.Fatalf("201 response missing from POST %s; have: %v", promotePath, keysOf(responses))
+	}
+	content, ok := resp201["content"].(map[string]any)
+	if !ok {
+		t.Fatalf("201 response content missing")
+	}
+	appJSON, ok := content["application/json"].(map[string]any)
+	if !ok {
+		t.Fatalf("201 response application/json missing")
+	}
+	schema, ok := appJSON["schema"].(map[string]any)
+	if !ok {
+		t.Fatalf("201 response schema missing")
+	}
+	if got := schema["$ref"]; got != "#/components/schemas/FactResponse" {
+		t.Errorf("201 response $ref = %v; want #/components/schemas/FactResponse", got)
+	}
+
+	// FactResponse schema must be present in components.
+	components, ok := spec["components"].(map[string]any)
+	if !ok {
+		t.Fatalf("components missing")
+	}
+	schemas, ok := components["schemas"].(map[string]any)
+	if !ok {
+		t.Fatalf("schemas missing")
+	}
+	if _, has := schemas["FactResponse"]; !has {
+		t.Errorf("FactResponse schema missing from components; have: %v", keysOf(schemas))
+	}
+}
+
+// TestGenerateIncludesCommunityRoute verifies that the Phase 7 community
+// detection endpoint surfaces in the full spec (AdminOnly=true, so excluded
+// from the AI-safe variant) with the correct operationId and a reference to
+// the CommunityDetectRequest schema. This is the red-test gate for Unit 53.
+func TestGenerateIncludesCommunityRoute(t *testing.T) {
+	g := New(testRegistry(t), DefaultRoutes())
+
+	// Community detect is admin-only; it must NOT appear in the AI-safe spec.
+	aiSafe, err := g.Generate(SpecVariantAISafe)
+	if err != nil {
+		t.Fatalf("Generate(AISafe): %v", err)
+	}
+	aiSafePaths, ok := aiSafe["paths"].(map[string]any)
+	if !ok {
+		t.Fatalf("paths missing or wrong type in ai-safe spec")
+	}
+	const communityPath = "/api/v1/admin/profiles/{profileId}/community/detect"
+	if _, present := aiSafePaths[communityPath]; present {
+		t.Errorf("admin community route must NOT appear in ai-safe spec")
+	}
+
+	// Full spec must include the route.
+	full, err := g.Generate(SpecVariantFull)
+	if err != nil {
+		t.Fatalf("Generate(Full): %v", err)
+	}
+	fullPaths, ok := full["paths"].(map[string]any)
+	if !ok {
+		t.Fatalf("paths missing or wrong type in full spec")
+	}
+
+	pathItem, present := fullPaths[communityPath]
+	if !present {
+		t.Fatalf("community detect route %q missing from full spec; have: %v", communityPath, keysOf(fullPaths))
+	}
+
+	pathMap, ok := pathItem.(map[string]any)
+	if !ok {
+		t.Fatalf("%s path item is wrong type: %T", communityPath, pathItem)
+	}
+
+	// Must be a POST operation.
+	postOp, ok := pathMap["post"].(map[string]any)
+	if !ok {
+		t.Fatalf("POST %s missing from full spec", communityPath)
+	}
+	if postOp["operationId"] != "adminDetectCommunity" {
+		t.Errorf("operationId = %v; want adminDetectCommunity", postOp["operationId"])
+	}
+
+	// Request body must reference CommunityDetectRequest schema.
+	reqBody, ok := postOp["requestBody"].(map[string]any)
+	if !ok {
+		t.Fatalf("requestBody missing or wrong type for POST %s", communityPath)
+	}
+	content, ok := reqBody["content"].(map[string]any)
+	if !ok {
+		t.Fatalf("requestBody.content missing")
+	}
+	appJSON, ok := content["application/json"].(map[string]any)
+	if !ok {
+		t.Fatalf("requestBody.content[application/json] missing")
+	}
+	schema, ok := appJSON["schema"].(map[string]any)
+	if !ok {
+		t.Fatalf("requestBody schema missing")
+	}
+	if got := schema["$ref"]; got != "#/components/schemas/CommunityDetectRequest" {
+		t.Errorf("requestBody $ref = %v; want #/components/schemas/CommunityDetectRequest", got)
+	}
+
+	// CommunityDetectRequest schema must be present in components.
+	components, ok := full["components"].(map[string]any)
+	if !ok {
+		t.Fatalf("components missing")
+	}
+	schemas, ok := components["schemas"].(map[string]any)
+	if !ok {
+		t.Fatalf("schemas missing")
+	}
+	if _, has := schemas["CommunityDetectRequest"]; !has {
+		t.Errorf("CommunityDetectRequest schema missing from components; have: %v", keysOf(schemas))
+	}
 }

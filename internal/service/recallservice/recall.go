@@ -51,6 +51,19 @@ const (
 	// MinLimit and MaxLimit bound the effective result count.
 	MinLimit = 1
 	MaxLimit = 50
+
+	// Tier constants for knowledge-pipeline recall enrichment.
+
+	// TierActiveFact is the recall tier for active Fact nodes (highest authority).
+	TierActiveFact = "1"
+	// TierValidatedClaim is the recall tier for validated Claim nodes.
+	TierValidatedClaim = "1.5"
+	// TierFragment is the recall tier for SourceFragment nodes (raw evidence).
+	TierFragment = "2"
+
+	// DefaultRecallValidatedClaimWeight scales validated-claim scores so that
+	// active facts outrank equivalent claims under the default weight.
+	DefaultRecallValidatedClaimWeight = 0.5
 )
 
 // ErrEmbeddingUnavailable is returned to callers when the embedding provider
@@ -70,8 +83,21 @@ type RecallRequest struct {
 }
 
 // RecallHit is one merged, hydrated recall result.
+//
+// Tier classifies the knowledge-pipeline level:
+//   - TierActiveFact    ("1")   – promoted, active Fact node
+//   - TierValidatedClaim ("1.5") – validated Claim node
+//   - TierFragment       ("2")   – raw SourceFragment (RRF-ranked)
+//
+// Fragment, Claim, and Fact are mutually exclusive: exactly one is non-nil per hit.
+// SemanticRank, KeywordRank, and FinalScore are populated for TierFragment hits
+// and preserved for backward compatibility.
 type RecallHit struct {
-	Fragment     *domain.Fragment `json:"fragment"`
+	Fragment     *domain.Fragment `json:"fragment,omitempty"`
+	Claim        *domain.Claim    `json:"claim,omitempty"`  // tier 1.5
+	Fact         *domain.Fact     `json:"fact,omitempty"`   // tier 1
+	Tier         string           `json:"tier,omitempty"`
+	Score        float64          `json:"score,omitempty"`
 	SemanticRank int              `json:"semantic_rank"` // 1-based; 0 if absent from that branch
 	KeywordRank  int              `json:"keyword_rank"`  // 1-based; 0 if absent from that branch
 	FinalScore   float64          `json:"final_score"`
@@ -106,14 +132,34 @@ type FragmentHydrator interface {
 	GetByID(ctx context.Context, profileID, fragmentID string) (*domain.Fragment, error)
 }
 
+// FactsLister fetches active facts for tier-1 recall enrichment.
+// Implementations must scope all queries to profileID (profile isolation invariant).
+// Passing nil is safe — tier-1 results are silently omitted.
+type FactsLister interface {
+	// ListActive returns up to limit active facts for profileID.
+	ListActive(ctx context.Context, profileID string, limit int) ([]*domain.Fact, error)
+}
+
+// ClaimsLister fetches validated claims for tier-1.5 recall enrichment.
+// Implementations must scope all queries to profileID (profile isolation invariant).
+// Passing nil is safe — tier-1.5 results are silently omitted.
+type ClaimsLister interface {
+	// ListValidated returns up to limit validated claims for profileID,
+	// ordered by confidence descending.
+	ListValidated(ctx context.Context, profileID string, limit int) ([]*domain.Claim, error)
+}
+
 // recallService implements RecallService.
 type recallService struct {
-	embedder EmbeddingProvider
-	semantic SemanticSearcher
-	keyword  KeywordSearcher
-	hydrator FragmentHydrator
-	logger   observability.LogProvider
-	metrics  observability.DiscoverabilityMetrics
+	embedder    EmbeddingProvider
+	semantic    SemanticSearcher
+	keyword     KeywordSearcher
+	hydrator    FragmentHydrator
+	factsLister FactsLister   // optional; nil → tier-1 results omitted
+	claimsLister ClaimsLister // optional; nil → tier-1.5 results omitted
+	claimWeight float64       // weight applied to claim scores (default DefaultRecallValidatedClaimWeight)
+	logger      observability.LogProvider
+	metrics     observability.DiscoverabilityMetrics
 }
 
 var _ RecallService = (*recallService)(nil)
@@ -121,6 +167,9 @@ var _ RecallService = (*recallService)(nil)
 // NewRecallService constructs a RecallService. All dependencies are required
 // except logger (may be nil — logging becomes a no-op) and metrics (may be
 // nil — a noop recorder is substituted so call sites never need nil checks).
+//
+// Tier expansion (facts / claims) is disabled. Use NewRecallServiceWithTiers
+// when tier-1 and tier-1.5 enrichment is desired.
 func NewRecallService(
 	embedder EmbeddingProvider,
 	semantic SemanticSearcher,
@@ -129,16 +178,45 @@ func NewRecallService(
 	logger observability.LogProvider,
 	metrics observability.DiscoverabilityMetrics,
 ) RecallService {
+	return NewRecallServiceWithTiers(embedder, semantic, keyword, hydrator, nil, nil, 0, logger, metrics)
+}
+
+// NewRecallServiceWithTiers constructs a RecallService with optional tier-1
+// (active facts) and tier-1.5 (validated claims) enrichment.
+//
+// factsLister and claimsLister may be nil — those tiers are silently omitted.
+// claimWeight is the multiplier applied to claim scores; pass 0 to use
+// DefaultRecallValidatedClaimWeight (0.5). This ensures active facts outrank
+// validated claims of equivalent base confidence under the default weight.
+//
+// logger may be nil (no-op). metrics may be nil (noop recorder substituted).
+func NewRecallServiceWithTiers(
+	embedder EmbeddingProvider,
+	semantic SemanticSearcher,
+	keyword KeywordSearcher,
+	hydrator FragmentHydrator,
+	factsLister FactsLister,
+	claimsLister ClaimsLister,
+	claimWeight float64,
+	logger observability.LogProvider,
+	metrics observability.DiscoverabilityMetrics,
+) RecallService {
 	if metrics == nil {
 		metrics = observability.NoopDiscoverabilityMetrics()
 	}
+	if claimWeight <= 0 {
+		claimWeight = DefaultRecallValidatedClaimWeight
+	}
 	return &recallService{
-		embedder: embedder,
-		semantic: semantic,
-		keyword:  keyword,
-		hydrator: hydrator,
-		logger:   logger,
-		metrics:  metrics,
+		embedder:    embedder,
+		semantic:    semantic,
+		keyword:     keyword,
+		hydrator:    hydrator,
+		factsLister: factsLister,
+		claimsLister: claimsLister,
+		claimWeight: claimWeight,
+		logger:      logger,
+		metrics:     metrics,
 	}
 }
 
@@ -222,23 +300,100 @@ func (s *recallService) Recall(ctx context.Context, profileID string, req Recall
 		merged = merged[:limit]
 	}
 
-	out := make([]RecallHit, 0, len(merged))
+	// Hydrate fragment hits (tier 2).
+	fragmentHits := make([]RecallHit, 0, len(merged))
 	for _, m := range merged {
 		frag, err := s.hydrator.GetByID(ctx, profileID, m.id)
 		if err != nil {
-			// A winning id may vanish due to a concurrent delete; skip it
-			// rather than failing the whole recall.
+			// A winning id may vanish due to a concurrent delete or retraction
+			// (AC-44). In both cases we skip the id rather than failing the whole
+			// recall so that the remaining results are still returned to the caller.
 			s.logHydrateError(m.id, err)
 			continue
 		}
-		out = append(out, RecallHit{
+		fragmentHits = append(fragmentHits, RecallHit{
 			Fragment:     frag,
+			Tier:         TierFragment,
+			Score:        m.FinalScore,
 			SemanticRank: m.SemanticRank,
 			KeywordRank:  m.KeywordRank,
 			FinalScore:   m.FinalScore,
 		})
 	}
-	return out, nil
+
+	// Collect tier-1 (active facts) and tier-1.5 (validated claims) enrichment.
+	tierHits := s.enrichTierHits(ctx, profileID, limit)
+
+	// Merge fragment hits with tier hits, sort by (tier ASC, score DESC).
+	all := append(tierHits, fragmentHits...) //nolint:gocritic
+	sort.SliceStable(all, func(i, j int) bool {
+		if all[i].Tier != all[j].Tier {
+			return all[i].Tier < all[j].Tier
+		}
+		return all[i].Score > all[j].Score
+	})
+
+	if len(all) > limit {
+		all = all[:limit]
+	}
+	return all, nil
+}
+
+// enrichTierHits fetches tier-1 (active facts) and tier-1.5 (validated claims)
+// hits for the profile. Errors are logged and swallowed so that a failing tier
+// enrichment does not prevent fragment recall from completing.
+//
+// Profile isolation invariant: both FactsLister and ClaimsLister receive
+// profileID as an explicit parameter and must scope all queries to that profile.
+func (s *recallService) enrichTierHits(ctx context.Context, profileID string, limit int) []RecallHit {
+	var hits []RecallHit
+
+	if s.factsLister != nil {
+		facts, err := s.factsLister.ListActive(ctx, profileID, limit)
+		if err != nil {
+			if s.logger != nil {
+				s.logger.Warn("recall: tier-1 fact listing failed",
+					observability.String("error", err.Error()),
+				)
+			}
+		} else {
+			for _, f := range facts {
+				if f == nil {
+					continue
+				}
+				hits = append(hits, RecallHit{
+					Fact:  f,
+					Tier:  TierActiveFact,
+					Score: f.TruthScore,
+				})
+			}
+		}
+	}
+
+	if s.claimsLister != nil {
+		claims, err := s.claimsLister.ListValidated(ctx, profileID, limit)
+		if err != nil {
+			if s.logger != nil {
+				s.logger.Warn("recall: tier-1.5 claim listing failed",
+					observability.String("error", err.Error()),
+				)
+			}
+		} else {
+			for _, c := range claims {
+				if c == nil {
+					continue
+				}
+				score := c.ExtractConf * s.claimWeight
+				hits = append(hits, RecallHit{
+					Claim: c,
+					Tier:  TierValidatedClaim,
+					Score: score,
+				})
+			}
+		}
+	}
+
+	return hits
 }
 
 // rrfEntry is the internal accumulator keyed by fragment id.

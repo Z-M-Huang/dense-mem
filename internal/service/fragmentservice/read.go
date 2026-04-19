@@ -46,6 +46,7 @@ func NewGetFragmentService(reader ScopedReader) GetFragmentService {
 func (s *getFragmentService) GetByID(ctx context.Context, profileID, fragmentID string) (*domain.Fragment, error) {
 	query := `
 		MATCH (sf:SourceFragment {profile_id: $profileId, fragment_id: $fragmentId})
+		WHERE ` + neo4j.FragmentActiveFilter + `
 		RETURN sf.fragment_id AS fragment_id,
 		       sf.profile_id AS profile_id,
 		       sf.content AS content,
@@ -57,6 +58,8 @@ func (s *getFragmentService) GetByID(ctx context.Context, profileID, fragmentID 
 		       sf.idempotency_key AS idempotency_key,
 		       sf.embedding_model AS embedding_model,
 		       sf.embedding_dimensions AS embedding_dimensions,
+		       sf.source_quality AS source_quality,
+		       sf.classification AS classification,
 		       sf.created_at AS created_at,
 		       sf.updated_at AS updated_at
 		LIMIT 1
@@ -123,6 +126,15 @@ func mapRowToFragment(row map[string]any) *domain.Fragment {
 		f.EmbeddingDimensions = int(dim)
 	case int:
 		f.EmbeddingDimensions = dim
+	}
+	switch sq := row["source_quality"].(type) {
+	case float64:
+		f.SourceQuality = sq
+	case float32:
+		f.SourceQuality = float64(sq)
+	}
+	if v, ok := row["classification"].(map[string]any); ok {
+		f.Classification = v
 	}
 	if v, ok := row["created_at"].(time.Time); ok {
 		f.CreatedAt = v

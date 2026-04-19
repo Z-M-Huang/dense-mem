@@ -13,18 +13,25 @@ import (
 //   - IdempotencyKey: optional, max 128 characters
 //   - Labels: max 20 items, each item max 64 chars, non-blank
 //   - Metadata: optional JSON object, size checked via ValidateMetadataSize
+//   - SourceQuality: optional float in [0,1]; defaults to 0 when omitted
+//   - Classification: optional arbitrary key-value labels
 type CreateFragmentRequest struct {
 	Content        string         `json:"content" validate:"required,max=8192,notblank"`
 	SourceType     string         `json:"source_type,omitempty" validate:"omitempty,oneof=conversation document observation manual"`
 	Source         string         `json:"source,omitempty" validate:"max=256"`
 	IdempotencyKey string         `json:"idempotency_key,omitempty" validate:"max=128"`
 	Labels         []string       `json:"labels,omitempty" validate:"max=20,dive,max=64,notblank"`
-	Metadata       map[string]any `json:"metadata,omitempty"` // size check in handler
+	Metadata       map[string]any `json:"metadata,omitempty"`        // size check in handler
+	SourceQuality  float64        `json:"source_quality,omitempty" validate:"gte=0,lte=1"`
+	Classification map[string]any `json:"classification,omitempty"` // arbitrary classification labels
 }
 
 // FragmentResponse represents a fragment in API responses.
+// Both "id" and "fragment_id" are emitted with the same value: "id" for backward
+// compatibility (AC-41) and "fragment_id" for UAT-02/UAT-03 contract requirements.
 type FragmentResponse struct {
 	ID                  string         `json:"id"`
+	FragmentID          string         `json:"fragment_id"` // alias of ID; required by UAT-02/UAT-03
 	Content             string         `json:"content"`
 	SourceType          string         `json:"source_type"`
 	Source              string         `json:"source,omitempty"`
@@ -34,6 +41,10 @@ type FragmentResponse struct {
 	IdempotencyKey      string         `json:"idempotency_key,omitempty"`
 	EmbeddingModel      string         `json:"embedding_model"`
 	EmbeddingDimensions int            `json:"embedding_dimensions"`
+	SourceQuality       float64        `json:"source_quality"`
+	Classification      map[string]any `json:"classification,omitempty"`
+	Status              string         `json:"status,omitempty"`
+	RecordedTo          *time.Time     `json:"recorded_to,omitempty"`
 	CreatedAt           time.Time      `json:"created_at"`
 	UpdatedAt           time.Time      `json:"updated_at"`
 }

@@ -68,6 +68,11 @@ func (g *generator) Generate(variant SpecVariant) (map[string]any, error) {
 
 	paths := map[string]any{}
 	schemas := baseSchemas()
+	// Merge knowledge-domain schemas so routes that ship before MCP tool
+	// registration can reference them via explicit RequestSchema/ResponseSchema.
+	for k, v := range knowledgeSchemas() {
+		schemas[k] = v
+	}
 
 	for _, route := range g.routes {
 		if !routeMatches(route, variant) {
@@ -126,25 +131,41 @@ func routeMatches(r RouteDescriptor, variant SpecVariant) bool {
 	}
 }
 
-// buildOperation composes a single OpenAPI operation for a route. Tool-backed
-// routes pull their request/response schemas from the registry.
+// buildOperation composes a single OpenAPI operation for a route.
+//
+// Schema resolution priority (highest to lowest):
+//  1. Explicit RequestSchema / ResponseSchema on the RouteDescriptor.
+//  2. ToolName-derived schemas pulled from the registry.
+//
+// This allows knowledge-pipeline routes to ship with explicit schema refs
+// before their MCP tool counterparts are registered.
 func (g *generator) buildOperation(r RouteDescriptor, schemas map[string]any) map[string]any {
+	// Determine the success status code. Default 200; creation routes use 201.
+	successStatus := "200"
+	if r.SuccessStatus != 0 {
+		successStatus = fmt.Sprintf("%d", r.SuccessStatus)
+	}
+
+	responses := map[string]any{
+		successStatus: map[string]any{"description": "OK"},
+		"400":         errorResponse("Validation error."),
+		"401":         errorResponse("Missing or invalid credentials."),
+		"403":         errorResponse("Forbidden."),
+		"404":         errorResponse("Not found."),
+		"429":         errorResponse("Rate limit exceeded."),
+		"500":         errorResponse("Internal error."),
+	}
+	// Merge caller-supplied extra responses (e.g. 202 Accepted for async routes).
+	for code, desc := range r.ExtraResponses {
+		responses[code] = errorResponse(desc)
+	}
+
 	op := map[string]any{
 		"operationId": r.OperationID,
 		"summary":     firstLine(r.Description),
 		"description": r.Description,
 		"tags":        tagsFor(r),
-		"responses": map[string]any{
-			"200": map[string]any{
-				"description": "OK",
-			},
-			"400": errorResponse("Validation error."),
-			"401": errorResponse("Missing or invalid credentials."),
-			"403": errorResponse("Forbidden."),
-			"404": errorResponse("Not found."),
-			"429": errorResponse("Rate limit exceeded."),
-			"500": errorResponse("Internal error."),
-		},
+		"responses":   responses,
 	}
 
 	// Path parameters — derived from {name} segments.
@@ -152,38 +173,48 @@ func (g *generator) buildOperation(r RouteDescriptor, schemas map[string]any) ma
 		op["parameters"] = params
 	}
 
-	// Request body + success response schema come from the registry when the
-	// route has a linked tool.
-	if r.ToolName != "" {
+	// Resolve request and response schema refs. Explicit fields win; fall back
+	// to the tool registry when ToolName is set.
+	reqSchemaRef := r.RequestSchema
+	respSchemaRef := r.ResponseSchema
+
+	if (reqSchemaRef == "" || respSchemaRef == "") && r.ToolName != "" {
 		if tool, ok := g.reg.Get(r.ToolName); ok {
-			if r.Method == "POST" || r.Method == "PATCH" || r.Method == "PUT" {
-				if tool.InputSchema != nil {
-					op["requestBody"] = map[string]any{
-						"required": true,
-						"content": map[string]any{
-							"application/json": map[string]any{
-								"schema": map[string]any{
-									"$ref": "#/components/schemas/" + schemaNameFor(tool.Name, "Input"),
-								},
-							},
-						},
-					}
-				}
+			if reqSchemaRef == "" && tool.InputSchema != nil {
+				reqSchemaRef = schemaNameFor(tool.Name, "Input")
 			}
-			if tool.OutputSchema != nil {
-				op["responses"].(map[string]any)["200"] = map[string]any{
-					"description": "Success",
-					"content": map[string]any{
-						"application/json": map[string]any{
-							"schema": map[string]any{
-								"$ref": "#/components/schemas/" + schemaNameFor(tool.Name, "Output"),
-							},
-						},
-					},
-				}
+			if respSchemaRef == "" && tool.OutputSchema != nil {
+				respSchemaRef = schemaNameFor(tool.Name, "Output")
 			}
 		}
 	}
+
+	if reqSchemaRef != "" && (r.Method == "POST" || r.Method == "PATCH" || r.Method == "PUT") {
+		op["requestBody"] = map[string]any{
+			"required": true,
+			"content": map[string]any{
+				"application/json": map[string]any{
+					"schema": map[string]any{
+						"$ref": "#/components/schemas/" + reqSchemaRef,
+					},
+				},
+			},
+		}
+	}
+
+	if respSchemaRef != "" {
+		responses[successStatus] = map[string]any{
+			"description": "Success",
+			"content": map[string]any{
+				"application/json": map[string]any{
+					"schema": map[string]any{
+						"$ref": "#/components/schemas/" + respSchemaRef,
+					},
+				},
+			},
+		}
+	}
+
 	return op
 }
 
@@ -209,6 +240,10 @@ func pathParams(p string) []map[string]any {
 }
 
 func tagsFor(r RouteDescriptor) []string {
+	// Explicit Tags on the descriptor take priority over path inference.
+	if len(r.Tags) > 0 {
+		return r.Tags
+	}
 	switch {
 	case r.AdminOnly:
 		return []string{"admin"}
@@ -258,13 +293,34 @@ func errorResponse(description string) map[string]any {
 	}
 }
 
+// baseSchemas returns the fixed component schemas present in every spec variant.
+// The ErrorResponse shape matches httperr.ErrorEnvelope exactly:
+//
+//	{ "error": { "code": string, "message": string, "details": [...] } }
 func baseSchemas() map[string]any {
 	return map[string]any{
 		"ErrorResponse": map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"error": map[string]any{"type": "string"},
-				"code":  map[string]any{"type": "string"},
+				"error": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"code":    map[string]any{"type": "string"},
+						"message": map[string]any{"type": "string"},
+						"details": map[string]any{
+							"type": "array",
+							"items": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"field":   map[string]any{"type": "string"},
+									"message": map[string]any{"type": "string"},
+								},
+								"required": []string{"field", "message"},
+							},
+						},
+					},
+					"required": []string{"code", "message"},
+				},
 			},
 			"required": []string{"error"},
 		},

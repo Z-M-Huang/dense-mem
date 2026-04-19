@@ -14,6 +14,142 @@ import (
 	"github.com/dense-mem/dense-mem/internal/tools/registry"
 )
 
+// TestServerIgnoresProfileOverride verifies that a caller cannot override the
+// server's fixed profile by injecting profile_id into tool arguments (AC-61 /
+// R4 — single-profile enforcement).
+func TestServerIgnoresProfileOverride(t *testing.T) {
+	logger, _ := testLogger(t)
+	reg := registry.New()
+	var gotProfile string
+	var gotArgs map[string]any
+	_ = reg.Register(registry.Tool{
+		Name:        "probe",
+		Description: "captures invocation context",
+		InputSchema: map[string]any{"type": "object"},
+		Available:   true,
+		Invoke: func(ctx context.Context, profileID string, input map[string]any) (map[string]any, error) {
+			gotProfile = profileID
+			gotArgs = input
+			return map[string]any{"ok": true}, nil
+		},
+	})
+	s := NewServer(reg, "pA", logger)
+
+	// Caller attempts to override profile by injecting profile_id into args.
+	out := runRPC(t, s, `{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"probe","arguments":{"profile_id":"pB","text":"hello"}}}`)
+	var resp rpcResp
+	if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &resp); err != nil {
+		t.Fatalf("unmarshal: %v — out=%q", err, out)
+	}
+	if resp.Error != nil {
+		t.Fatalf("unexpected error: %+v", resp.Error)
+	}
+
+	// The server's bound profile must be used — not the attacker-supplied one.
+	if gotProfile != "pA" {
+		t.Errorf("profileID = %q; want pA (override not stripped)", gotProfile)
+	}
+	// profile_id must be removed from the args map passed to the tool.
+	if _, present := gotArgs["profile_id"]; present {
+		t.Errorf("profile_id was not stripped from tool arguments; args = %v", gotArgs)
+	}
+	// Other args must be passed through.
+	if gotArgs["text"] != "hello" {
+		t.Errorf("text arg = %v; want hello", gotArgs["text"])
+	}
+}
+
+// TestSanitizeToolError verifies that error messages containing secrets (Bearer
+// tokens, sk-... keys) are scrubbed before reaching the MCP client (AC-60).
+func TestSanitizeToolError(t *testing.T) {
+	logger, _ := testLogger(t)
+	reg := registry.New()
+	_ = reg.Register(registry.Tool{
+		Name:        "leaky",
+		Description: "returns error with secrets",
+		InputSchema: map[string]any{"type": "object"},
+		Available:   true,
+		Invoke: func(ctx context.Context, profileID string, input map[string]any) (map[string]any, error) {
+			return nil, errors.New("upstream call failed: Bearer sk-abc123secret — retry later")
+		},
+	})
+	s := NewServer(reg, "pA", logger)
+
+	out := runRPC(t, s, `{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"leaky","arguments":{}}}`)
+	var resp rpcResp
+	if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &resp); err != nil {
+		t.Fatalf("unmarshal: %v — out=%q", err, out)
+	}
+	if resp.Error == nil || resp.Error.Code != errCodeToolFailure {
+		t.Fatalf("expected tool failure; got %+v", resp.Error)
+	}
+	// Bearer token must be redacted.
+	if strings.Contains(resp.Error.Message, "sk-abc123secret") {
+		t.Errorf("secret leaked in error message: %q", resp.Error.Message)
+	}
+	// Non-secret context must survive.
+	if !strings.Contains(resp.Error.Message, "upstream call failed") {
+		t.Errorf("non-secret context stripped from error message: %q", resp.Error.Message)
+	}
+}
+
+// TestDeprecatedEnvAliases verifies that LookupEnv accepts X_PROFILE_ID and
+// DENSE_MEM_AUTH_KEY as fallbacks when canonical names are unset, and that a
+// deprecation warning is written to the provided writer (AC-60 / R4).
+func TestDeprecatedEnvAliases(t *testing.T) {
+	t.Run("canonical names take priority", func(t *testing.T) {
+		env := map[string]string{
+			"DENSE_MEM_PROFILE_ID": "canonical-profile",
+			"DENSE_MEM_API_KEY":    "canonical-key",
+			"X_PROFILE_ID":         "old-profile",
+			"DENSE_MEM_AUTH_KEY":   "old-key",
+		}
+		var warn bytes.Buffer
+		profileID, apiKey := LookupEnv(func(k string) string { return env[k] }, &warn)
+		if profileID != "canonical-profile" {
+			t.Errorf("profileID = %q; want canonical-profile", profileID)
+		}
+		if apiKey != "canonical-key" {
+			t.Errorf("apiKey = %q; want canonical-key", apiKey)
+		}
+		// No deprecation warnings when canonical names are set.
+		if warn.Len() != 0 {
+			t.Errorf("unexpected deprecation warning: %q", warn.String())
+		}
+	})
+
+	t.Run("deprecated aliases accepted with warning", func(t *testing.T) {
+		env := map[string]string{
+			"X_PROFILE_ID":       "old-profile",
+			"DENSE_MEM_AUTH_KEY": "old-key",
+		}
+		var warn bytes.Buffer
+		profileID, apiKey := LookupEnv(func(k string) string { return env[k] }, &warn)
+		if profileID != "old-profile" {
+			t.Errorf("profileID = %q; want old-profile", profileID)
+		}
+		if apiKey != "old-key" {
+			t.Errorf("apiKey = %q; want old-key", apiKey)
+		}
+		// Both deprecated aliases must produce warnings.
+		warnStr := warn.String()
+		if !strings.Contains(warnStr, "X_PROFILE_ID") {
+			t.Errorf("missing deprecation warning for X_PROFILE_ID; got: %q", warnStr)
+		}
+		if !strings.Contains(warnStr, "DENSE_MEM_AUTH_KEY") {
+			t.Errorf("missing deprecation warning for DENSE_MEM_AUTH_KEY; got: %q", warnStr)
+		}
+	})
+
+	t.Run("empty when nothing set", func(t *testing.T) {
+		var warn bytes.Buffer
+		profileID, apiKey := LookupEnv(func(string) string { return "" }, &warn)
+		if profileID != "" || apiKey != "" {
+			t.Errorf("expected empty; got profileID=%q apiKey=%q", profileID, apiKey)
+		}
+	})
+}
+
 // testLogger returns a LogProvider that writes to a bytes.Buffer so tests can
 // assert the server never writes diagnostics to the stdout writer.
 func testLogger(t *testing.T) (observability.LogProvider, *bytes.Buffer) {

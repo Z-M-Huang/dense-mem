@@ -170,6 +170,59 @@ func TestErrorHandler(t *testing.T) {
 	})
 }
 
+// TestKnowledgeErrorCodes verifies the stable external domain error codes introduced
+// for the knowledge pipeline (AC-X6).  Every code must:
+//   - Serialise to its exact lowercase string (stable public API contract)
+//   - Map to the correct HTTP status via HTTPStatusCode
+func TestKnowledgeErrorCodes(t *testing.T) {
+	tests := []struct {
+		code           ErrorCode
+		expectedString string
+		expectedHTTP   int
+	}{
+		// Fragment / lookup errors
+		{ErrSupportingFragmentMissing, "supporting_fragment_missing", http.StatusNotFound},
+		{ErrClaimNotFound, "claim_not_found", http.StatusNotFound},
+		{ErrFactNotFound, "fact_not_found", http.StatusNotFound},
+
+		// Verifier back-pressure
+		{ErrVerifierRateLimit, "verifier_rate_limit", http.StatusTooManyRequests},
+		{ErrVerifierTimeout, "verifier_timeout", http.StatusGatewayTimeout},
+		{ErrVerifierProvider, "verifier_provider", http.StatusServiceUnavailable},
+		{ErrVerifierMalformedResponse, "verifier_malformed_response", http.StatusBadGateway},
+
+		// Policy / predicate violations
+		{ErrPredicateNotPoliced, "predicate_not_policed", http.StatusUnprocessableEntity},
+		{ErrUnsupportedPolicy, "unsupported_policy", http.StatusUnprocessableEntity},
+		{ErrCommunityGraphTooLarge, "community_graph_too_large", http.StatusUnprocessableEntity},
+
+		// State-machine conflicts
+		{ErrNeedsClaimValidated, "needs_claim_validated", http.StatusConflict},
+		{ErrGateRejected, "gate_rejected", http.StatusConflict},
+		{ErrComparableDisputed, "comparable_disputed", http.StatusConflict},
+		{ErrRejectedWeaker, "rejected_weaker", http.StatusConflict},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.expectedString, func(t *testing.T) {
+			// Verify the constant value equals the expected string (stable contract)
+			require.Equal(t, tt.expectedString, string(tt.code),
+				"error code string must be stable lowercase domain token")
+
+			// Verify HTTPStatusCode mapping
+			require.Equal(t, tt.expectedHTTP, HTTPStatusCode(tt.code),
+				"HTTP status mapping must match plan spec")
+
+			// Verify the code round-trips through APIError / JSON
+			apiErr := New(tt.code, "test")
+			data, err := json.Marshal(NewErrorEnvelope(apiErr))
+			require.NoError(t, err)
+			require.Contains(t, string(data), tt.expectedString,
+				"code must appear verbatim in JSON envelope")
+		})
+	}
+}
+
 func TestAPIErrorProvider(t *testing.T) {
 	// Verify APIError implements APIErrorProvider
 	var _ APIErrorProvider = (*APIError)(nil)

@@ -19,20 +19,17 @@ import (
 	"github.com/dense-mem/dense-mem/internal/tools/registry"
 )
 
-// Environment variables read at startup. The caller is expected to set both.
-var (
-	envProfileID = "X_PROFILE_ID"
-	envAuth      = "DENSE_MEM_AUTH_" + "KEY" // split to defeat overzealous secret scanners
-)
-
 func main() {
-	profileID := os.Getenv(envProfileID)
+	// Resolve env vars, accepting canonical names with fallback to deprecated
+	// aliases. Deprecation warnings are printed to stderr so they appear in
+	// operator logs but never pollute the JSON-RPC stdout channel.
+	profileID, apiKey := mcp.LookupEnv(os.Getenv, os.Stderr)
 	if profileID == "" {
-		fmt.Fprintf(os.Stderr, "%s is required\n", envProfileID)
+		fmt.Fprintln(os.Stderr, "DENSE_MEM_PROFILE_ID (or deprecated X_PROFILE_ID) is required")
 		os.Exit(2)
 	}
-	if os.Getenv(envAuth) == "" {
-		fmt.Fprintf(os.Stderr, "%s is required\n", envAuth)
+	if apiKey == "" {
+		fmt.Fprintln(os.Stderr, "DENSE_MEM_API_KEY (or deprecated DENSE_MEM_AUTH_KEY) is required")
 		os.Exit(2)
 	}
 

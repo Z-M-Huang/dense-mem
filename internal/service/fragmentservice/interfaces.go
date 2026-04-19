@@ -24,3 +24,21 @@ type CreateFragmentService interface {
 	// Returns error if embedding generation fails (AC-23: no silent unembedded writes).
 	Create(ctx context.Context, profileID string, req *dto.CreateFragmentRequest) (*CreateResult, error)
 }
+
+// RetractFragmentService tombstones a fragment and recomputes affected facts.
+//
+// RETRACT VS DELETE: Retract is a soft tombstone (status='retracted', recorded_to=now).
+// The node remains in the graph so lineage is preserved, but it is excluded from all
+// active-fragment reads (FragmentActiveFilter). Hard delete (DETACH DELETE) is a
+// separate operation (DeleteFragmentService).
+//
+// FACT REVALIDATION: After tombstoning, facts whose remaining active support no longer
+// satisfies the DefaultPromotionGates threshold are marked status='needs_revalidation'.
+// The support gate uses OR semantics: support_count >= MinSourceCount OR
+// max_source_quality >= MinMaxSourceQuality (AC-35).
+type RetractFragmentService interface {
+	// Retract tombstones the fragment and marks affected facts for revalidation
+	// when their remaining active support falls below the promotion gate.
+	// Returns ErrFragmentNotFound if the fragment does not exist in this profile.
+	Retract(ctx context.Context, profileID, fragmentID string) error
+}

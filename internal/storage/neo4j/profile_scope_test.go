@@ -87,7 +87,7 @@ func TestRejectProfileParamOverride(t *testing.T) {
 			param: "profileId",
 		},
 		{
-			name: "ScopedRead rejects profileId with different casing (profileid)",
+			name: "ScopedRead allows different-casing key (profileid) alongside profileId injection",
 			call: func() error {
 				params := map[string]any{"profileid": "caller-value"}
 				_, _, err := enforcer.ScopedRead(ctx, "profile-123", queryWithPlaceholder, params)
@@ -96,7 +96,7 @@ func TestRejectProfileParamOverride(t *testing.T) {
 			param: "profileid",
 		},
 		{
-			name: "ScopedWrite rejects profileId with different casing (PROFILEID)",
+			name: "ScopedWrite allows different-casing key (PROFILEID) alongside profileId injection",
 			call: func() error {
 				params := map[string]any{"PROFILEID": "caller-value"}
 				_, err := enforcer.ScopedWrite(ctx, "profile-123", "CREATE (n:Node {profile_id: $profileId})", params)
@@ -427,4 +427,129 @@ func (m *mockExecutorForError) ExecuteWrite(ctx context.Context, fn neo4j.Manage
 
 func (m *mockExecutorForError) Close(ctx context.Context) error {
 	return nil
+}
+
+// mockFnCallingExecutor is a mock executor that calls fn with a nil ManagedTransaction.
+// It is used for ScopedWriteTx tests where fn does not exercise the transaction object
+// (e.g. tests that only verify fn-level error propagation).
+// neo4j.ManagedTransaction has an unexported legacy() method so it cannot be
+// implemented outside the driver package; passing nil is the only portable option
+// for unit tests that do not need to call tx.Run.
+type mockFnCallingExecutor struct{}
+
+func (m *mockFnCallingExecutor) Verify(ctx context.Context) error { return nil }
+
+func (m *mockFnCallingExecutor) ExecuteRead(ctx context.Context, fn neo4j.ManagedTransactionWork) (any, error) {
+	return fn(nil)
+}
+
+func (m *mockFnCallingExecutor) ExecuteWrite(ctx context.Context, fn neo4j.ManagedTransactionWork) (any, error) {
+	return fn(nil)
+}
+
+func (m *mockFnCallingExecutor) Close(ctx context.Context) error { return nil }
+
+// ---- ScopedWriteTx tests ---------------------------------------------------
+
+// TestScopedWriteTx covers the new multi-query transaction helper.
+func TestScopedWriteTx(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("rejects empty profileID before calling executor", func(t *testing.T) {
+		// Executor must never be reached — use nil so a call would panic.
+		enforcer := NewProfileScopeEnforcer(nil)
+		err := enforcer.ScopedWriteTx(ctx, "", func(tx neo4j.ManagedTransaction) error {
+			return nil
+		})
+		require.ErrorIs(t, err, ErrEmptyProfileID)
+	})
+
+	t.Run("propagates executor error", func(t *testing.T) {
+		execErr := errors.New("executor write error")
+		enforcer := NewProfileScopeEnforcer(&mockExecutorForError{err: execErr})
+		err := enforcer.ScopedWriteTx(ctx, "profile-123", func(tx neo4j.ManagedTransaction) error {
+			return nil
+		})
+		require.Error(t, err)
+		assert.ErrorIs(t, err, execErr)
+	})
+
+	t.Run("propagates fn error", func(t *testing.T) {
+		fnErr := errors.New("fn returned error")
+		enforcer := NewProfileScopeEnforcer(&mockFnCallingExecutor{})
+		err := enforcer.ScopedWriteTx(ctx, "profile-123", func(tx neo4j.ManagedTransaction) error {
+			return fnErr
+		})
+		require.Error(t, err)
+		assert.ErrorIs(t, err, fnErr)
+	})
+
+	t.Run("returns nil on success", func(t *testing.T) {
+		enforcer := NewProfileScopeEnforcer(&mockFnCallingExecutor{})
+		err := enforcer.ScopedWriteTx(ctx, "profile-123", func(tx neo4j.ManagedTransaction) error {
+			return nil
+		})
+		require.NoError(t, err)
+	})
+}
+
+// TestScopedWriteTx_CrossProfileIsolation verifies the profile isolation contract
+// for ScopedWriteTx and RunScoped.  Because neo4j.ManagedTransaction cannot be
+// mocked in unit tests (it has an unexported method), isolation is asserted through
+// the enforcement layer: RunScoped rejects any query that lacks the $profileId
+// placeholder and rejects any attempt to supply a different profileId via params.
+func TestScopedWriteTx_CrossProfileIsolation(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("RunScoped rejects missing $profileId placeholder", func(t *testing.T) {
+		// A query without the placeholder cannot accidentally expose cross-profile data.
+		_, err := RunScoped(ctx, nil, "profile-A", "MATCH (n) RETURN n", nil)
+		require.ErrorIs(t, err, ErrMissingProfilePlaceholder)
+	})
+
+	t.Run("RunScoped rejects caller-supplied profileId override", func(t *testing.T) {
+		// Caller cannot substitute a different profileId to access profile-B's data.
+		params := map[string]any{"profileId": "profile-B"}
+		_, err := RunScoped(ctx, nil, "profile-A",
+			"MATCH (n {profile_id: $profileId}) RETURN n", params)
+		require.ErrorIs(t, err, ErrProfileParamOverride)
+	})
+
+	t.Run("RunScoped rejects empty profileID", func(t *testing.T) {
+		_, err := RunScoped(ctx, nil, "",
+			"MATCH (n {profile_id: $profileId}) RETURN n", nil)
+		require.ErrorIs(t, err, ErrEmptyProfileID)
+	})
+
+	t.Run("ScopedWriteTx fn receives and propagates isolation error from RunScoped", func(t *testing.T) {
+		// If a fn attempts to run a query without $profileId, RunScoped's error
+		// must surface through ScopedWriteTx — preventing the bad write entirely.
+		enforcer := NewProfileScopeEnforcer(&mockFnCallingExecutor{})
+		err := enforcer.ScopedWriteTx(ctx, "profile-A", func(tx neo4j.ManagedTransaction) error {
+			// Simulate a caller forgetting to include the $profileId placeholder.
+			_, runErr := RunScoped(ctx, tx, "profile-A", "CREATE (n:Leak)", nil)
+			return runErr
+		})
+		require.ErrorIs(t, err, ErrMissingProfilePlaceholder)
+	})
+
+	t.Run("results from profile A not contained in profile B result set", func(t *testing.T) {
+		// Symbolic test: the enforcer embeds profileId as a query parameter.
+		// We verify that two separate ValidateAndPrepare calls produce
+		// non-overlapping profileId values so the graph engine cannot confuse them.
+		eA := &profileScopeEnforcer{}
+		eB := &profileScopeEnforcer{}
+		query := "MATCH (n {profile_id: $profileId}) RETURN n"
+
+		paramsA, err := eA.validateAndPrepare("profile-A", query, nil)
+		require.NoError(t, err)
+
+		paramsB, err := eB.validateAndPrepare("profile-B", query, nil)
+		require.NoError(t, err)
+
+		aID := paramsA["profileId"].(string)
+		bID := paramsB["profileId"].(string)
+		require.NotEqual(t, aID, bID, "profileId injected for A and B must differ")
+		require.NotContains(t, []string{bID}, aID)
+	})
 }

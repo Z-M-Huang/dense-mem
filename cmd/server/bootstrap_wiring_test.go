@@ -1,0 +1,61 @@
+package main
+
+import (
+	"context"
+	"testing"
+
+	internalhttp "github.com/dense-mem/dense-mem/internal/http"
+	"github.com/dense-mem/dense-mem/internal/http/handler"
+	"github.com/dense-mem/dense-mem/internal/service/recallservice"
+	"github.com/dense-mem/dense-mem/internal/tools/registry"
+	"github.com/stretchr/testify/require"
+)
+
+// stubRecallSvcForBootstrap implements recallservice.RecallService for
+// wiring smoke tests only. Mocks are kept in *_test.go per
+// memory/feedback_mock_placement.md — cross-pkg consumers use a local stub.
+type stubRecallSvcForBootstrap struct{}
+
+func (s *stubRecallSvcForBootstrap) Recall(
+	_ context.Context,
+	_ string,
+	_ recallservice.RecallRequest,
+) ([]recallservice.RecallHit, error) {
+	return nil, nil
+}
+
+var _ recallservice.RecallService = (*stubRecallSvcForBootstrap)(nil)
+
+// TestServerBootstrapWiresKnowledgePipeline is a compile-and-wire smoke test
+// that verifies the server bootstrap can construct all knowledge-pipeline
+// handlers and assign them to ProtectedHandlers.
+//
+// Specifically it checks:
+//   - registry.BuildDefault succeeds without embedding services (matches both
+//     the MCP binary path and the non-embedding branch in main.go)
+//   - handler.NewRecallHandler can be constructed and its Handle method
+//     assigned to ProtectedHandlers.Recall (AC-55, AC-62)
+//
+// No HTTP requests are issued and no database connections are opened.
+func TestServerBootstrapWiresKnowledgePipeline(t *testing.T) {
+	// registry.BuildDefault must succeed when no embedding services are wired.
+	// This mirrors cmd/mcp/main.go:48 and the !cfg.IsEmbeddingConfigured() path
+	// in main.go.
+	reg, err := registry.BuildDefault(registry.Dependencies{})
+	require.NoError(t, err, "BuildDefault must succeed without embedding services")
+	require.NotNil(t, reg, "registry must be non-nil")
+
+	// RecallHandler must be constructable from any RecallService implementation.
+	// In production, recallSvc is nil when embedding is unconfigured; the
+	// handler is only wired when recallSvc != nil (matching fragmentCreateHandler).
+	recallH := handler.NewRecallHandler(&stubRecallSvcForBootstrap{})
+	require.NotNil(t, recallH, "NewRecallHandler must return a non-nil handler")
+
+	// Verify that ProtectedHandlers.Recall accepts the assignment.
+	// This is a compile-time + runtime check that the field exists and has the
+	// right type.
+	ph := internalhttp.ProtectedHandlers{
+		Recall: recallH.Handle,
+	}
+	require.NotNil(t, ph.Recall, "ProtectedHandlers.Recall must be non-nil after handler assignment")
+}

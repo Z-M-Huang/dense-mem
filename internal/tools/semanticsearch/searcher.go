@@ -3,8 +3,11 @@ package semanticsearch
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
+
+	neo4jstore "github.com/dense-mem/dense-mem/internal/storage/neo4j"
 )
 
 // ScopedReaderInterface is the interface for scoped read operations.
@@ -27,15 +30,18 @@ func NewEmbeddingSearcher(reader ScopedReaderInterface) EmbeddingSearcherInterfa
 }
 
 // QueryVectorIndex performs vector similarity search on SourceFragment embeddings.
-// Results are filtered by profile_id in the Cypher query.
+// Results are filtered by profile_id and retract status in the Cypher query.
 func (s *neo4jEmbeddingSearcher) QueryVectorIndex(ctx context.Context, profileID string, embedding []float32, limit int) ([]SearchHit, error) {
-	// Build the Cypher query with vector index search
-	// Uses db.index.vector.queryNodes for vector similarity search
-	cypherQuery := `
-		CALL db.index.vector.queryNodes('fragment_embedding_idx', $embedding, $limit) YIELD node AS f, score
-		WHERE f.profile_id = $profileId
-		RETURN f.id AS id, f.content AS content, score, f.labels AS labels, f.metadata AS metadata, f.profile_id AS profile_id
-	`
+	// Adapt FragmentActiveFilter (which uses the sf. node alias) to the f. alias used here.
+	// This excludes retracted SourceFragment nodes; legacy nodes without a status property
+	// are treated as active per the coalesce default (AC-44).
+	fragmentActive := strings.ReplaceAll(neo4jstore.FragmentActiveFilter, "sf.", "f.")
+
+	// Build the Cypher query with vector index search.
+	// Uses db.index.vector.queryNodes for vector similarity search.
+	cypherQuery := `CALL db.index.vector.queryNodes('fragment_embedding_idx', $embedding, $limit) YIELD node AS f, score
+WHERE f.profile_id = $profileId AND ` + fragmentActive + `
+RETURN f.fragment_id AS id, f.content AS content, score, f.labels AS labels, f.metadata AS metadata, f.profile_id AS profile_id`
 
 	// Build params - convert float32 slice to any slice for Neo4j
 	embeddingAny := make([]any, len(embedding))

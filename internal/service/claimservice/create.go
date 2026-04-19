@@ -1,0 +1,352 @@
+package claimservice
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"time"
+
+	"github.com/dense-mem/dense-mem/internal/domain"
+	"github.com/dense-mem/dense-mem/internal/observability"
+	"github.com/dense-mem/dense-mem/internal/service/claimidentity"
+	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
+)
+
+// claimDedupeLookup is the minimal interface for claim deduplication checks.
+//
+// Profile isolation invariant: every method MUST scope its query to profileID.
+// Returning data from a different profile is a security violation.
+type claimDedupeLookup interface {
+	// ByIdempotencyKey returns the existing claim for profileID + key,
+	// or (nil, nil) on a miss.
+	ByIdempotencyKey(ctx context.Context, profileID, key string) (*domain.Claim, error)
+
+	// ByContentHash returns the existing claim for profileID + hash,
+	// or (nil, nil) on a miss.
+	ByContentHash(ctx context.Context, profileID, hash string) (*domain.Claim, error)
+}
+
+// claimWriter is the minimal interface for persisting Claim nodes.
+// It is satisfied by the ProfileScopeEnforcer returned by
+// storage/neo4j.NewProfileScopeEnforcer — callers inject that value
+// so no additional wiring is required.
+type claimWriter interface {
+	ScopedWrite(ctx context.Context, profileID string, query string, params map[string]any) (neo4j.ResultSummary, error)
+}
+
+// createClaimServiceImpl implements CreateClaimService.
+type createClaimServiceImpl struct {
+	lookup  claimDedupeLookup
+	reader  supportedFragmentsReader
+	writer  claimWriter
+	audit   AuditEmitter
+	logger  *slog.Logger
+	metrics observability.DiscoverabilityMetrics
+}
+
+// Compile-time check that createClaimServiceImpl satisfies CreateClaimService.
+var _ CreateClaimService = (*createClaimServiceImpl)(nil)
+
+// NewCreateClaimService constructs a ready-to-use CreateClaimService.
+//
+// audit, logger, and metrics may be nil; audit failures are swallowed so the
+// primary operation always succeeds, an absent logger emits no structured log
+// lines, and absent metrics are silently skipped.
+func NewCreateClaimService(
+	lookup claimDedupeLookup,
+	reader supportedFragmentsReader,
+	writer claimWriter,
+	audit AuditEmitter,
+	logger *slog.Logger,
+	metrics observability.DiscoverabilityMetrics,
+) CreateClaimService {
+	return &createClaimServiceImpl{
+		lookup:  lookup,
+		reader:  reader,
+		writer:  writer,
+		audit:   audit,
+		logger:  logger,
+		metrics: metrics,
+	}
+}
+
+// createClaimCypher persists a Claim node and one SUPPORTED_BY edge per
+// supporting fragment in a single atomic write.
+//
+// MERGE on (profile_id, claim_id) makes the write race-safe: concurrent
+// requests that derive the same deterministic claim_id will converge on one
+// node rather than producing duplicates.  ON CREATE SET populates all fields
+// only when the node is first written — a matched (already-existing) node is
+// left untouched.
+//
+// UNWIND $edges creates one SUPPORTED_BY relationship per fragment entry.
+// Each edge carries profile_id and fragment_id for isolation enforcement and
+// fast index scans, plus extracted_at and extract_conf as provenance metadata.
+// When $edges is empty the UNWIND produces zero rows and no edges are written,
+// but the Claim node MERGE has already committed.
+//
+// Profile isolation: $profileId is injected automatically by ScopedWrite.
+// Callers MUST NOT include profileId in the params map.
+const createClaimCypher = `
+MERGE (c:Claim {profile_id: $profileId, claim_id: $claimId})
+ON CREATE SET
+    c.subject                        = $subject,
+    c.predicate                      = $predicate,
+    c.object                         = $object,
+    c.modality                       = $modality,
+    c.polarity                       = $polarity,
+    c.speaker                        = $speaker,
+    c.span_start                     = $spanStart,
+    c.span_end                       = $spanEnd,
+    c.valid_from                     = $validFrom,
+    c.valid_to                       = $validTo,
+    c.recorded_at                    = $recordedAt,
+    c.extract_conf                   = $extractConf,
+    c.resolution_conf                = $resolutionConf,
+    c.source_quality                 = $sourceQuality,
+    c.entailment_verdict             = $entailmentVerdict,
+    c.status                         = $status,
+    c.extraction_model               = $extractionModel,
+    c.extraction_version             = $extractionVersion,
+    c.pipeline_run_id                = $pipelineRunId,
+    c.content_hash                   = $contentHash,
+    c.idempotency_key                = $idempotencyKey,
+    c.classification                 = $classification,
+    c.classification_lattice_version = $classificationLatticeVersion,
+    c.supported_by                   = $supportedBy
+WITH c
+UNWIND $edges AS edge
+MATCH (sf:SourceFragment {profile_id: $profileId, fragment_id: edge.fragment_id})
+MERGE (c)-[r:SUPPORTED_BY {profile_id: $profileId, fragment_id: edge.fragment_id}]->(sf)
+ON CREATE SET
+    r.extracted_at = edge.extracted_at,
+    r.extract_conf = edge.extract_conf`
+
+// Create persists a new claim scoped to profileID.
+//
+// Algorithm:
+//  1. Pre-hash field-length guard (ValidateClaimIdentityInputs).
+//  2. Compute content_hash (SHA-256 of subject|predicate|object|valid_from).
+//  3. Derive deterministic claim_id:
+//     – UUIDv5(profileID, idempotencyKey) when key present, else
+//     – UUIDv5(profileID, contentHash).
+//  4. Deduplicate by idempotency_key.
+//  5. Deduplicate by content_hash (only when no idempotency key).
+//  6. Load supporting fragments (active-only) and compute quality signals.
+//  7. Compute defaults:
+//     status = "candidate"
+//     entailment_verdict = "insufficient"
+//     recorded_at = now (UTC)
+//     source_quality = max(fragment.source_quality)
+//     classification = lattice.Max(fragment.classification...)
+//     classification_lattice_version = "v1"
+//  8. Persist via ScopedWrite.
+//  9. Emit audit event (failure swallowed).
+func (s *createClaimServiceImpl) Create(ctx context.Context, profileID string, claim *domain.Claim) (*CreateResult, error) {
+	// Step 1: pre-hash field-length guard.
+	if err := claimidentity.ValidateClaimIdentityInputs(
+		profileID,
+		claim.Subject,
+		claim.Predicate,
+		claim.Object,
+		claim.IdempotencyKey,
+	); err != nil {
+		return nil, fmt.Errorf("claim create: validation: %w", err)
+	}
+
+	// Step 2: compute content_hash.
+	contentHash := claimidentity.ContentHash(claim.Subject, claim.Predicate, claim.Object, claim.ValidFrom)
+
+	// Step 3: derive deterministic claim_id.
+	var (
+		claimID string
+		idErr   error
+	)
+	if claim.IdempotencyKey != "" {
+		claimID, idErr = claimidentity.ClaimID(profileID, claim.IdempotencyKey)
+	} else {
+		claimID, idErr = claimidentity.ClaimIDFromHash(profileID, contentHash)
+	}
+	if idErr != nil {
+		return nil, fmt.Errorf("claim create: derive claim_id: %w", idErr)
+	}
+
+	// Step 4: deduplicate by idempotency_key.
+	if claim.IdempotencyKey != "" {
+		existing, err := s.lookup.ByIdempotencyKey(ctx, profileID, claim.IdempotencyKey)
+		if err != nil {
+			return nil, fmt.Errorf("claim create: idempotency lookup: %w", err)
+		}
+		if existing != nil {
+			if s.metrics != nil {
+				s.metrics.IncClaimCreate("duplicate", "idempotency_key")
+			}
+			return &CreateResult{
+				Claim:       existing,
+				Duplicate:   true,
+				DuplicateOf: existing.ClaimID,
+			}, nil
+		}
+	} else {
+		// Step 5: deduplicate by content_hash (only when no idempotency key).
+		existing, err := s.lookup.ByContentHash(ctx, profileID, contentHash)
+		if err != nil {
+			return nil, fmt.Errorf("claim create: content-hash lookup: %w", err)
+		}
+		if existing != nil {
+			if s.metrics != nil {
+				s.metrics.IncClaimCreate("duplicate", "content_hash")
+			}
+			return &CreateResult{
+				Claim:       existing,
+				Duplicate:   true,
+				DuplicateOf: existing.ClaimID,
+			}, nil
+		}
+	}
+
+	// Step 6: load supporting fragments (active-only).
+	support, err := loadSupportingFragments(ctx, s.reader, profileID, claim.SupportedBy)
+	if err != nil {
+		return nil, fmt.Errorf("claim create: %w", err)
+	}
+
+	// Step 7: compute defaults.
+	now := time.Now().UTC()
+
+	// Merged classification is map[string]string from the lattice; convert to
+	// map[string]any because domain.Claim.Classification is typed that way.
+	mergedClass := make(map[string]any, len(support.MergedClassification))
+	for k, v := range support.MergedClassification {
+		mergedClass[k] = v
+	}
+
+	newClaim := &domain.Claim{
+		ClaimID:   claimID,
+		ProfileID: profileID,
+		// Semantic triple from the caller.
+		Subject:   claim.Subject,
+		Predicate: claim.Predicate,
+		Object:    claim.Object,
+		// Linguistic metadata from the caller.
+		Modality:  claim.Modality,
+		Polarity:  claim.Polarity,
+		Speaker:   claim.Speaker,
+		SpanStart: claim.SpanStart,
+		SpanEnd:   claim.SpanEnd,
+		// Temporal bounds from the caller.
+		ValidFrom: claim.ValidFrom,
+		ValidTo:   claim.ValidTo,
+		// Pipeline defaults.
+		RecordedAt:        now,
+		Status:            domain.StatusCandidate,
+		EntailmentVerdict: domain.EntailmentVerdict("insufficient"),
+		// Confidence signals from the caller.
+		ExtractConf:    claim.ExtractConf,
+		ResolutionConf: claim.ResolutionConf,
+		// Quality signals derived from supporting fragments.
+		SourceQuality: support.MaxSourceQuality,
+		// Provenance from the caller.
+		ExtractionModel:   claim.ExtractionModel,
+		ExtractionVersion: claim.ExtractionVersion,
+		PipelineRunID:     claim.PipelineRunID,
+		// Idempotency.
+		ContentHash:    contentHash,
+		IdempotencyKey: claim.IdempotencyKey,
+		// Classification computed via lattice.
+		Classification:               mergedClass,
+		// "v1" is the canonical lattice version. DefaultLattice (consumed by
+		// support.go in this package) is built against this schema version.
+		ClassificationLatticeVersion: "v1",
+		// Supporting fragment IDs.
+		SupportedBy: claim.SupportedBy,
+	}
+
+	// Step 8: persist to graph.
+	//
+	// Build one edge descriptor per supporting fragment. Each descriptor carries
+	// the fields written onto the SUPPORTED_BY relationship:
+	//   - fragment_id  — identifies the SourceFragment node for MATCH
+	//   - extracted_at — set to recorded_at (the moment this claim was created)
+	//   - extract_conf — confidence score from the extraction pipeline
+	//
+	// Profile isolation on the relationship is enforced by the $profileId
+	// injection in ScopedWrite, which also populates the profile_id property
+	// written by the ON CREATE SET clause in createClaimCypher.
+	edges := make([]map[string]any, 0, len(support.Fragments))
+	for _, frag := range support.Fragments {
+		edges = append(edges, map[string]any{
+			"fragment_id":  frag.FragmentID,
+			"extracted_at": newClaim.RecordedAt,
+			"extract_conf": newClaim.ExtractConf,
+		})
+	}
+
+	params := map[string]any{
+		"claimId":                      newClaim.ClaimID,
+		"subject":                      newClaim.Subject,
+		"predicate":                    newClaim.Predicate,
+		"object":                       newClaim.Object,
+		"modality":                     string(newClaim.Modality),
+		"polarity":                     string(newClaim.Polarity),
+		"speaker":                      newClaim.Speaker,
+		"spanStart":                    newClaim.SpanStart,
+		"spanEnd":                      newClaim.SpanEnd,
+		"validFrom":                    newClaim.ValidFrom,
+		"validTo":                      newClaim.ValidTo,
+		"recordedAt":                   newClaim.RecordedAt,
+		"extractConf":                  newClaim.ExtractConf,
+		"resolutionConf":               newClaim.ResolutionConf,
+		"sourceQuality":                newClaim.SourceQuality,
+		"entailmentVerdict":            string(newClaim.EntailmentVerdict),
+		"status":                       string(newClaim.Status),
+		"extractionModel":              newClaim.ExtractionModel,
+		"extractionVersion":            newClaim.ExtractionVersion,
+		"pipelineRunId":                newClaim.PipelineRunID,
+		"contentHash":                  newClaim.ContentHash,
+		"idempotencyKey":               newClaim.IdempotencyKey,
+		"classification":               newClaim.Classification,
+		"classificationLatticeVersion": newClaim.ClassificationLatticeVersion,
+		"supportedBy":                  newClaim.SupportedBy,
+		// edges drives the UNWIND ... MERGE for SUPPORTED_BY relationships.
+		"edges": edges,
+	}
+	_, err = s.writer.ScopedWrite(ctx, profileID, createClaimCypher, params)
+	if err != nil {
+		if s.metrics != nil {
+			s.metrics.IncClaimCreate("error", "")
+		}
+		return nil, fmt.Errorf("claim create: persist: %w", err)
+	}
+
+	if s.metrics != nil {
+		s.metrics.IncClaimCreate("created", "")
+	}
+
+	// Step 9: emit audit event; swallow failures so the primary op succeeds.
+	if s.audit != nil {
+		entry := AuditLogEntry{
+			ProfileID:  profileID,
+			Timestamp:  now,
+			Operation:  "claim.create",
+			EntityType: "claim",
+			EntityID:   claimID,
+			// Raw text intentionally excluded from the audit payload.
+			AfterPayload: map[string]any{
+				"claim_id":     claimID,
+				"profile_id":   profileID,
+				"content_hash": contentHash,
+				"status":       string(domain.StatusCandidate),
+			},
+		}
+		if auditErr := s.audit.Append(ctx, entry); auditErr != nil && s.logger != nil {
+			s.logger.Warn("audit emit failed for claim.create",
+				slog.String("profile_id", profileID),
+				slog.String("claim_id", claimID),
+				slog.String("error", auditErr.Error()),
+			)
+		}
+	}
+
+	return &CreateResult{Claim: newClaim}, nil
+}

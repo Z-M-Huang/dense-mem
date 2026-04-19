@@ -1,0 +1,188 @@
+/**
+ * UAT-13 — End-to-end knowledge pipeline journey.
+ *
+ * Exercises the full pipeline in a single test sequence:
+ *   fragment → claim → verify → promote → recall → retract (cascade)
+ *
+ * Also covers AC-X2 (OpenAPI surface) and AC-X6 (stable error codes) regressions.
+ *
+ * Will be RED until all pipeline units are complete.
+ */
+
+import { test, expect } from '@playwright/test';
+import {
+  headers,
+  adminHeaders,
+  seedFragmentForProfile,
+  BASE_URL,
+} from './helpers';
+
+const profileId = process.env.PROFILE_ID || 'uat-profile-e2e-journey';
+
+// UAT-13: Full pipeline — fragment → claim → verify → promote → recall → retract
+test('UAT-13: full knowledge pipeline journey', async ({ request }) => {
+  // ── Step 1: Create a source fragment ──────────────────────────────────────
+  const fragRes = await request.post(`${BASE_URL}/api/v1/fragments`, {
+    headers: headers(profileId),
+    data: {
+      content: 'The speed of light in a vacuum is approximately 299792458 m/s.',
+      source_quality: 0.99,
+      classification: { domain: 'physics', confidence: 0.99 },
+      labels: ['fact', 'physics'],
+    },
+  });
+  expect(fragRes.status()).toBe(201);
+  const fragBody = await fragRes.json();
+  expect(fragBody).toHaveProperty('data');
+  const fragmentId: string = fragBody.data.fragment_id ?? fragBody.data.id;
+  expect(typeof fragmentId).toBe('string');
+
+  // ── Step 2: Create a claim backed by the fragment ─────────────────────────
+  const claimRes = await request.post(`${BASE_URL}/api/v1/claims`, {
+    headers: headers(profileId),
+    data: {
+      predicate: 'HAS_VALUE',
+      subject: 'speed_of_light',
+      object: '299792458_m_per_s',
+      supporting_fragment_ids: [fragmentId],
+    },
+  });
+  expect(claimRes.status()).toBe(201);
+  const claimBody = await claimRes.json();
+  expect(claimBody).toMatchObject({
+    data: {
+      id: expect.any(String),
+      status: expect.stringMatching(/^(candidate|pending)$/),
+    },
+  });
+  const claimId: string = claimBody.data.id;
+
+  // ── Step 3: Verify the claim ──────────────────────────────────────────────
+  const verifyRes = await request.post(
+    `${BASE_URL}/api/v1/claims/${claimId}/verify`,
+    {
+      headers: headers(profileId),
+      data: { verifier_model: 'test-verifier' },
+    },
+  );
+  expect(verifyRes.status()).toBe(200);
+  const verifyBody = await verifyRes.json();
+  expect(verifyBody.data.status).toBe('validated');
+
+  // ── Step 4: Promote the claim to a fact ───────────────────────────────────
+  const promoteRes = await request.post(
+    `${BASE_URL}/api/v1/claims/${claimId}/promote`,
+    {
+      headers: headers(profileId),
+      data: { policy: 'single_supporter' },
+    },
+  );
+  expect(promoteRes.status()).toBe(201);
+  const promoteBody = await promoteRes.json();
+  expect(promoteBody).toMatchObject({
+    data: {
+      id: expect.any(String),
+      predicate: 'HAS_VALUE',
+      subject: 'speed_of_light',
+      object: '299792458_m_per_s',
+    },
+  });
+  const factId: string = promoteBody.data.id;
+
+  // ── Step 5: Retrieve the fact ─────────────────────────────────────────────
+  const factRes = await request.get(`${BASE_URL}/api/v1/facts/${factId}`, {
+    headers: headers(profileId),
+  });
+  expect(factRes.status()).toBe(200);
+  const factBody = await factRes.json();
+  expect(factBody.data.id).toBe(factId);
+
+  // ── Step 6: Recall the fact via semantic search ───────────────────────────
+  const recallRes = await request.get(`${BASE_URL}/api/v1/recall`, {
+    headers: headers(profileId),
+    params: { query: 'speed of light physics constant', limit: '10' },
+  });
+  expect(recallRes.status()).toBe(200);
+  const recallBody = await recallRes.json();
+  expect(Array.isArray(recallBody.data)).toBe(true);
+
+  // ── Step 7: Retract the source fragment ───────────────────────────────────
+  const fragDbId: string = fragBody.data.id;
+  const retractRes = await request.post(
+    `${BASE_URL}/api/v1/fragments/${fragDbId}/retract`,
+    {
+      headers: headers(profileId),
+    },
+  );
+  expect(retractRes.status()).toBe(200);
+  const retractBody = await retractRes.json();
+  expect(retractBody.data).toMatchObject({ retracted: true });
+});
+
+// AC-X2 regression: OpenAPI documents claims, facts, recall, and retract routes
+test('AC-X2 regression: OpenAPI spec covers full pipeline routes', async ({ request }) => {
+  const res = await request.get(`${BASE_URL}/api/v1/openapi.json`, {
+    headers: headers(profileId),
+  });
+  expect(res.status()).toBe(200);
+  const spec = await res.json();
+  expect(spec).toHaveProperty('paths');
+  const paths: Record<string, unknown> = spec.paths;
+  const pathKeys = Object.keys(paths);
+
+  const required = ['/claims', '/facts', '/recall'];
+  for (const route of required) {
+    expect(pathKeys).toEqual(
+      expect.arrayContaining([expect.stringMatching(route)]),
+    );
+  }
+});
+
+// AC-X6 regression: All error responses have machine-readable code fields
+test('AC-X6 regression: error envelope includes stable code field', async ({ request }) => {
+  // Trigger a known 404 — non-existent claim
+  const res = await request.get(
+    `${BASE_URL}/api/v1/claims/00000000-0000-0000-0000-000000000000`,
+    {
+      headers: headers(profileId),
+    },
+  );
+  expect(res.status()).toBeGreaterThanOrEqual(400);
+  const body = await res.json();
+  expect(body).toHaveProperty('code');
+  expect(typeof body.code).toBe('string');
+  // Stable external contract: lowercase with underscores
+  expect(body.code).toMatch(/^[a-z][a-z0-9_]*$/);
+});
+
+// Cross-profile isolation regression: facts not accessible across profiles
+test('Cross-profile isolation: fact from profile A not visible to profile B', async ({
+  request,
+}) => {
+  const profileIdB = 'uat-profile-e2e-journey-b';
+
+  // Create a fact in profile A
+  const frag = await seedFragmentForProfile(
+    request,
+    profileId,
+    'Profile A exclusive fact for isolation regression.',
+  );
+  const claimRes = await request.post(`${BASE_URL}/api/v1/claims`, {
+    headers: headers(profileId),
+    data: {
+      predicate: 'IS',
+      subject: 'isolation_e2e_subject',
+      object: 'isolation_e2e_object',
+      supporting_fragment_ids: [frag.fragment_id],
+    },
+  });
+  expect(claimRes.status()).toBe(201);
+  const claimId: string = (await claimRes.json()).data.id;
+
+  // Profile B must not see profile A's claim
+  const readRes = await request.get(`${BASE_URL}/api/v1/claims/${claimId}`, {
+    headers: headers(profileIdB),
+  });
+  expect(readRes.status()).not.toBe(200);
+  expect(readRes.status()).toBeGreaterThanOrEqual(400);
+});

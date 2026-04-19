@@ -7,6 +7,8 @@ import (
 
 	"github.com/dense-mem/dense-mem/internal/domain"
 	"github.com/dense-mem/dense-mem/internal/http/dto"
+	"github.com/dense-mem/dense-mem/internal/service/claimservice"
+	"github.com/dense-mem/dense-mem/internal/service/factservice"
 	"github.com/dense-mem/dense-mem/internal/service/fragmentservice"
 	"github.com/dense-mem/dense-mem/internal/service/recallservice"
 )
@@ -181,4 +183,181 @@ type stubRecall struct{}
 
 func (stubRecall) Recall(ctx context.Context, profileID string, req recallservice.RecallRequest) ([]recallservice.RecallHit, error) {
 	return []recallservice.RecallHit{}, nil
+}
+
+// --- knowledge pipeline stubs ---
+
+type stubClaimCreate struct {
+	lastProfile string
+}
+
+func (s *stubClaimCreate) Create(ctx context.Context, profileID string, claim *domain.Claim) (*claimservice.CreateResult, error) {
+	s.lastProfile = profileID
+	return &claimservice.CreateResult{
+		Claim: &domain.Claim{ClaimID: "c-1", ProfileID: profileID},
+	}, nil
+}
+
+type stubClaimGet struct{}
+
+func (stubClaimGet) Get(ctx context.Context, profileID, claimID string) (*domain.Claim, error) {
+	return &domain.Claim{ClaimID: claimID, ProfileID: profileID}, nil
+}
+
+type stubClaimList struct{}
+
+func (stubClaimList) List(ctx context.Context, profileID string, limit, offset int) ([]*domain.Claim, int, error) {
+	return []*domain.Claim{{ClaimID: "c-1", ProfileID: profileID}}, 1, nil
+}
+
+type stubClaimVerify struct{}
+
+func (stubClaimVerify) Verify(ctx context.Context, profileID, claimID string) (*domain.Claim, error) {
+	return &domain.Claim{ClaimID: claimID, ProfileID: profileID, Status: domain.StatusValidated}, nil
+}
+
+type stubFactPromote struct{}
+
+func (stubFactPromote) Promote(ctx context.Context, profileID, claimID string) (*domain.Fact, error) {
+	return &domain.Fact{FactID: "f-1", ProfileID: profileID, PromotedFromClaimID: claimID}, nil
+}
+
+type stubFactGet struct{}
+
+func (stubFactGet) Get(ctx context.Context, profileID, factID string) (*domain.Fact, error) {
+	return &domain.Fact{FactID: factID, ProfileID: profileID}, nil
+}
+
+type stubFactList struct{}
+
+func (stubFactList) List(ctx context.Context, profileID string, filters factservice.FactListFilters, limit int, cursor string) ([]*domain.Fact, string, error) {
+	return []*domain.Fact{{FactID: "f-1", ProfileID: profileID}}, "", nil
+}
+
+type stubFragmentRetract struct {
+	lastProfile string
+}
+
+func (s *stubFragmentRetract) Retract(ctx context.Context, profileID, fragmentID string) error {
+	s.lastProfile = profileID
+	return nil
+}
+
+type stubCommunityDetect struct {
+	lastProfile string
+}
+
+func (s *stubCommunityDetect) Detect(ctx context.Context, profileID string) error {
+	s.lastProfile = profileID
+	return nil
+}
+
+// --- knowledge pipeline tests ---
+
+// TestBuildDefaultIncludesKnowledgeTools verifies all 9 knowledge pipeline
+// tools are registered regardless of whether their dependencies are wired.
+func TestBuildDefaultIncludesKnowledgeTools(t *testing.T) {
+	reg, err := BuildDefault(Dependencies{})
+	if err != nil {
+		t.Fatalf("BuildDefault: %v", err)
+	}
+	required := []string{
+		"post_claim", "get_claim", "list_claims", "verify_claim",
+		"promote_claim", "get_fact", "list_facts",
+		"retract_fragment", "detect_community",
+	}
+	for _, name := range required {
+		if _, ok := reg.Get(name); !ok {
+			t.Errorf("tool %q not registered", name)
+		}
+	}
+}
+
+// TestBuildDefaultKnowledgeTools_AvailabilityReflectsDeps verifies that each
+// knowledge tool's Available flag mirrors whether its dependency is wired.
+func TestBuildDefaultKnowledgeTools_AvailabilityReflectsDeps(t *testing.T) {
+	// No deps → all knowledge tools unavailable.
+	reg, _ := BuildDefault(Dependencies{})
+	for _, name := range []string{
+		"post_claim", "get_claim", "list_claims", "verify_claim",
+		"promote_claim", "get_fact", "list_facts",
+		"retract_fragment", "detect_community",
+	} {
+		tool, _ := reg.Get(name)
+		if tool.Available {
+			t.Errorf("%s Available = true; want false when deps missing", name)
+		}
+	}
+
+	// Wire all deps → all knowledge tools available.
+	reg2, _ := BuildDefault(Dependencies{
+		ClaimCreate:     &stubClaimCreate{},
+		ClaimGet:        stubClaimGet{},
+		ClaimList:       stubClaimList{},
+		ClaimVerify:     stubClaimVerify{},
+		FactPromote:     stubFactPromote{},
+		FactGet:         stubFactGet{},
+		FactList:        stubFactList{},
+		FragmentRetract: &stubFragmentRetract{},
+		CommunityDetect: &stubCommunityDetect{},
+	})
+	for _, name := range []string{
+		"post_claim", "get_claim", "list_claims", "verify_claim",
+		"promote_claim", "get_fact", "list_facts",
+		"retract_fragment", "detect_community",
+	} {
+		tool, _ := reg2.Get(name)
+		if !tool.Available {
+			t.Errorf("%s Available = false; want true when dep wired", name)
+		}
+	}
+}
+
+// TestBuildDefaultKnowledgeTools_CrossProfileIsolation verifies that each
+// knowledge tool's invoker passes the profileID argument through to the
+// service — no cross-profile data leakage is possible at the tool layer.
+func TestBuildDefaultKnowledgeTools_CrossProfileIsolation(t *testing.T) {
+	retract := &stubFragmentRetract{}
+	reg, _ := BuildDefault(Dependencies{
+		ClaimGet:        stubClaimGet{},
+		FragmentRetract: retract,
+	})
+
+	// retract_fragment — verify profileID routing.
+	tool, _ := reg.Get("retract_fragment")
+	if _, err := tool.Invoke(context.Background(), "profileA", map[string]any{"id": "frag-1"}); err != nil {
+		t.Fatalf("retract_fragment profileA: %v", err)
+	}
+	if retract.lastProfile != "profileA" {
+		t.Errorf("retract_fragment routed to %q; want profileA", retract.lastProfile)
+	}
+	if _, err := tool.Invoke(context.Background(), "profileB", map[string]any{"id": "frag-2"}); err != nil {
+		t.Fatalf("retract_fragment profileB: %v", err)
+	}
+	if retract.lastProfile != "profileB" {
+		t.Errorf("retract_fragment routed to %q after second call; want profileB", retract.lastProfile)
+	}
+
+	// get_claim — verify that each profile receives only its own scoped data.
+	claimTool, _ := reg.Get("get_claim")
+	aResult, err := claimTool.Invoke(context.Background(), "profileA", map[string]any{"id": "c-shared-id"})
+	if err != nil {
+		t.Fatalf("get_claim profileA: %v", err)
+	}
+	bResult, err := claimTool.Invoke(context.Background(), "profileB", map[string]any{"id": "c-shared-id"})
+	if err != nil {
+		t.Fatalf("get_claim profileB: %v", err)
+	}
+	aProfile, _ := aResult["profile_id"].(string)
+	bProfile, _ := bResult["profile_id"].(string)
+	if aProfile != "profileA" {
+		t.Errorf("get_claim profileA result has profile_id=%q; want profileA", aProfile)
+	}
+	if bProfile != "profileB" {
+		t.Errorf("get_claim profileB result has profile_id=%q; want profileB", bProfile)
+	}
+	// The cross-profile isolation invariant: B's result must not contain A's data.
+	if bProfile == "profileA" {
+		t.Error("cross-profile isolation failure: profileB received profileA-scoped data")
+	}
 }

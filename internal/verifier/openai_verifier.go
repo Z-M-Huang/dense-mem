@@ -1,0 +1,330 @@
+package verifier
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"strings"
+	"time"
+	"unicode"
+
+	"github.com/dense-mem/dense-mem/internal/config"
+)
+
+const (
+	openAIVerifierProvider      = "openai"
+	openAIVerifierMaxItemChars  = 4000
+	openAIVerifierMaxTotalChars = 32000
+	openAIVerifierDefaultTimeout = 60 * time.Second
+
+	// openAIVerifierSystemPrompt is the fixed system instruction for all verification calls.
+	// Temperature is set to 0 and a strict JSON schema is enforced, so this prompt focuses
+	// solely on the task semantics and output contract.
+	openAIVerifierSystemPrompt = `You are a fact-verification assistant. Given a claim and a list of evidence items, determine whether the evidence supports ("entailed"), contradicts ("contradicted"), or is insufficient to assess ("insufficient") the claim.
+
+Respond ONLY with a JSON object conforming to the required schema:
+- "verdict": exactly one of "entailed", "contradicted", or "insufficient"
+- "confidence": a float in [0.0, 1.0] expressing your confidence in the verdict
+- "rationale": a concise, non-empty explanation of your reasoning`
+)
+
+// verifierResponseSchema is the strict JSON schema enforced via response_format.
+// It is declared as a package-level variable so it is parsed once and reused.
+var verifierResponseSchema = json.RawMessage(`{
+	"type": "object",
+	"properties": {
+		"verdict":    {"type": "string", "enum": ["entailed", "contradicted", "insufficient"]},
+		"confidence": {"type": "number"},
+		"rationale":  {"type": "string"}
+	},
+	"required": ["verdict", "confidence", "rationale"],
+	"additionalProperties": false
+}`)
+
+// openAIVerifierMessage is a single chat message.
+type openAIVerifierMessage struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
+// openAIVerifierJSONSchema wraps the schema with metadata for the response_format field.
+type openAIVerifierJSONSchema struct {
+	Name   string          `json:"name"`
+	Strict bool            `json:"strict"`
+	Schema json.RawMessage `json:"schema"`
+}
+
+// openAIVerifierResponseFormat selects structured JSON output mode.
+type openAIVerifierResponseFormat struct {
+	Type       string                   `json:"type"`
+	JSONSchema openAIVerifierJSONSchema `json:"json_schema"`
+}
+
+// openAIVerifierRequest is the request body sent to /chat/completions.
+type openAIVerifierRequest struct {
+	Model          string                       `json:"model"`
+	Messages       []openAIVerifierMessage      `json:"messages"`
+	Temperature    float64                      `json:"temperature"`
+	ResponseFormat openAIVerifierResponseFormat `json:"response_format"`
+}
+
+// openAIVerifierAPIResponse represents the outer chat completions response envelope.
+type openAIVerifierAPIResponse struct {
+	Choices []struct {
+		Message struct {
+			Content string `json:"content"`
+		} `json:"message"`
+	} `json:"choices"`
+	Error *struct {
+		Message string `json:"message"`
+		Code    string `json:"code"`
+	} `json:"error"`
+}
+
+// openAIVerifierResult is the structured payload the LLM returns inside the content field.
+type openAIVerifierResult struct {
+	Verdict    string  `json:"verdict"`
+	Confidence float64 `json:"confidence"`
+	Rationale  string  `json:"rationale"`
+}
+
+// OpenAIVerifier implements Verifier for OpenAI-compatible chat APIs.
+// It is safe for concurrent use: all fields are set during construction and
+// never mutated thereafter.
+type OpenAIVerifier struct {
+	baseURL    string
+	apiKey     string
+	model      string
+	httpClient *http.Client
+}
+
+// Compile-time assertion that OpenAIVerifier implements Verifier.
+var _ Verifier = (*OpenAIVerifier)(nil)
+
+// NewOpenAIVerifier creates a new OpenAI-compatible verifier using the supplied
+// configuration. If httpClient is nil a default client with a 60-second timeout
+// is used.
+func NewOpenAIVerifier(cfg config.ConfigProvider, httpClient *http.Client) *OpenAIVerifier {
+	client := httpClient
+	if client == nil {
+		client = &http.Client{Timeout: openAIVerifierDefaultTimeout}
+	}
+
+	return &OpenAIVerifier{
+		baseURL:    cfg.GetAIAPIURL(),
+		apiKey:     cfg.GetAIAPIKey(),
+		model:      cfg.GetAIVerifierModel(),
+		httpClient: client,
+	}
+}
+
+// Verify submits req to the OpenAI-compatible chat completions endpoint and
+// returns a structured Response. The returned error is one of the sentinel
+// types defined in errors.go (ErrVerifierTimeout, ErrVerifierProvider,
+// ErrVerifierRateLimit, ErrVerifierMalformedResponse).
+func (v *OpenAIVerifier) Verify(ctx context.Context, req Request) (Response, error) {
+	evidence := prepareEvidence(req.Context)
+
+	// Build the user payload as JSON so the LLM receives a machine-readable object.
+	type userPayload struct {
+		Claim    string   `json:"claim"`
+		Evidence []string `json:"evidence"`
+	}
+
+	userJSON, err := json.Marshal(userPayload{
+		Claim:    req.Predicate,
+		Evidence: evidence,
+	})
+	if err != nil {
+		return Response{}, &ProviderError{
+			Provider: openAIVerifierProvider,
+			Message:  "failed to marshal user payload",
+			Cause:    err,
+		}
+	}
+
+	chatReq := openAIVerifierRequest{
+		Model: v.model,
+		Messages: []openAIVerifierMessage{
+			{Role: "system", Content: openAIVerifierSystemPrompt},
+			{Role: "user", Content: string(userJSON)},
+		},
+		Temperature: 0,
+		ResponseFormat: openAIVerifierResponseFormat{
+			Type: "json_schema",
+			JSONSchema: openAIVerifierJSONSchema{
+				Name:   "verification_result",
+				Strict: true,
+				Schema: verifierResponseSchema,
+			},
+		},
+	}
+
+	bodyBytes, err := json.Marshal(chatReq)
+	if err != nil {
+		return Response{}, &ProviderError{
+			Provider: openAIVerifierProvider,
+			Message:  "failed to marshal request",
+			Cause:    err,
+		}
+	}
+
+	url := strings.TrimSuffix(v.baseURL, "/") + "/chat/completions"
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return Response{}, &ProviderError{
+			Provider: openAIVerifierProvider,
+			Message:  "failed to create HTTP request",
+			Cause:    err,
+		}
+	}
+	httpReq.Header.Set("Authorization", "Bearer "+v.apiKey)
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	httpResp, err := v.httpClient.Do(httpReq)
+	if err != nil {
+		if ctx.Err() != nil {
+			return Response{}, &TimeoutError{
+				Provider: openAIVerifierProvider,
+				Message:  ctx.Err().Error(),
+			}
+		}
+		return Response{}, &ProviderError{
+			Provider: openAIVerifierProvider,
+			Message:  "HTTP request failed",
+			Cause:    err,
+		}
+	}
+	defer httpResp.Body.Close()
+
+	var apiResp openAIVerifierAPIResponse
+	if err := json.NewDecoder(httpResp.Body).Decode(&apiResp); err != nil {
+		return Response{}, &MalformedResponseError{
+			Provider: openAIVerifierProvider,
+			Message:  "failed to decode API response",
+		}
+	}
+
+	if httpResp.StatusCode == http.StatusTooManyRequests {
+		msg := "rate limited"
+		if apiResp.Error != nil && apiResp.Error.Message != "" {
+			msg = apiResp.Error.Message
+		}
+		return Response{}, &RateLimitError{
+			Provider: openAIVerifierProvider,
+			Message:  msg,
+		}
+	}
+
+	if httpResp.StatusCode != http.StatusOK {
+		msg := fmt.Sprintf("unexpected status %d", httpResp.StatusCode)
+		if apiResp.Error != nil && apiResp.Error.Message != "" {
+			msg = apiResp.Error.Message
+		}
+		return Response{}, &ProviderError{
+			Provider: openAIVerifierProvider,
+			Message:  msg,
+		}
+	}
+
+	if len(apiResp.Choices) == 0 {
+		return Response{}, &MalformedResponseError{
+			Provider: openAIVerifierProvider,
+			Message:  "no choices in response",
+		}
+	}
+
+	rawContent := apiResp.Choices[0].Message.Content
+
+	var result openAIVerifierResult
+	if err := json.Unmarshal([]byte(rawContent), &result); err != nil {
+		return Response{}, &MalformedResponseError{
+			Provider: openAIVerifierProvider,
+			Message:  "failed to parse structured response content",
+			RawJSON:  rawContent,
+		}
+	}
+
+	// Validate verdict is one of the three allowed values.
+	switch result.Verdict {
+	case "entailed", "contradicted", "insufficient":
+		// valid — continue
+	default:
+		return Response{}, &MalformedResponseError{
+			Provider: openAIVerifierProvider,
+			Message:  fmt.Sprintf("invalid verdict %q: must be entailed|contradicted|insufficient", result.Verdict),
+			RawJSON:  rawContent,
+		}
+	}
+
+	// Validate confidence is in [0, 1].
+	if result.Confidence < 0 || result.Confidence > 1 {
+		return Response{}, &MalformedResponseError{
+			Provider: openAIVerifierProvider,
+			Message:  fmt.Sprintf("confidence %f out of range [0,1]", result.Confidence),
+			RawJSON:  rawContent,
+		}
+	}
+
+	// Validate rationale is non-empty.
+	if strings.TrimSpace(result.Rationale) == "" {
+		return Response{}, &MalformedResponseError{
+			Provider: openAIVerifierProvider,
+			Message:  "rationale must be non-empty",
+			RawJSON:  rawContent,
+		}
+	}
+
+	return Response{
+		Verdict:    result.Verdict,
+		Confidence: result.Confidence,
+		Reasoning:  result.Rationale,
+		RawJSON:    rawContent,
+	}, nil
+}
+
+// prepareEvidence converts a single evidence string into the list format
+// expected by the LLM payload. It strips control characters, enforces a
+// per-item cap (openAIVerifierMaxItemChars) and a total-payload cap
+// (openAIVerifierMaxTotalChars) via deterministic byte-level truncation.
+func prepareEvidence(evidenceStr string) []string {
+	if evidenceStr == "" {
+		return []string{}
+	}
+
+	cleaned := stripControlChars(evidenceStr)
+	if cleaned == "" {
+		return []string{}
+	}
+
+	// Per-item cap: truncate to max item chars.
+	if len(cleaned) > openAIVerifierMaxItemChars {
+		cleaned = cleaned[:openAIVerifierMaxItemChars]
+	}
+
+	// Total cap: since we produce a single-item list here, the total equals
+	// the item length. This guard ensures the invariant holds if future callers
+	// produce multiple items.
+	if len(cleaned) > openAIVerifierMaxTotalChars {
+		cleaned = cleaned[:openAIVerifierMaxTotalChars]
+	}
+
+	return []string{cleaned}
+}
+
+// stripControlChars returns s with all Unicode control characters removed,
+// preserving horizontal tab (\t), line feed (\n), and carriage return (\r)
+// which are meaningful in natural-language evidence.
+func stripControlChars(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r == '\t' || r == '\n' || r == '\r' {
+			return r
+		}
+		if unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, s)
+}

@@ -82,3 +82,30 @@ Middleware  Business Logic  Raw Queries
 - Document non-obvious invariants
 - Mark intentional security decisions
 - Explain architectural choices
+
+## Knowledge Pipeline Contracts
+
+The knowledge pipeline has stable contracts that all consumers MUST follow.
+See `docs/knowledge-pipeline-contracts.md` for the full reference.
+
+| Stage | Route | AC |
+|-------|-------|-----|
+| Fragment ingestion | `POST /api/v1/fragments` | AC-3 |
+| Claim creation | `POST /api/v1/claims` | AC-16 |
+| Claim verification | `POST /api/v1/claims/{id}/verify` | AC-28 |
+| Fact promotion | `POST /api/v1/claims/{id}/promote` | AC-41 |
+| Fragment retraction | `POST /api/v1/fragments/{id}/retract` | AC-48 |
+| Community detection | `POST /api/v1/admin/profiles/{id}/community/detect` | AC-49 |
+| Hybrid recall | `GET /api/v1/recall` | AC-55, AC-62 |
+
+**Recall tier contract** (MUST NOT be changed without an ADR):
+- Tier `"1"` = active facts (score = `truth_score`)
+- Tier `"1.5"` = validated claims only (score = `extract_conf * 0.5`)
+- Tier `"2"` = fragments (score = RRF)
+
+Related documents:
+- `docs/knowledge-pipeline-contracts.md` — stable schemas and error contracts
+- `docs/knowledge-pipeline-operability.md` — RBAC, alerts, rollback, risk register
+- `docs/knowledge-pipeline-client-contracts.md` — client/UI integration guide
+- `docs/adr/` — architectural decision records
+- `docs/policies/` — access control and classification policies

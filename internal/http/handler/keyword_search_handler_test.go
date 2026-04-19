@@ -127,10 +127,10 @@ func TestKeywordSearchHandler_Handle_LimitZero_422(t *testing.T) {
 
 	assert.Equal(t, http.StatusUnprocessableEntity, rec.Code)
 
-	var resp httperr.ErrorEnvelope
+	var resp httperr.APIError
 	err := json.Unmarshal(rec.Body.Bytes(), &resp)
 	require.NoError(t, err)
-	assert.Equal(t, httperr.VALIDATION_ERROR, resp.Error.Code)
+	assert.Equal(t, httperr.VALIDATION_ERROR, resp.Code)
 }
 
 // TestKeywordSearchHandler_Handle_EmptyResult_200 tests that empty result returns 200 with {"data":[]}.
@@ -229,10 +229,10 @@ func TestKeywordSearchHandler_Handle_LimitCapped(t *testing.T) {
 	// Should return 422 because limit exceeds max=100
 	assert.Equal(t, http.StatusUnprocessableEntity, rec.Code)
 
-	var resp httperr.ErrorEnvelope
+	var resp httperr.APIError
 	err := json.Unmarshal(rec.Body.Bytes(), &resp)
 	require.NoError(t, err)
-	assert.Equal(t, httperr.VALIDATION_ERROR, resp.Error.Code)
+	assert.Equal(t, httperr.VALIDATION_ERROR, resp.Code)
 }
 
 // TestKeywordSearchHandler_BindsDTO_Keywords tests that handler binds dto.KeywordSearchRequest with "keywords" field.

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/dense-mem/dense-mem/internal/domain"
+	"github.com/dense-mem/dense-mem/internal/storage/neo4j"
 )
 
 const (
@@ -104,7 +105,8 @@ func (s *listFragmentsService) List(ctx context.Context, profileID string, opts 
 
 	query := `
 		MATCH (sf:SourceFragment {profile_id: $profileId})
-		WHERE ($srcType IS NULL OR sf.source_type = $srcType)
+		WHERE ` + neo4j.FragmentActiveFilter + `
+		  AND ($srcType IS NULL OR sf.source_type = $srcType)
 		  AND ($afterTs IS NULL OR sf.created_at < $afterTs
 		       OR (sf.created_at = $afterTs AND sf.fragment_id < $afterId))
 		RETURN sf.fragment_id AS fragment_id,
@@ -118,6 +120,8 @@ func (s *listFragmentsService) List(ctx context.Context, profileID string, opts 
 		       sf.idempotency_key AS idempotency_key,
 		       sf.embedding_model AS embedding_model,
 		       sf.embedding_dimensions AS embedding_dimensions,
+		       sf.source_quality AS source_quality,
+		       sf.classification AS classification,
 		       sf.created_at AS created_at,
 		       sf.updated_at AS updated_at
 		ORDER BY sf.created_at DESC, sf.fragment_id DESC

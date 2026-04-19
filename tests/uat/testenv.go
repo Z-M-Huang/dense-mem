@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -502,11 +503,17 @@ func NewTestEnv(t *testing.T, opts ...TestEnvOptions) *TestEnv {
 }
 
 // SetupTestEnv is a helper function that sets up the test environment
-// and returns a cleanup function
+// and returns a cleanup function. If the Docker daemon is unreachable
+// (e.g. CI runners without Docker-in-Docker or restricted socket perms),
+// the test is skipped rather than failed — testcontainer dependencies
+// are an environment requirement, not a contract failure.
 func SetupTestEnv(t *testing.T, ctx context.Context, opts ...TestEnvOptions) (*TestEnv, func()) {
 	t.Helper()
 	env := NewTestEnv(t, opts...)
 	if err := env.Setup(ctx); err != nil {
+		if isDockerUnavailable(err) {
+			t.Skipf("Docker unavailable — skipping testcontainer-backed UAT: %v", err)
+		}
 		t.Fatalf("failed to setup test environment: %v", err)
 	}
 	cleanup := func() {
@@ -515,6 +522,23 @@ func SetupTestEnv(t *testing.T, ctx context.Context, opts ...TestEnvOptions) (*T
 		}
 	}
 	return env, cleanup
+}
+
+// isDockerUnavailable returns true when the error chain indicates the Docker
+// daemon cannot be reached. Used to decide Skip vs Fatal in test setup.
+func isDockerUnavailable(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	switch {
+	case strings.Contains(msg, "docker.sock"),
+		strings.Contains(msg, "failed to create Docker provider"),
+		strings.Contains(msg, "rootless Docker not found"),
+		strings.Contains(msg, "Cannot connect to the Docker daemon"):
+		return true
+	}
+	return false
 }
 
 // Helper config implementations
@@ -676,3 +700,10 @@ func (c *testConfig) GetAIEmbeddingTimeoutSeconds() int   { return c.aiEmbedding
 func (c *testConfig) IsEmbeddingConfigured() bool {
 	return c.aiAPIURL != "" && c.aiAPIKey != "" && c.aiEmbeddingModel != "" && c.aiEmbeddingDimensions > 0
 }
+func (c *testConfig) GetAIVerifierModel() string            { return "gpt-4o-mini" }
+func (c *testConfig) GetAIVerifierMaxConcurrency() int      { return 5 }
+func (c *testConfig) GetClaimWriteRateLimit() int           { return 60 }
+func (c *testConfig) GetClaimReadRateLimit() int            { return 300 }
+func (c *testConfig) GetRecallValidatedClaimWeight() float64 { return 0.5 }
+func (c *testConfig) GetPromoteTxTimeoutSeconds() int       { return 10 }
+func (c *testConfig) GetAICommunityMaxNodes() int           { return 500000 }

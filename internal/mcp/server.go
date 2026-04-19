@@ -19,6 +19,7 @@ import (
 	"io"
 
 	"github.com/dense-mem/dense-mem/internal/observability"
+	"github.com/dense-mem/dense-mem/internal/tools"
 	"github.com/dense-mem/dense-mem/internal/tools/registry"
 )
 
@@ -57,6 +58,32 @@ var _ ServerInterface = (*Server)(nil)
 // NewServer constructs a Server bound to a registry and a fixed profile ID.
 func NewServer(reg registry.Registry, profileID string, logger observability.LogProvider) *Server {
 	return &Server{registry: reg, profileID: profileID, logger: logger}
+}
+
+// LookupEnv resolves the MCP startup environment, preferring canonical names
+// and falling back to deprecated aliases. A deprecation warning is written to
+// w whenever a deprecated alias is used and the canonical name is unset.
+//
+// Canonical names: DENSE_MEM_PROFILE_ID, DENSE_MEM_API_KEY, DENSE_MEM_URL
+// Deprecated aliases: X_PROFILE_ID → DENSE_MEM_PROFILE_ID
+//
+//	DENSE_MEM_AUTH_KEY → DENSE_MEM_API_KEY
+func LookupEnv(getenv func(string) string, w io.Writer) (profileID, apiKey string) {
+	profileID = getenv("DENSE_MEM_PROFILE_ID")
+	if profileID == "" {
+		if alias := getenv("X_PROFILE_ID"); alias != "" {
+			profileID = alias
+			fmt.Fprintln(w, "warning: X_PROFILE_ID is deprecated; use DENSE_MEM_PROFILE_ID")
+		}
+	}
+	apiKey = getenv("DENSE_MEM_API_KEY")
+	if apiKey == "" {
+		if alias := getenv("DENSE_MEM_AUTH_KEY"); alias != "" {
+			apiKey = alias
+			fmt.Fprintln(w, "warning: DENSE_MEM_AUTH_KEY is deprecated; use DENSE_MEM_API_KEY")
+		}
+	}
+	return
 }
 
 // rpcRequest mirrors the incoming JSON-RPC 2.0 envelope.
@@ -153,9 +180,9 @@ func (s *Server) handleInitialize() map[string]any {
 // handleToolsList returns registered tools mapped to MCP tool descriptors.
 // The registry is already the source of truth so this is a pure transform.
 func (s *Server) handleToolsList() map[string]any {
-	tools := s.registry.List()
-	out := make([]map[string]any, 0, len(tools))
-	for _, t := range tools {
+	listed := s.registry.List()
+	out := make([]map[string]any, 0, len(listed))
+	for _, t := range listed {
 		schema := t.InputSchema
 		if schema == nil {
 			schema = map[string]any{"type": "object"}
@@ -204,13 +231,16 @@ func (s *Server) handleToolsCall(ctx context.Context, raw json.RawMessage) (map[
 	if args == nil {
 		args = map[string]any{}
 	}
+	// Strip profile_id to prevent callers from overriding the fixed server
+	// profile. The server is single-profile; profileID is bound at construction.
+	delete(args, "profile_id")
 	result, err := tool.Invoke(ctx, s.profileID, args)
 	if err != nil {
 		s.logger.Error("mcp: tool invocation failed", err,
 			observability.String("tool", params.Name),
 			observability.ProfileID(s.profileID),
 		)
-		return nil, &rpcError{Code: errCodeToolFailure, Message: sanitizeToolError(err)}
+		return nil, &rpcError{Code: errCodeToolFailure, Message: tools.SanitizeError(err)}
 	}
 
 	payload, err := json.Marshal(result)
@@ -223,20 +253,6 @@ func (s *Server) handleToolsCall(ctx context.Context, raw json.RawMessage) (map[
 			{"type": "text", "text": string(payload)},
 		},
 	}, nil
-}
-
-// sanitizeToolError produces a client-safe message. Known domain errors are
-// surfaced; anything else is collapsed to a generic string so that internal
-// provider errors (API keys, endpoints, etc) never escape the boundary.
-func sanitizeToolError(err error) string {
-	if err == nil {
-		return ""
-	}
-	msg := err.Error()
-	if msg == "" {
-		return "tool invocation failed"
-	}
-	return msg
 }
 
 func okResponse(id json.RawMessage, result any) rpcResponse {

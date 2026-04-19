@@ -191,23 +191,30 @@ func TestUAT10_ToolCatalogAndOpenAPI(t *testing.T) {
 	assert.Contains(t, generator, "registry",
 		"OpenAPI generator must read from the shared registry, not redefine schemas")
 
-	// In-process contract check: BuildDefault yields the seven canonical tools
+	// In-process contract check: BuildDefault advertises every canonical tool
 	// even with zero service wiring — the availability flag gates execution,
-	// not advertisement, so discovery never silently drops entries.
+	// not advertisement, so discovery never silently drops entries. Phase 8
+	// (knowledge pipeline) added 9 new tools on top of the original 7.
 	reg, err := registry.BuildDefault(registry.Dependencies{})
 	require.NoError(t, err)
 	list := reg.List()
-	assert.Len(t, list, 7, "BuildDefault must register seven canonical tools")
 	seen := map[string]bool{}
 	for _, tl := range list {
 		seen[tl.Name] = true
 	}
 	for _, name := range []string{
+		// Original 7 (Phase 1 canonical set)
 		"save_memory", "get_memory", "list_recent_memories", "recall_memory",
 		"keyword-search", "semantic-search", "graph-query",
+		// Phase 8 knowledge pipeline tools
+		"post_claim", "get_claim", "list_claims",
+		"verify_claim", "promote_claim",
+		"get_fact", "list_facts",
+		"retract_fragment", "detect_community",
 	} {
 		assert.True(t, seen[name], "registry must list %q after BuildDefault", name)
 	}
+	assert.GreaterOrEqual(t, len(list), 7, "BuildDefault must register at least the original 7 canonical tools")
 
 	// save_memory is write-scoped; without FragmentCreate + embedding, it is
 	// advertised but marked unavailable (AC-32).

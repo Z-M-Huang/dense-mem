@@ -246,10 +246,10 @@ func TestAuditHandler_Get_DifferentProfile_Forbidden(t *testing.T) {
 
 	assert.Equal(t, http.StatusForbidden, rec.Code)
 
-	var resp httperr.ErrorEnvelope
+	var resp httperr.APIError
 	err := json.Unmarshal(rec.Body.Bytes(), &resp)
 	require.NoError(t, err)
-	assert.Equal(t, httperr.FORBIDDEN, resp.Error.Code)
+	assert.Equal(t, httperr.FORBIDDEN, resp.Code)
 }
 
 // TestAuditHandler_NoUpdateDelete verifies no update/delete routes exist for audit log.
@@ -319,8 +319,8 @@ func TestAuditHandler_Get_InvalidUUID(t *testing.T) {
 
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 
-	var resp httperr.ErrorEnvelope
+	var resp httperr.APIError
 	err := json.Unmarshal(rec.Body.Bytes(), &resp)
 	require.NoError(t, err)
-	assert.Equal(t, httperr.INVALID_UUID, resp.Error.Code)
+	assert.Equal(t, httperr.INVALID_UUID, resp.Code)
 }

@@ -334,10 +334,10 @@ func TestProfileHandler_Get_InvalidUUID(t *testing.T) {
 
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 
-	var resp httperr.ErrorEnvelope
+	var resp httperr.APIError
 	err := json.Unmarshal(rec.Body.Bytes(), &resp)
 	require.NoError(t, err)
-	assert.Equal(t, httperr.INVALID_UUID, resp.Error.Code)
+	assert.Equal(t, httperr.INVALID_UUID, resp.Code)
 }
 
 // TestProfileHandler_Get_DeletedProfile_404 tests get on deleted profile returns 404.
@@ -361,10 +361,10 @@ func TestProfileHandler_Get_DeletedProfile_404(t *testing.T) {
 
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 
-	var resp httperr.ErrorEnvelope
+	var resp httperr.APIError
 	err := json.Unmarshal(rec.Body.Bytes(), &resp)
 	require.NoError(t, err)
-	assert.Equal(t, httperr.NOT_FOUND, resp.Error.Code)
+	assert.Equal(t, httperr.NOT_FOUND, resp.Code)
 }
 
 // TestProfileHandler_Patch_AdminOrSameProfile tests patch with admin or same-profile access.

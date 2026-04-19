@@ -111,9 +111,12 @@ func logRateLimit(c echo.Context, auditSvc service.AuditService, profileID, rout
 }
 
 // selectRateLimit resolves the rate-limit tier for a single request.
-// Admin callers always use the admin tier. Standard callers hit the fragment
-// write tier for POST/DELETE on /fragments, the fragment read tier for GET
-// on /fragments, and the default standard tier for everything else.
+// Admin callers always use the admin tier. Standard callers hit:
+//   - fragment write tier for POST/DELETE on /fragments (stricter: triggers embedding + graph write)
+//   - fragment read tier for GET on /fragments
+//   - claim write tier for POST/DELETE on /claims
+//   - claim read tier for GET on /claims
+//   - default standard tier for everything else
 func selectRateLimit(cfg config.ConfigProvider, role, method, routePath string) int {
 	if role == "admin" {
 		return cfg.GetAdminRateLimitPerMinute()
@@ -128,6 +131,15 @@ func selectRateLimit(cfg config.ConfigProvider, role, method, routePath string) 
 		}
 	}
 
+	if isClaimRoute(routePath) {
+		switch method {
+		case "POST", "DELETE":
+			return cfg.GetClaimWriteRateLimit()
+		case "GET":
+			return cfg.GetClaimReadRateLimit()
+		}
+	}
+
 	return cfg.GetRateLimitPerMinute()
 }
 
@@ -136,4 +148,10 @@ func selectRateLimit(cfg config.ConfigProvider, role, method, routePath string) 
 // ":param" markers so a simple substring check is reliable.
 func isFragmentRoute(routePath string) bool {
 	return strings.Contains(routePath, "/fragments")
+}
+
+// isClaimRoute matches any /claims or /claims/:id route regardless
+// of the surrounding path prefix.
+func isClaimRoute(routePath string) bool {
+	return strings.Contains(routePath, "/claims")
 }

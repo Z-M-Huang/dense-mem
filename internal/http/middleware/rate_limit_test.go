@@ -18,10 +18,12 @@ import (
 
 // testRateLimitConfig implements config.ConfigProvider for rate limit tests.
 type testRateLimitConfig struct {
-	rateLimitPerMinute       int
-	adminRateLimitPerMinute  int
-	fragmentCreateRateLimit  int
-	fragmentReadRateLimit    int
+	rateLimitPerMinute      int
+	adminRateLimitPerMinute int
+	fragmentCreateRateLimit int
+	fragmentReadRateLimit   int
+	claimWriteRateLimit     int
+	claimReadRateLimit      int
 }
 
 func (c *testRateLimitConfig) GetHTTPAddr() string                 { return ":8080" }
@@ -53,6 +55,23 @@ func (c *testRateLimitConfig) GetAIEmbeddingModel() string          { return "" 
 func (c *testRateLimitConfig) GetAIEmbeddingDimensions() int        { return 0 }
 func (c *testRateLimitConfig) GetAIEmbeddingTimeoutSeconds() int    { return 30 }
 func (c *testRateLimitConfig) IsEmbeddingConfigured() bool          { return false }
+func (c *testRateLimitConfig) GetAIVerifierModel() string             { return "gpt-4o-mini" }
+func (c *testRateLimitConfig) GetAIVerifierMaxConcurrency() int       { return 5 }
+func (c *testRateLimitConfig) GetClaimWriteRateLimit() int {
+	if c.claimWriteRateLimit != 0 {
+		return c.claimWriteRateLimit
+	}
+	return 60
+}
+func (c *testRateLimitConfig) GetClaimReadRateLimit() int {
+	if c.claimReadRateLimit != 0 {
+		return c.claimReadRateLimit
+	}
+	return 300
+}
+func (c *testRateLimitConfig) GetRecallValidatedClaimWeight() float64 { return 0.5 }
+func (c *testRateLimitConfig) GetPromoteTxTimeoutSeconds() int      { return 10 }
+func (c *testRateLimitConfig) GetAICommunityMaxNodes() int          { return 500000 }
 
 // runRateLimitMiddlewareContract is the shared contract helper for rate limit
 // middleware. It exercises header contract and 429 behavior for any backend
@@ -146,6 +165,13 @@ func (c *redisRateLimitConfig) GetAIEmbeddingModel() string          { return ""
 func (c *redisRateLimitConfig) GetAIEmbeddingDimensions() int        { return 0 }
 func (c *redisRateLimitConfig) GetAIEmbeddingTimeoutSeconds() int    { return 30 }
 func (c *redisRateLimitConfig) IsEmbeddingConfigured() bool          { return false }
+func (c *redisRateLimitConfig) GetAIVerifierModel() string           { return "gpt-4o-mini" }
+func (c *redisRateLimitConfig) GetAIVerifierMaxConcurrency() int     { return 5 }
+func (c *redisRateLimitConfig) GetClaimWriteRateLimit() int          { return 60 }
+func (c *redisRateLimitConfig) GetClaimReadRateLimit() int           { return 300 }
+func (c *redisRateLimitConfig) GetRecallValidatedClaimWeight() float64 { return 0.5 }
+func (c *redisRateLimitConfig) GetPromoteTxTimeoutSeconds() int      { return 10 }
+func (c *redisRateLimitConfig) GetAICommunityMaxNodes() int          { return 500000 }
 
 func TestRateLimitMiddleware_Contract_Redis(t *testing.T) {
 	t.Parallel()
@@ -214,6 +240,49 @@ func TestSelectRateLimit_FragmentTiers(t *testing.T) {
 	if cfg.GetFragmentCreateRateLimit() >= cfg.GetFragmentReadRateLimit() {
 		t.Errorf("fragment create (%d) should be stricter than fragment read (%d)",
 			cfg.GetFragmentCreateRateLimit(), cfg.GetFragmentReadRateLimit())
+	}
+}
+
+// TestSelectRateLimit_ClaimTiers asserts that POST and DELETE on /claims routes
+// use GetClaimWriteRateLimit and GETs use GetClaimReadRateLimit. Admin callers
+// always bypass claim-tier selection and use the admin tier.
+func TestSelectRateLimit_ClaimTiers(t *testing.T) {
+	t.Parallel()
+
+	cfg := &testRateLimitConfig{
+		rateLimitPerMinute:      100,
+		adminRateLimitPerMinute: 1000,
+		fragmentCreateRateLimit: 60,
+		fragmentReadRateLimit:   300,
+		claimWriteRateLimit:     40,
+		claimReadRateLimit:      200,
+	}
+
+	cases := []struct {
+		name   string
+		role   string
+		method string
+		path   string
+		want   int
+	}{
+		{"admin overrides claim route", "admin", "POST", "/api/v1/claims", 1000},
+		{"claim create POST uses write tier", "standard", "POST", "/api/v1/claims", 40},
+		{"claim delete DELETE uses write tier", "standard", "DELETE", "/api/v1/claims/:id", 40},
+		{"claim list GET uses read tier", "standard", "GET", "/api/v1/claims", 200},
+		{"claim read GET uses read tier", "standard", "GET", "/api/v1/claims/:id", 200},
+	}
+
+	for _, tc := range cases {
+		got := selectRateLimit(cfg, tc.role, tc.method, tc.path)
+		if got != tc.want {
+			t.Errorf("%s: selectRateLimit(%q, %q, %q) = %d; want %d",
+				tc.name, tc.role, tc.method, tc.path, got, tc.want)
+		}
+	}
+
+	if cfg.GetClaimWriteRateLimit() >= cfg.GetClaimReadRateLimit() {
+		t.Errorf("claim write (%d) should be stricter than claim read (%d)",
+			cfg.GetClaimWriteRateLimit(), cfg.GetClaimReadRateLimit())
 	}
 }
 

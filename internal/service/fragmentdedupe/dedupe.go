@@ -58,6 +58,7 @@ func (l *neo4jDedupeLookup) ByIdempotencyKey(ctx context.Context, profileID, key
 	// The query must contain $profileId placeholder for ScopedRead validation
 	query := `
 		MATCH (sf:SourceFragment {profile_id: $profileId, idempotency_key: $key})
+		WHERE ` + neo4j.FragmentActiveFilter + `
 		RETURN sf.fragment_id AS fragment_id,
 		       sf.profile_id AS profile_id,
 		       sf.content AS content,
@@ -69,6 +70,8 @@ func (l *neo4jDedupeLookup) ByIdempotencyKey(ctx context.Context, profileID, key
 		       sf.idempotency_key AS idempotency_key,
 		       sf.embedding_model AS embedding_model,
 		       sf.embedding_dimensions AS embedding_dimensions,
+		       sf.source_quality AS source_quality,
+		       sf.classification AS classification,
 		       sf.created_at AS created_at,
 		       sf.updated_at AS updated_at
 		LIMIT 1
@@ -97,6 +100,7 @@ func (l *neo4jDedupeLookup) ByContentHash(ctx context.Context, profileID, hash s
 	// The query must contain $profileId placeholder for ScopedRead validation
 	query := `
 		MATCH (sf:SourceFragment {profile_id: $profileId, content_hash: $hash})
+		WHERE ` + neo4j.FragmentActiveFilter + `
 		RETURN sf.fragment_id AS fragment_id,
 		       sf.profile_id AS profile_id,
 		       sf.content AS content,
@@ -108,6 +112,8 @@ func (l *neo4jDedupeLookup) ByContentHash(ctx context.Context, profileID, hash s
 		       sf.idempotency_key AS idempotency_key,
 		       sf.embedding_model AS embedding_model,
 		       sf.embedding_dimensions AS embedding_dimensions,
+		       sf.source_quality AS source_quality,
+		       sf.classification AS classification,
 		       sf.created_at AS created_at,
 		       sf.updated_at AS updated_at
 		LIMIT 1
@@ -176,6 +182,19 @@ func mapToFragment(m map[string]any) *domain.Fragment {
 			fragment.EmbeddingDimensions = int(dim)
 		case int:
 			fragment.EmbeddingDimensions = dim
+		}
+	}
+	if v, ok := m["source_quality"]; ok {
+		switch sq := v.(type) {
+		case float64:
+			fragment.SourceQuality = sq
+		case float32:
+			fragment.SourceQuality = float64(sq)
+		}
+	}
+	if v, ok := m["classification"]; ok {
+		if cls, ok := v.(map[string]any); ok {
+			fragment.Classification = cls
 		}
 	}
 	if v, ok := m["created_at"].(time.Time); ok {

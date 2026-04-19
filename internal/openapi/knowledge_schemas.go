@@ -1,0 +1,370 @@
+package openapi
+
+// knowledgeSchemas returns component-schema definitions for the knowledge
+// pipeline entities (Claim, Fact, Community). These schemas are merged into
+// every generated spec so that routes can reference them via explicit
+// RequestSchema / ResponseSchema fields on RouteDescriptor — decoupled from
+// MCP tool registration, which may complete later.
+//
+// Schema names follow the PascalCase component convention used throughout this
+// package. They are intentionally separate from tool-derived schemas (which
+// use schemaNameFor) to avoid name collisions and to allow independent
+// evolution of the REST surface vs. the tool surface.
+func knowledgeSchemas() map[string]any {
+	return map[string]any{
+		// ClaimRequest is the request body for creating or updating a candidate
+		// claim derived from a source fragment.
+		"ClaimRequest": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"fragment_id": map[string]any{
+					"type":        "string",
+					"format":      "uuid",
+					"description": "Source fragment this claim was extracted from.",
+				},
+				"content": map[string]any{
+					"type":        "string",
+					"description": "Natural-language assertion extracted from the fragment.",
+				},
+				"confidence": map[string]any{
+					"type":        "number",
+					"format":      "float",
+					"minimum":     0,
+					"maximum":     1,
+					"description": "Extraction confidence score (0–1).",
+				},
+				"metadata": map[string]any{
+					"type":        "object",
+					"description": "Arbitrary key-value metadata attached by the extractor.",
+				},
+			},
+			"required": []string{"fragment_id", "content"},
+		},
+
+		// ClaimResponse is the body returned for a single claim resource.
+		"ClaimResponse": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"id": map[string]any{
+					"type":   "string",
+					"format": "uuid",
+				},
+				"profile_id": map[string]any{
+					"type":   "string",
+					"format": "uuid",
+				},
+				"fragment_id": map[string]any{
+					"type":   "string",
+					"format": "uuid",
+				},
+				"content": map[string]any{
+					"type": "string",
+				},
+				"confidence": map[string]any{
+					"type":   "number",
+					"format": "float",
+				},
+				"status": map[string]any{
+					"type":        "string",
+					"enum":        []string{"candidate", "validated", "rejected"},
+					"description": "Lifecycle state of the claim.",
+				},
+				"metadata": map[string]any{
+					"type": "object",
+				},
+				"created_at": map[string]any{
+					"type":   "string",
+					"format": "date-time",
+				},
+				"updated_at": map[string]any{
+					"type":   "string",
+					"format": "date-time",
+				},
+			},
+			"required": []string{"id", "profile_id", "fragment_id", "content", "status"},
+		},
+
+		// FactResponse is the body returned for a promoted, validated fact node.
+		// Field names mirror the FactResponse DTO in internal/http/dto/fact.go.
+		// Facts are immutable once created; only the status field may be updated
+		// (e.g. to "retracted").
+		"FactResponse": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"fact_id": map[string]any{
+					"type":        "string",
+					"format":      "uuid",
+					"description": "Unique identifier of the promoted fact.",
+				},
+				"profile_id": map[string]any{
+					"type":   "string",
+					"format": "uuid",
+				},
+				"subject": map[string]any{
+					"type":        "string",
+					"description": "Subject of the subject-predicate-object triple.",
+				},
+				"predicate": map[string]any{
+					"type":        "string",
+					"description": "Predicate of the subject-predicate-object triple.",
+				},
+				"object": map[string]any{
+					"type":        "string",
+					"description": "Object of the subject-predicate-object triple.",
+				},
+				"status": map[string]any{
+					"type":        "string",
+					"enum":        []string{"active", "retracted", "superseded"},
+					"description": "Lifecycle state of the fact.",
+				},
+				"truth_score": map[string]any{
+					"type":        "number",
+					"format":      "float",
+					"minimum":     0,
+					"maximum":     1,
+					"description": "Confidence score assigned during promotion (0–1).",
+				},
+				"valid_from": map[string]any{
+					"type":        "string",
+					"format":      "date-time",
+					"description": "Optional start of the fact's validity window.",
+				},
+				"valid_to": map[string]any{
+					"type":        "string",
+					"format":      "date-time",
+					"description": "Optional end of the fact's validity window.",
+				},
+				"recorded_at": map[string]any{
+					"type":        "string",
+					"format":      "date-time",
+					"description": "Timestamp when the fact was recorded in the graph.",
+				},
+				"retracted_at": map[string]any{
+					"type":        "string",
+					"format":      "date-time",
+					"description": "Timestamp when the fact was retracted, if applicable.",
+				},
+				"last_confirmed_at": map[string]any{
+					"type":        "string",
+					"format":      "date-time",
+					"description": "Timestamp of the most recent confirmation of this fact.",
+				},
+				"promoted_from_claim_id": map[string]any{
+					"type":        "string",
+					"format":      "uuid",
+					"description": "The validated claim this fact was promoted from.",
+				},
+				"classification": map[string]any{
+					"type":        "object",
+					"description": "Structured classification labels applied at promotion time.",
+				},
+				"classification_lattice_version": map[string]any{
+					"type":        "string",
+					"description": "Version of the classification lattice used.",
+				},
+				"source_quality": map[string]any{
+					"type":        "number",
+					"format":      "float",
+					"minimum":     0,
+					"maximum":     1,
+					"description": "Quality score of the originating source fragment (0–1).",
+				},
+				"labels": map[string]any{
+					"type":  "array",
+					"items": map[string]any{"type": "string"},
+					"description": "Free-form labels attached to the fact.",
+				},
+				"metadata": map[string]any{
+					"type":        "object",
+					"description": "Arbitrary key-value metadata attached at promotion time.",
+				},
+			},
+			"required": []string{"fact_id", "profile_id", "subject", "predicate", "object", "status", "truth_score", "recorded_at", "promoted_from_claim_id", "source_quality"},
+		},
+
+		// FactRequest is the request body for promoting a validated claim to a fact.
+		// The claim referenced must already be in the "validated" lifecycle state.
+		"FactRequest": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"claim_id": map[string]any{
+					"type":        "string",
+					"format":      "uuid",
+					"description": "Validated claim to promote to a fact.",
+				},
+				"metadata": map[string]any{
+					"type":        "object",
+					"description": "Arbitrary key-value metadata attached at promotion time.",
+				},
+			},
+			"required": []string{"claim_id"},
+		},
+
+		// VerifyClaimResponse is the body returned after an entailment verification
+		// run. It captures the verdict, updated status, and verifier metadata.
+		"VerifyClaimResponse": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"claim_id": map[string]any{
+					"type":   "string",
+					"format": "uuid",
+				},
+				"entailment_verdict": map[string]any{
+					"type":        "string",
+					"enum":        []string{"entailed", "contradicted", "neutral", "unverified"},
+					"description": "Outcome of the entailment check.",
+				},
+				"status": map[string]any{
+					"type":        "string",
+					"enum":        []string{"candidate", "validated", "rejected", "superseded"},
+					"description": "Updated lifecycle state of the claim after verification.",
+				},
+				"last_verifier_response": map[string]any{
+					"type":        "string",
+					"description": "Raw reasoning text returned by the verifier model.",
+				},
+				"verifier_model": map[string]any{
+					"type":        "string",
+					"description": "Model identifier used for verification.",
+				},
+				"verified_at": map[string]any{
+					"type":   "string",
+					"format": "date-time",
+				},
+			},
+			"required": []string{"claim_id", "entailment_verdict", "status"},
+		},
+
+		// RetractFragmentResponse is the body returned after a fragment is
+		// soft-tombstoned via POST /api/v1/fragments/:id/retract. The fragment
+		// node is preserved in the graph for lineage but excluded from all
+		// active-fragment reads (AC-48).
+		"RetractFragmentResponse": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"status": map[string]any{
+					"type":        "string",
+					"enum":        []string{"retracted"},
+					"description": "Confirmation that the fragment has been soft-tombstoned.",
+				},
+			},
+			"required": []string{"status"},
+		},
+
+		// CommunityDetectRequest is the request body for
+		// POST /api/v1/admin/profiles/{profileId}/community/detect.
+		// All fields are optional tuning parameters for the underlying GDS algorithm.
+		"CommunityDetectRequest": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"gamma": map[string]any{
+					"type":        "number",
+					"format":      "float",
+					"minimum":     0,
+					"description": "Resolution parameter for Louvain community detection. Higher values produce more, smaller communities.",
+				},
+				"tolerance": map[string]any{
+					"type":        "number",
+					"format":      "float",
+					"minimum":     0,
+					"description": "Convergence threshold for iterative algorithms. Smaller values increase precision.",
+				},
+				"max_levels": map[string]any{
+					"type":        "integer",
+					"minimum":     1,
+					"description": "Maximum number of hierarchical community-merge levels.",
+				},
+			},
+		},
+
+		// RecallHitResponse is one ranked result returned by GET /api/v1/recall.
+		// Tier classifies the knowledge-pipeline level:
+		//   "1"   = active Fact (highest authority)
+		//   "1.5" = validated Claim
+		//   "2"   = SourceFragment (raw evidence)
+		"RecallHitResponse": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"tier": map[string]any{
+					"type":        "string",
+					"enum":        []string{"1", "1.5", "2"},
+					"description": "Knowledge-pipeline tier of this hit: 1=active fact, 1.5=validated claim, 2=source fragment.",
+				},
+				"score": map[string]any{
+					"type":        "number",
+					"format":      "float",
+					"description": "Normalised relevance score after tier weighting.",
+				},
+				"fragment": map[string]any{
+					"$ref":        "#/components/schemas/FragmentResponse",
+					"description": "Populated for tier-2 (SourceFragment) hits.",
+				},
+				"claim": map[string]any{
+					"$ref":        "#/components/schemas/ClaimResponse",
+					"description": "Populated for tier-1.5 (validated Claim) hits.",
+				},
+				"fact": map[string]any{
+					"$ref":        "#/components/schemas/FactResponse",
+					"description": "Populated for tier-1 (active Fact) hits.",
+				},
+				"semantic_rank": map[string]any{
+					"type":        "integer",
+					"description": "1-based rank from the semantic branch; 0 if absent.",
+				},
+				"keyword_rank": map[string]any{
+					"type":        "integer",
+					"description": "1-based rank from the keyword branch; 0 if absent.",
+				},
+				"final_score": map[string]any{
+					"type":        "number",
+					"format":      "float",
+					"description": "Reciprocal Rank Fusion score (fragment hits only).",
+				},
+			},
+		},
+
+		// RecallResponse wraps the ranked list returned by GET /api/v1/recall.
+		"RecallResponse": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"items": map[string]any{
+					"type":  "array",
+					"items": map[string]any{"$ref": "#/components/schemas/RecallHitResponse"},
+				},
+			},
+			"required": []string{"items"},
+		},
+
+		// CommunityResponse represents a detected knowledge community — a cluster
+		// of related facts grouped by graph community detection algorithms.
+		"CommunityResponse": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"id": map[string]any{
+					"type":   "string",
+					"format": "uuid",
+				},
+				"profile_id": map[string]any{
+					"type":   "string",
+					"format": "uuid",
+				},
+				"label": map[string]any{
+					"type":        "string",
+					"description": "Human-readable label inferred for the community.",
+				},
+				"member_count": map[string]any{
+					"type":        "integer",
+					"description": "Number of fact nodes in this community.",
+				},
+				"metadata": map[string]any{
+					"type": "object",
+				},
+				"created_at": map[string]any{
+					"type":   "string",
+					"format": "date-time",
+				},
+			},
+			"required": []string{"id", "profile_id", "member_count"},
+		},
+	}
+}

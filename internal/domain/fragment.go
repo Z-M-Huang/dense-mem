@@ -4,6 +4,16 @@ import (
 	"time"
 )
 
+// FragmentStatus represents the lifecycle state of a Fragment.
+type FragmentStatus string
+
+const (
+	// FragmentStatusActive is the default state for a fragment that is live and searchable.
+	FragmentStatusActive FragmentStatus = "active"
+	// FragmentStatusRetracted marks a fragment that has been withdrawn but not hard-deleted.
+	FragmentStatusRetracted FragmentStatus = "retracted"
+)
+
 // SourceType represents the origin type of a Fragment.
 type SourceType string
 
@@ -30,8 +40,20 @@ type Fragment struct {
 	IdempotencyKey      string         `json:"idempotency_key,omitempty"`
 	EmbeddingModel      string         `json:"embedding_model"`
 	EmbeddingDimensions int            `json:"embedding_dimensions"`
-	CreatedAt           time.Time      `json:"created_at"`
-	UpdatedAt           time.Time      `json:"updated_at"`
+	// SourceQuality is a [0,1] signal used by downstream claim extraction to weight
+	// evidence reliability. Claims inherit this value from their supporting fragments.
+	SourceQuality float64 `json:"source_quality"`
+	// Classification holds arbitrary key-value labels (e.g. topic, sentiment) produced
+	// during ingestion. Claims propagate these labels for upstream filtering.
+	Classification map[string]any `json:"classification,omitempty"`
+	// Status tracks the lifecycle state of the fragment (active or retracted).
+	// Defaults to active on creation. Hard-delete behavior is handled separately.
+	Status FragmentStatus `json:"status,omitempty"`
+	// RecordedTo marks the point in time up to which this fragment's content has been
+	// processed into downstream claims/facts. Nil means not yet recorded.
+	RecordedTo *time.Time `json:"recorded_to,omitempty"`
+	CreatedAt  time.Time  `json:"created_at"`
+	UpdatedAt  time.Time  `json:"updated_at"`
 	// Embedding vector deliberately NOT included in default read response (AC-28).
 }
 

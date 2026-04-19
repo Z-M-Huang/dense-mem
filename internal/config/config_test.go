@@ -34,6 +34,14 @@ func clearEnv() {
 		"AI_API_EMBEDDING_MODEL",
 		"AI_API_EMBEDDING_DIMENSIONS",
 		"AI_API_EMBEDDING_TIMEOUT_SECONDS",
+		// Knowledge-pipeline knobs
+		"AI_VERIFIER_MODEL",
+		"AI_VERIFIER_MAX_CONCURRENCY",
+		"CLAIM_WRITE_RATE_LIMIT",
+		"CLAIM_READ_RATE_LIMIT",
+		"RECALL_VALIDATED_CLAIM_WEIGHT",
+		"PROMOTE_TX_TIMEOUT_SECONDS",
+		"AI_COMMUNITY_MAX_NODES",
 	}
 	for _, v := range envVars {
 		os.Unsetenv(v)
@@ -473,5 +481,39 @@ func TestLoad_EmbeddingConfig_NoneSet(t *testing.T) {
 	// Default timeout should still be applied
 	if cfg.GetAIEmbeddingTimeoutSeconds() != 30 {
 		t.Errorf("GetAIEmbeddingTimeoutSeconds() = %d, want %d", cfg.GetAIEmbeddingTimeoutSeconds(), 30)
+	}
+}
+
+// TestLoadKnowledgeConfigDefaults verifies that all knowledge-pipeline knobs
+// have their expected default values when no environment variables are set (AC-X3).
+func TestLoadKnowledgeConfigDefaults(t *testing.T) {
+	clearEnv()
+	setRequiredEnv()
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() returned unexpected error: %v", err)
+	}
+
+	if got := cfg.GetAIVerifierModel(); got != "gpt-4o-mini" {
+		t.Errorf("GetAIVerifierModel() = %q, want %q", got, "gpt-4o-mini")
+	}
+	if got := cfg.GetAIVerifierMaxConcurrency(); got != 5 {
+		t.Errorf("GetAIVerifierMaxConcurrency() = %d, want %d", got, 5)
+	}
+	if got := cfg.GetClaimWriteRateLimit(); got != 60 {
+		t.Errorf("GetClaimWriteRateLimit() = %d, want %d", got, 60)
+	}
+	if got := cfg.GetClaimReadRateLimit(); got != 300 {
+		t.Errorf("GetClaimReadRateLimit() = %d, want %d", got, 300)
+	}
+	if got := cfg.GetRecallValidatedClaimWeight(); got != 0.5 {
+		t.Errorf("GetRecallValidatedClaimWeight() = %f, want %f", got, 0.5)
+	}
+	if got := cfg.GetPromoteTxTimeoutSeconds(); got != 10 {
+		t.Errorf("GetPromoteTxTimeoutSeconds() = %d, want %d", got, 10)
+	}
+	if got := cfg.GetAICommunityMaxNodes(); got != 500000 {
+		t.Errorf("GetAICommunityMaxNodes() = %d, want %d", got, 500000)
 	}
 }

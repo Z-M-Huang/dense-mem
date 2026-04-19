@@ -27,6 +27,23 @@ func HTTPStatusCode(code ErrorCode) int {
 		return http.StatusServiceUnavailable
 	case INTERNAL_ERROR:
 		return http.StatusInternalServerError
+
+	// Knowledge-pipeline domain codes (AC-X6)
+	case ErrSupportingFragmentMissing, ErrClaimNotFound, ErrFactNotFound:
+		return http.StatusNotFound
+	case ErrVerifierRateLimit:
+		return http.StatusTooManyRequests
+	case ErrVerifierTimeout:
+		return http.StatusGatewayTimeout
+	case ErrVerifierProvider:
+		return http.StatusServiceUnavailable
+	case ErrVerifierMalformedResponse:
+		return http.StatusBadGateway
+	case ErrPredicateNotPoliced, ErrUnsupportedPolicy, ErrCommunityGraphTooLarge:
+		return http.StatusUnprocessableEntity
+	case ErrNeedsClaimValidated, ErrGateRejected, ErrComparableDisputed, ErrRejectedWeaker:
+		return http.StatusConflict
+
 	default:
 		return http.StatusInternalServerError
 	}
@@ -58,9 +75,10 @@ func ErrorHandler(err error, c echo.Context) {
 		return
 	}
 
-	// Send the error envelope
-	envelope := NewErrorEnvelope(apiErr)
-	c.JSON(statusCode, envelope)
+	// Send the APIError directly as a flat JSON object {code, message, details}.
+	// AC-X6: The stable external contract exposes code at the top level so
+	// callers can match on body.code without needing to unwrap a nested key.
+	c.JSON(statusCode, apiErr)
 }
 
 // echoHTTPErrorToAPIError converts an Echo HTTPError to our APIError.

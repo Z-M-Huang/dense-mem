@@ -301,6 +301,258 @@ func TestKeywordSearchEmptyResult(t *testing.T) {
 		})
 	}
 }
+// profileFilteringScopedReader is a test double for ScopedReaderInterface that returns
+// rows keyed by profileID — simulating Neo4j's per-profile data isolation.
+type profileFilteringScopedReader struct {
+	rowsByProfile map[string][]map[string]any
+}
+
+func (r *profileFilteringScopedReader) ScopedRead(_ context.Context, profileID string, _ string, _ map[string]any) (neo4j.ResultSummary, []map[string]any, error) {
+	return nil, r.rowsByProfile[profileID], nil
+}
+
+// TestSearchContent verifies that SearchContent returns the correct fragment_id
+// (from f.fragment_id, not f.id) and enforces cross-profile isolation.
+func TestSearchContent(t *testing.T) {
+	t.Run("maps fragment_id from f.fragment_id property", func(t *testing.T) {
+		reader := &fakeScopedReader{rows: []map[string]any{
+			{"fragment_id": "frag-abc-123", "content": "hello world", "score": 0.91, "profile_id": "p1"},
+			{"fragment_id": "frag-def-456", "content": "second result", "score": 0.55, "profile_id": "p1"},
+		}}
+		s := NewFragmentSearcher(reader)
+		got, err := s.SearchContent(context.Background(), "p1", "hello", nil, 10)
+		require.NoError(t, err)
+		require.Len(t, got, 2)
+		// AC-1: fragment_id must come from f.fragment_id, not f.id
+		assert.Equal(t, "frag-abc-123", got[0].FragmentID)
+		assert.Equal(t, "frag-def-456", got[1].FragmentID)
+	})
+
+	t.Run("cross profile isolation — profile B does not receive profile A data", func(t *testing.T) {
+		profileA := "profile-a"
+		profileB := "profile-b"
+
+		reader := &profileFilteringScopedReader{
+			rowsByProfile: map[string][]map[string]any{
+				profileA: {
+					{"fragment_id": "frag-a1", "content": "A content", "score": 0.9, "profile_id": profileA},
+					{"fragment_id": "frag-a2", "content": "A content 2", "score": 0.8, "profile_id": profileA},
+				},
+				profileB: {
+					{"fragment_id": "frag-b1", "content": "B content", "score": 0.7, "profile_id": profileB},
+				},
+			},
+		}
+
+		s := NewFragmentSearcher(reader)
+
+		// Profile B query must not return profile A fragment IDs
+		bResults, err := s.SearchContent(context.Background(), profileB, "content", nil, 10)
+		require.NoError(t, err)
+		bIDs := make([]string, len(bResults))
+		for i, r := range bResults {
+			bIDs[i] = r.FragmentID
+		}
+		require.NotContains(t, bIDs, "frag-a1", "profile A frag-a1 must not appear in profile B results")
+		require.NotContains(t, bIDs, "frag-a2", "profile A frag-a2 must not appear in profile B results")
+		require.Contains(t, bIDs, "frag-b1", "profile B frag-b1 must be present in profile B results")
+
+		// Profile A query must not return profile B fragment IDs
+		aResults, err := s.SearchContent(context.Background(), profileA, "content", nil, 10)
+		require.NoError(t, err)
+		aIDs := make([]string, len(aResults))
+		for i, r := range aResults {
+			aIDs[i] = r.FragmentID
+		}
+		require.NotContains(t, aIDs, "frag-b1", "profile B frag-b1 must not appear in profile A results")
+		require.Contains(t, aIDs, "frag-a1", "profile A frag-a1 must be present in profile A results")
+	})
+}
+
+// TestSearchPredicate verifies that SearchPredicate reads fact_id from r.fact_id (node property)
+// and enforces cross-profile isolation — covering AC-2.
+func TestSearchPredicate(t *testing.T) {
+	t.Run("maps fact_id from r.fact_id node property", func(t *testing.T) {
+		reader := &fakeScopedReader{rows: []map[string]any{
+			{"fact_id": "fact-abc-123", "predicate": "knows", "score": 0.91, "profile_id": "p1"},
+			{"fact_id": "fact-def-456", "predicate": "likes", "score": 0.55, "profile_id": "p1"},
+		}}
+		s := NewFactSearcher(reader)
+		got, err := s.SearchPredicate(context.Background(), "p1", "knows", nil, 10)
+		require.NoError(t, err)
+		require.Len(t, got, 2)
+		// AC-2: fact_id must come from r.fact_id (Fact node property), not r.id
+		assert.Equal(t, "fact-abc-123", got[0].FactID)
+		assert.Equal(t, "fact-def-456", got[1].FactID)
+	})
+
+	t.Run("cross profile isolation — profile B does not receive profile A data", func(t *testing.T) {
+		profileA := "profile-a"
+		profileB := "profile-b"
+
+		reader := &profileFilteringScopedReader{
+			rowsByProfile: map[string][]map[string]any{
+				profileA: {
+					{"fact_id": "fact-a1", "predicate": "A knows B", "score": 0.9, "profile_id": profileA},
+					{"fact_id": "fact-a2", "predicate": "A likes C", "score": 0.8, "profile_id": profileA},
+				},
+				profileB: {
+					{"fact_id": "fact-b1", "predicate": "B knows A", "score": 0.7, "profile_id": profileB},
+				},
+			},
+		}
+
+		s := NewFactSearcher(reader)
+
+		// Profile B query must not return profile A fact IDs
+		bResults, err := s.SearchPredicate(context.Background(), profileB, "knows", nil, 10)
+		require.NoError(t, err)
+		bIDs := make([]string, len(bResults))
+		for i, r := range bResults {
+			bIDs[i] = r.FactID
+		}
+		require.NotContains(t, bIDs, "fact-a1", "profile A fact-a1 must not appear in profile B results")
+		require.NotContains(t, bIDs, "fact-a2", "profile A fact-a2 must not appear in profile B results")
+		require.Contains(t, bIDs, "fact-b1", "profile B fact-b1 must be present in profile B results")
+
+		// Profile A query must not return profile B fact IDs
+		aResults, err := s.SearchPredicate(context.Background(), profileA, "knows", nil, 10)
+		require.NoError(t, err)
+		aIDs := make([]string, len(aResults))
+		for i, r := range aResults {
+			aIDs[i] = r.FactID
+		}
+		require.NotContains(t, aIDs, "fact-b1", "profile B fact-b1 must not appear in profile A results")
+		require.Contains(t, aIDs, "fact-a1", "profile A fact-a1 must be present in profile A results")
+	})
+}
+
+// capturingReader implements ScopedReaderInterface and records every call for inspection.
+type capturingReader struct {
+	capturedQuery  string
+	capturedParams map[string]any
+	rows           []map[string]any
+}
+
+func (c *capturingReader) ScopedRead(_ context.Context, _ string, query string, params map[string]any) (neo4j.ResultSummary, []map[string]any, error) {
+	c.capturedQuery = query
+	c.capturedParams = params
+	return nil, c.rows, nil
+}
+
+// TestLabelFiltering verifies that label filter values are passed as Cypher parameters
+// (not string-concatenated into the query), preventing Cypher injection (AC-6).
+func TestLabelFiltering(t *testing.T) {
+	t.Run("fragment searcher passes labels as parameter, not concatenated in query", func(t *testing.T) {
+		labels := []string{"science", "'; DROP DATABASE neo4j; //"}
+
+		reader := &capturingReader{rows: []map[string]any{
+			{"fragment_id": "frag-1", "content": "hello", "score": 0.9, "profile_id": "p1", "labels": []any{"science"}},
+		}}
+		s := NewFragmentSearcher(reader)
+
+		got, err := s.SearchContent(context.Background(), "p1", "hello", labels, 10)
+		require.NoError(t, err)
+		require.NotEmpty(t, got)
+
+		// The raw label values must NOT appear in the query string
+		for _, label := range labels {
+			assert.NotContains(t, reader.capturedQuery, label,
+				"label value %q must not be string-interpolated into the Cypher query", label)
+		}
+
+		// The labels must be present as a parameter
+		require.Contains(t, reader.capturedParams, "labels", "labels param must be set")
+		passedLabels, ok := reader.capturedParams["labels"].([]string)
+		require.True(t, ok, "labels param must be []string")
+		assert.Equal(t, labels, passedLabels)
+
+		// The parameterized predicate must appear in the query
+		assert.Contains(t, reader.capturedQuery, "ANY(label IN $labels WHERE label IN f.labels)",
+			"fragment query must use parameterized ANY() predicate")
+	})
+
+	t.Run("fact searcher passes labels as parameter, not concatenated in query", func(t *testing.T) {
+		labels := []string{"history", "'; MATCH (n) DETACH DELETE n; //"}
+
+		reader := &capturingReader{rows: []map[string]any{
+			{"fact_id": "fact-1", "predicate": "knows", "score": 0.85, "profile_id": "p1", "labels": []any{"history"}},
+		}}
+		s := NewFactSearcher(reader)
+
+		got, err := s.SearchPredicate(context.Background(), "p1", "knows", labels, 10)
+		require.NoError(t, err)
+		require.NotEmpty(t, got)
+
+		// The raw label values must NOT appear in the query string
+		for _, label := range labels {
+			assert.NotContains(t, reader.capturedQuery, label,
+				"label value %q must not be string-interpolated into the Cypher query", label)
+		}
+
+		// The labels must be present as a parameter
+		require.Contains(t, reader.capturedParams, "labels", "labels param must be set")
+		passedLabels, ok := reader.capturedParams["labels"].([]string)
+		require.True(t, ok, "labels param must be []string")
+		assert.Equal(t, labels, passedLabels)
+
+		// The parameterized predicate must appear in the query
+		assert.Contains(t, reader.capturedQuery, "ANY(label IN $labels WHERE label IN r.labels)",
+			"fact query must use parameterized ANY() predicate")
+	})
+
+	t.Run("no labels param set when labels filter is empty", func(t *testing.T) {
+		reader := &capturingReader{rows: []map[string]any{}}
+		s := NewFragmentSearcher(reader)
+
+		_, err := s.SearchContent(context.Background(), "p1", "hello", nil, 10)
+		require.NoError(t, err)
+
+		// No labels param should be present
+		assert.NotContains(t, reader.capturedParams, "labels",
+			"labels param must not be set when no labels filter is requested")
+
+		// No ANY() predicate should appear
+		assert.NotContains(t, reader.capturedQuery, "ANY(label IN $labels",
+			"query must not contain ANY() predicate when no labels filter is requested")
+	})
+
+	t.Run("cross-profile isolation still enforced with label filter", func(t *testing.T) {
+		labels := []string{"science"}
+		profileA := "profile-a"
+		profileB := "profile-b"
+
+		mockFragment := &mockFragmentSearcher{
+			searchContentFunc: func(_ context.Context, pid string, _ string, _ []string, _ int) ([]FragmentSearchResult, error) {
+				// Simulate Cypher returning mixed-profile rows (defense-in-depth scenario)
+				return []FragmentSearchResult{
+					{FragmentID: "frag-a1", Content: "A content", Score: 0.9, ProfileID: profileA, Labels: []string{"science"}},
+					{FragmentID: "frag-b1", Content: "B content", Score: 0.8, ProfileID: profileB, Labels: []string{"science"}},
+				}, nil
+			},
+		}
+		mockFact := &mockFactSearcher{}
+
+		svc := NewKeywordSearchService(mockFragment, mockFact)
+		result, err := svc.Search(context.Background(), profileB, &KeywordSearchRequest{
+			Query:  "content",
+			Limit:  10,
+			Labels: labels,
+		})
+		require.NoError(t, err)
+
+		for _, hit := range result.Data {
+			assert.Equal(t, profileB, hit.ProfileID,
+				"label-filtered results must still be profile-isolated")
+		}
+		bIDs := make([]string, len(result.Data))
+		for i, h := range result.Data {
+			bIDs[i] = h.ID
+		}
+		assert.NotContains(t, bIDs, "frag-a1", "profile A data must not appear in profile B results")
+	})
+}
+
 // TestFragmentSearcher_ScorePropagated tests that BM25 scores are propagated from the fulltext search.
 func TestFragmentSearcher_ScorePropagated(t *testing.T) {
 	reader := &fakeScopedReader{rows: []map[string]any{

@@ -299,8 +299,17 @@ func TestVerifyAPIKeyTampered(t *testing.T) {
 	hash, err := crypto.HashKey(rawKey)
 	require.NoError(t, err)
 
-	// Tamper with the hash
-	tamperedHash := hash[:len(hash)-1] + "X"
+	// Tamper with a mid-hash character. Avoids the last base64 char, which for
+	// a 32-byte argon2 output carries 2 padding bits — changing it can decode
+	// to the same bytes and spuriously verify (~6% of the time).
+	lastDollar := strings.LastIndex(hash, "$")
+	require.Greater(t, lastDollar, 0, "PHC hash must contain $-separated HASH segment")
+	mid := lastDollar + 1 + (len(hash)-lastDollar-1)/2
+	replacement := byte('A')
+	if hash[mid] == 'A' {
+		replacement = 'B'
+	}
+	tamperedHash := hash[:mid] + string(replacement) + hash[mid+1:]
 
 	// Verify tampered hash fails
 	assert.False(t, crypto.VerifyKey(rawKey, tamperedHash), "Tampered hash should not verify")

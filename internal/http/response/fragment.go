@@ -14,6 +14,7 @@ func ToFragmentResponse(f *domain.Fragment) *dto.FragmentResponse {
 
 	return &dto.FragmentResponse{
 		ID:                  f.FragmentID,
+		FragmentID:          f.FragmentID, // alias; same value as ID for UAT-02/UAT-03 compatibility
 		Content:             f.Content,
 		SourceType:          string(f.SourceType),
 		Source:              f.Source,
@@ -23,6 +24,10 @@ func ToFragmentResponse(f *domain.Fragment) *dto.FragmentResponse {
 		IdempotencyKey:      f.IdempotencyKey,
 		EmbeddingModel:      f.EmbeddingModel,
 		EmbeddingDimensions: f.EmbeddingDimensions,
+		SourceQuality:       f.SourceQuality,
+		Classification:      f.Classification,
+		Status:              string(f.Status),
+		RecordedTo:          f.RecordedTo,
 		CreatedAt:           f.CreatedAt,
 		UpdatedAt:           f.UpdatedAt,
 	}

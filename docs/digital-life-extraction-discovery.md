@@ -64,6 +64,10 @@ Used as the async execution backbone in the documented architecture:
 - retries / backpressure / DLQ
 - connector -> ingestion pipeline
 
+Note on `dense-mem` deployment: Redis is optional for single-node deployments
+and required for multi-instance setups (where rate-limit counters and SSE
+concurrency must be shared across replicas).
+
 ## 1.2 Layered architecture pattern
 
 Documented top-level flow:
@@ -97,7 +101,7 @@ The documented ingestion pipeline is:
    - mentions
 4. Event is queued in Redis/BullMQ
 5. Ingestion Agent dequeues a batch
-6. LLM extraction creates candidate `Claim` nodes from source evidence
+6. Claim extraction creates candidate `Claim` nodes from source evidence (via `POST /api/v1/claims`)
 7. Separate verifier model checks entailment
 8. Modality gates block non-factual material
 9. Contradiction detection compares against active facts
@@ -238,8 +242,8 @@ The original docs only discuss a single database with no tenant predicate. `dens
 
 Documented stages:
 
-### 1. LLM extraction
-Creates candidate claims from a source fragment.
+### 1. Claim extraction
+Creates candidate claims from a source fragment (caller-initiated via `POST /api/v1/claims`).
 
 ### 2. Verifier pass
 A separate model sees:

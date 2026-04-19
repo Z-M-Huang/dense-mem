@@ -35,6 +35,8 @@ bun-debug.log*
 # Test
 coverage/
 .nyc_output/
+tests/uat/test-results/
+tests/uat/playwright-report/
 
 # Temporary
 tmp/

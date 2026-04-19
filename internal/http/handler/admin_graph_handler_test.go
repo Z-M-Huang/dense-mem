@@ -153,11 +153,11 @@ func TestAdminGraphTimeout(t *testing.T) {
 
 	assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
 
-	var resp httperr.ErrorEnvelope
+	var resp httperr.APIError
 	err := json.Unmarshal(rec.Body.Bytes(), &resp)
 	require.NoError(t, err)
-	assert.Equal(t, httperr.SERVICE_UNAVAILABLE, resp.Error.Code)
-	assert.Contains(t, resp.Error.Message, "timeout")
+	assert.Equal(t, httperr.SERVICE_UNAVAILABLE, resp.Code)
+	assert.Contains(t, resp.Message, "timeout")
 }
 
 // TestAdminGraphRowCap tests that result sets are capped at 1000 rows.
@@ -277,10 +277,10 @@ func TestAdminGraphAudit(t *testing.T) {
 
 	// Response should be error
 	assert.Equal(t, http.StatusUnprocessableEntity, rec.Code)
-	var resp httperr.ErrorEnvelope
+	var resp httperr.APIError
 	err := json.Unmarshal(rec.Body.Bytes(), &resp)
 	require.NoError(t, err)
-	assert.Equal(t, httperr.VALIDATION_ERROR, resp.Error.Code)
+	assert.Equal(t, httperr.VALIDATION_ERROR, resp.Code)
 }
 
 // TestAdminGraphHandler_Validation tests handler-level validation.
@@ -347,10 +347,10 @@ func TestAdminGraphHandler_Validation(t *testing.T) {
 
 			assert.Equal(t, tt.expectedStatus, rec.Code)
 
-			var resp httperr.ErrorEnvelope
+			var resp httperr.APIError
 			err := json.Unmarshal(rec.Body.Bytes(), &resp)
 			require.NoError(t, err)
-			assert.Equal(t, tt.expectedCode, resp.Error.Code)
+			assert.Equal(t, tt.expectedCode, resp.Code)
 		})
 	}
 }
@@ -392,8 +392,8 @@ func TestAdminGraphHandler_AdminOnly(t *testing.T) {
 
 	assert.Equal(t, http.StatusForbidden, rec.Code)
 
-	var resp httperr.ErrorEnvelope
+	var resp httperr.APIError
 	err := json.Unmarshal(rec.Body.Bytes(), &resp)
 	require.NoError(t, err)
-	assert.Equal(t, httperr.FORBIDDEN, resp.Error.Code)
+	assert.Equal(t, httperr.FORBIDDEN, resp.Code)
 }
