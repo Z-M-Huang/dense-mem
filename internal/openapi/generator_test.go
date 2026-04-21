@@ -724,3 +724,42 @@ func TestGenerateIncludesCommunityRoute(t *testing.T) {
 		t.Errorf("CommunityDetectRequest schema missing from components; have: %v", keysOf(schemas))
 	}
 }
+
+func TestGenerateIncludesGenericToolExecuteRoute(t *testing.T) {
+	g := New(testRegistry(t), DefaultRoutes())
+
+	aiSafe, err := g.Generate(SpecVariantAISafe)
+	if err != nil {
+		t.Fatalf("Generate(AISafe): %v", err)
+	}
+	aiSafePaths := aiSafe["paths"].(map[string]any)
+	if _, present := aiSafePaths["/api/v1/tools/{name}"]; present {
+		t.Fatalf("generic tool execute route must not appear in ai-safe spec")
+	}
+
+	full, err := g.Generate(SpecVariantFull)
+	if err != nil {
+		t.Fatalf("Generate(Full): %v", err)
+	}
+	fullPaths := full["paths"].(map[string]any)
+	pathItem, present := fullPaths["/api/v1/tools/{name}"]
+	if !present {
+		t.Fatalf("generic tool execute route missing from full spec; have: %v", keysOf(fullPaths))
+	}
+
+	postOp := pathItem.(map[string]any)["post"].(map[string]any)
+	if postOp["operationId"] != "executeTool" {
+		t.Errorf("operationId = %v; want executeTool", postOp["operationId"])
+	}
+
+	reqBody := postOp["requestBody"].(map[string]any)
+	reqSchema := reqBody["content"].(map[string]any)["application/json"].(map[string]any)["schema"].(map[string]any)
+	if got := reqSchema["$ref"]; got != "#/components/schemas/ToolExecuteRequest" {
+		t.Errorf("requestBody $ref = %v; want #/components/schemas/ToolExecuteRequest", got)
+	}
+
+	respSchema := postOp["responses"].(map[string]any)["200"].(map[string]any)["content"].(map[string]any)["application/json"].(map[string]any)["schema"].(map[string]any)
+	if got := respSchema["$ref"]; got != "#/components/schemas/ToolExecuteResponse" {
+		t.Errorf("200 response $ref = %v; want #/components/schemas/ToolExecuteResponse", got)
+	}
+}

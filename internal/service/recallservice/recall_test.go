@@ -76,7 +76,6 @@ func (f *fakeKeywordSearcher) SearchContent(ctx context.Context, profileID strin
 }
 
 type fakeHydrator struct {
-	mu        sync.Mutex
 	frags     map[string]*domain.Fragment
 	callCount int32
 	missIDs   map[string]bool

@@ -32,9 +32,7 @@ type HealthConfig struct {
 // Server is the Echo server wrapper.
 // It holds the Echo instance and configuration.
 type Server struct {
-	echo   *echo.Echo
-	config config.Config
-	logger observability.LogProvider
+	echo *echo.Echo
 }
 
 // ServerProvider is the companion interface for Server.
@@ -74,7 +72,44 @@ func NewServer(cfg config.Config, logger observability.LogProvider, health Healt
 
 	// Global middleware (applies to all routes)
 	e.Use(middleware.Recover())
-	e.Use(middleware.Logger())
+	e.Use(middleware.RequestLoggerWithConfig(middleware.RequestLoggerConfig{
+		HandleError: true,
+		LogMethod:   true,
+		LogURI:      true,
+		LogStatus:   true,
+		LogLatency:  true,
+		LogRemoteIP: true,
+		LogError:    true,
+		LogValuesFunc: func(c echo.Context, v middleware.RequestLoggerValues) error {
+			if logger == nil {
+				return nil
+			}
+
+			attrs := []observability.LogAttr{
+				observability.String("method", v.Method),
+				observability.String("uri", v.URI),
+				observability.Int("status", v.Status),
+				observability.String("latency", v.Latency.String()),
+				observability.String("remote_ip", v.RemoteIP),
+			}
+			if v.RoutePath != "" {
+				attrs = append(attrs, observability.String("route", v.RoutePath))
+			}
+			if requestID := c.Response().Header().Get(echo.HeaderXRequestID); requestID != "" {
+				attrs = append(attrs, observability.String("request_id", requestID))
+			}
+			if v.Error != nil {
+				logger.Error("http_request", v.Error, attrs...)
+				return nil
+			}
+			if v.Status >= http.StatusBadRequest {
+				logger.Warn("http_request", attrs...)
+				return nil
+			}
+			logger.Info("http_request", attrs...)
+			return nil
+		},
+	}))
 
 	// Register public routes (no auth/profile/rate-limit middleware)
 	registerPublicRoutes(e, health)

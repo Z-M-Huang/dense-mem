@@ -6,6 +6,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/dense-mem/dense-mem/internal/http/dto"
+	"github.com/dense-mem/dense-mem/internal/http/middleware"
 	"github.com/dense-mem/dense-mem/internal/tools/registry"
 )
 
@@ -33,9 +34,18 @@ func NewToolCatalogHandler(reg registry.Registry) *ToolCatalogHandler {
 
 // Handle returns the full catalog of registered tools.
 func (h *ToolCatalogHandler) Handle(c echo.Context) error {
+	principal := middleware.GetPrincipal(c.Request().Context())
 	tools := h.reg.List()
 	entries := make([]dto.ToolCatalogEntry, 0, len(tools))
 	for _, t := range tools {
+		if principal != nil {
+			if !principalCanSeeTool(principal, t) {
+				continue
+			}
+			if toolRequiresAdmin(t.Name) && principal.Role != "admin" {
+				continue
+			}
+		}
 		entries = append(entries, dto.ToolCatalogEntry{
 			Name:           t.Name,
 			Description:    t.Description,

@@ -20,9 +20,13 @@ func TestFromContext_EmptyWhenUnset(t *testing.T) {
 
 func TestFromContext_NilSafe(t *testing.T) {
 	// Defensive: services sometimes receive nil ctx from tests; must not panic.
-	if got := FromContext(nil); got != "" {
+	if got := FromContext(nilContext()); got != "" {
 		t.Errorf("FromContext(nil) = %q; want empty string", got)
 	}
+}
+
+func nilContext() context.Context {
+	return nil
 }
 
 func TestWithID_DoesNotLeakAcrossKeys(t *testing.T) {

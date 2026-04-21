@@ -250,11 +250,7 @@ func (p *RetryEmbeddingProvider) shouldRetry(err error) bool {
 
 	// Check for wrapped rate limit errors
 	var rateLimitErr *RateLimitError
-	if errors.As(err, &rateLimitErr) {
-		return true
-	}
-
-	return false
+	return errors.As(err, &rateLimitErr)
 }
 
 // calculateDelay computes the backoff delay for the given attempt.

@@ -114,7 +114,6 @@ func TestSweepOrphanGraphs(t *testing.T) {
 	ctx := context.Background()
 
 	const prefixA = GraphNamePrefix + "profile-A-"
-	const prefixB = GraphNamePrefix + "profile-B-"
 
 	t.Run("drops all graphs matching the prefix", func(t *testing.T) {
 		stub := &stubGDSQuerier{

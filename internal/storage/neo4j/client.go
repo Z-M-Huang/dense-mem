@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
+	neo4jconfig "github.com/neo4j/neo4j-go-driver/v5/neo4j/config"
 )
 
 // Neo4jClientInterface is the companion interface for Neo4jClient.
@@ -59,7 +60,7 @@ func NewClient(ctx context.Context, cfg ConfigProvider) (*Neo4jClient, error) {
 	driver, err := neo4j.NewDriverWithContext(
 		uri,
 		neo4j.BasicAuth(user, password, ""),
-		func(config *neo4j.Config) {
+		func(config *neo4jconfig.Config) {
 			config.MaxConnectionPoolSize = 100
 			config.ConnectionAcquisitionTimeout = 60 * time.Second
 			config.MaxConnectionLifetime = 1 * time.Hour

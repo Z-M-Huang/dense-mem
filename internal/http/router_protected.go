@@ -304,12 +304,6 @@ func RegisterProtectedRoutesWithHandlers(e *echo.Echo, deps ProtectedDeps, handl
 	if handlers.ToolCatalog != nil {
 		toolGroup.GET("", handlers.ToolCatalog, middleware.RequireScopes("read"))
 	}
-	if handlers.GetTool != nil {
-		toolGroup.GET("/:id", handlers.GetTool, middleware.RequireScopes("read"))
-	}
-	if handlers.CreateTool != nil {
-		toolGroup.POST("", handlers.CreateTool, middleware.RequireScopes("write"))
-	}
 	// Search/query tools are read-scoped (no data mutation).
 	if handlers.GraphQuery != nil {
 		toolGroup.POST("/graph-query", handlers.GraphQuery, middleware.RequireScopes("read"))
@@ -319,6 +313,12 @@ func RegisterProtectedRoutesWithHandlers(e *echo.Echo, deps ProtectedDeps, handl
 	}
 	if handlers.SemanticSearch != nil {
 		toolGroup.POST("/semantic-search", handlers.SemanticSearch, middleware.RequireScopes("read"))
+	}
+	if handlers.GetTool != nil {
+		toolGroup.GET("/:id", handlers.GetTool, middleware.RequireScopes("read"))
+	}
+	if handlers.ExecuteTool != nil {
+		toolGroup.POST("/:name", handlers.ExecuteTool)
 	}
 
 	// Admin routes
@@ -380,7 +380,7 @@ type ProtectedHandlers struct {
 	UpdateProfile   echo.HandlerFunc
 	DeleteProfile   echo.HandlerFunc
 	GetTool         echo.HandlerFunc
-	CreateTool      echo.HandlerFunc
+	ExecuteTool     echo.HandlerFunc
 	GetStats        echo.HandlerFunc
 	ListAllKeys     echo.HandlerFunc
 	GraphQuery      echo.HandlerFunc

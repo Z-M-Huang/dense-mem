@@ -18,17 +18,6 @@ import (
 	"github.com/dense-mem/dense-mem/internal/tools/keywordsearch"
 )
 
-// postJSON is a helper to post JSON and get the response recorder.
-func postJSON(t *testing.T, path, body string) (*httptest.ResponseRecorder, echo.Context) {
-	t.Helper()
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-	return rec, c
-}
-
 // mockKeywordSearchService implements KeywordSearchServiceInterface for testing.
 type mockKeywordSearchService struct {
 	searchFunc func(ctx context.Context, profileID string, req *keywordsearch.KeywordSearchRequest) (*keywordsearch.KeywordSearchResult, error)

@@ -83,7 +83,8 @@ func DefaultRoutes() []RouteDescriptor {
 		{Method: "POST", Path: "/api/v1/fragments/{id}/retract", OperationID: "retractFragment", ResponseSchema: "RetractFragmentResponse", AISafe: true, Tags: []string{"knowledge"}, Description: "Soft-tombstone a fragment; preserves graph lineage and triggers fact revalidation."},
 
 		// --- Tool catalog (AI-safe) ---
-		{Method: "GET", Path: "/api/v1/tools", OperationID: "listTools", AISafe: true, Description: "List all registered tools."},
+		{Method: "GET", Path: "/api/v1/tools", OperationID: "listTools", ResponseSchema: "ToolCatalogResponse", AISafe: true, Description: "List all registered tools."},
+		{Method: "POST", Path: "/api/v1/tools/{name}", OperationID: "executeTool", RequestSchema: "ToolExecuteRequest", ResponseSchema: "ToolExecuteResponse", Description: "Execute a registered tool by name. Discover per-tool schemas and scope requirements via GET /api/v1/tools first."},
 
 		// --- Recall (AI-safe) ---
 		{Method: "GET", Path: "/api/v1/recall", OperationID: "recallKnowledge", ResponseSchema: "RecallResponse", AISafe: true, Tags: []string{"knowledge"}, Description: "Hybrid semantic + keyword recall spanning all knowledge-pipeline tiers (facts, claims, fragments).", ExtraResponses: map[string]string{

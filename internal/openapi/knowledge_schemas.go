@@ -12,40 +12,83 @@ package openapi
 // evolution of the REST surface vs. the tool surface.
 func knowledgeSchemas() map[string]any {
 	return map[string]any{
-		// ClaimRequest is the request body for creating or updating a candidate
-		// claim derived from a source fragment.
+		// ClaimRequest is the request body for creating a candidate claim from
+		// one or more supporting fragments.
 		"ClaimRequest": map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"fragment_id": map[string]any{
-					"type":        "string",
-					"format":      "uuid",
-					"description": "Source fragment this claim was extracted from.",
+				"supported_by": map[string]any{
+					"type":        "array",
+					"items":       map[string]any{"type": "string", "format": "uuid"},
+					"minItems":    1,
+					"description": "Source fragment IDs that support this claim.",
 				},
-				"content": map[string]any{
+				"subject": map[string]any{
 					"type":        "string",
-					"description": "Natural-language assertion extracted from the fragment.",
+					"description": "Subject of the claim triple.",
+					"maxLength":   256,
 				},
-				"confidence": map[string]any{
+				"predicate": map[string]any{
+					"type":        "string",
+					"description": "Predicate of the claim triple.",
+					"maxLength":   128,
+				},
+				"object": map[string]any{
+					"type":        "string",
+					"description": "Object of the claim triple.",
+					"maxLength":   1024,
+				},
+				"modality": map[string]any{
+					"type":        "string",
+					"enum":        []string{"assertion", "question", "proposal", "speculation", "quoted"},
+					"description": "Epistemic modality of the claim.",
+				},
+				"polarity": map[string]any{
+					"type":        "string",
+					"enum":        []string{"+", "-"},
+					"description": "Affirmative or negating polarity.",
+				},
+				"speaker": map[string]any{
+					"type":        "string",
+					"description": "Speaker or source attribution for the claim.",
+					"maxLength":   256,
+				},
+				"extract_conf": map[string]any{
 					"type":        "number",
 					"format":      "float",
 					"minimum":     0,
 					"maximum":     1,
-					"description": "Extraction confidence score (0–1).",
+					"description": "Extraction confidence score (0-1).",
 				},
-				"metadata": map[string]any{
-					"type":        "object",
-					"description": "Arbitrary key-value metadata attached by the extractor.",
+				"resolution_conf": map[string]any{
+					"type":        "number",
+					"format":      "float",
+					"minimum":     0,
+					"maximum":     1,
+					"description": "Entity-resolution confidence score (0-1).",
+				},
+				"idempotency_key": map[string]any{
+					"type":        "string",
+					"description": "Client-supplied idempotency key scoped to the profile.",
+					"maxLength":   128,
+				},
+				"valid_from": map[string]any{
+					"type":   "string",
+					"format": "date-time",
+				},
+				"valid_to": map[string]any{
+					"type":   "string",
+					"format": "date-time",
 				},
 			},
-			"required": []string{"fragment_id", "content"},
+			"required": []string{"supported_by"},
 		},
 
 		// ClaimResponse is the body returned for a single claim resource.
 		"ClaimResponse": map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"id": map[string]any{
+				"claim_id": map[string]any{
 					"type":   "string",
 					"format": "uuid",
 				},
@@ -53,35 +96,83 @@ func knowledgeSchemas() map[string]any {
 					"type":   "string",
 					"format": "uuid",
 				},
-				"fragment_id": map[string]any{
-					"type":   "string",
-					"format": "uuid",
-				},
-				"content": map[string]any{
+				"subject": map[string]any{
 					"type": "string",
 				},
-				"confidence": map[string]any{
+				"predicate": map[string]any{
+					"type": "string",
+				},
+				"object": map[string]any{
+					"type": "string",
+				},
+				"modality": map[string]any{
+					"type": "string",
+					"enum": []string{"assertion", "question", "proposal", "speculation", "quoted"},
+				},
+				"polarity": map[string]any{
+					"type": "string",
+					"enum": []string{"+", "-"},
+				},
+				"speaker": map[string]any{
+					"type": "string",
+				},
+				"span_start": map[string]any{
+					"type": "integer",
+				},
+				"span_end": map[string]any{
+					"type": "integer",
+				},
+				"valid_from": map[string]any{
+					"type":   "string",
+					"format": "date-time",
+				},
+				"valid_to": map[string]any{
+					"type":   "string",
+					"format": "date-time",
+				},
+				"recorded_at": map[string]any{
+					"type":   "string",
+					"format": "date-time",
+				},
+				"extract_conf": map[string]any{
 					"type":   "number",
 					"format": "float",
 				},
+				"resolution_conf": map[string]any{
+					"type":   "number",
+					"format": "float",
+				},
+				"source_quality": map[string]any{
+					"type":   "number",
+					"format": "float",
+				},
+				"entailment_verdict": map[string]any{
+					"type": "string",
+					"enum": []string{"entailed", "contradicted", "neutral", "insufficient"},
+				},
 				"status": map[string]any{
 					"type":        "string",
-					"enum":        []string{"candidate", "validated", "rejected"},
+					"enum":        []string{"candidate", "validated", "rejected", "superseded", "disputed", "promoted"},
 					"description": "Lifecycle state of the claim.",
 				},
-				"metadata": map[string]any{
+				"extraction_model": map[string]any{
+					"type": "string",
+				},
+				"content_hash": map[string]any{
+					"type": "string",
+				},
+				"idempotency_key": map[string]any{
+					"type": "string",
+				},
+				"classification": map[string]any{
 					"type": "object",
 				},
-				"created_at": map[string]any{
-					"type":   "string",
-					"format": "date-time",
-				},
-				"updated_at": map[string]any{
-					"type":   "string",
-					"format": "date-time",
+				"supported_by": map[string]any{
+					"type":  "array",
+					"items": map[string]any{"type": "string", "format": "uuid"},
 				},
 			},
-			"required": []string{"id", "profile_id", "fragment_id", "content", "status"},
+			"required": []string{"claim_id", "profile_id", "subject", "predicate", "object", "modality", "polarity", "span_start", "span_end", "recorded_at", "extract_conf", "resolution_conf", "source_quality", "entailment_verdict", "status", "extraction_model", "content_hash"},
 		},
 
 		// FactResponse is the body returned for a promoted, validated fact node.
@@ -170,8 +261,8 @@ func knowledgeSchemas() map[string]any {
 					"description": "Quality score of the originating source fragment (0–1).",
 				},
 				"labels": map[string]any{
-					"type":  "array",
-					"items": map[string]any{"type": "string"},
+					"type":        "array",
+					"items":       map[string]any{"type": "string"},
 					"description": "Free-form labels attached to the fact.",
 				},
 				"metadata": map[string]any{
@@ -211,12 +302,12 @@ func knowledgeSchemas() map[string]any {
 				},
 				"entailment_verdict": map[string]any{
 					"type":        "string",
-					"enum":        []string{"entailed", "contradicted", "neutral", "unverified"},
+					"enum":        []string{"entailed", "contradicted", "insufficient"},
 					"description": "Outcome of the entailment check.",
 				},
 				"status": map[string]any{
 					"type":        "string",
-					"enum":        []string{"candidate", "validated", "rejected", "superseded"},
+					"enum":        []string{"candidate", "validated", "rejected", "superseded", "disputed", "promoted"},
 					"description": "Updated lifecycle state of the claim after verification.",
 				},
 				"last_verifier_response": map[string]any{
@@ -327,12 +418,69 @@ func knowledgeSchemas() map[string]any {
 		"RecallResponse": map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"items": map[string]any{
+				"data": map[string]any{
 					"type":  "array",
 					"items": map[string]any{"$ref": "#/components/schemas/RecallHitResponse"},
 				},
 			},
-			"required": []string{"items"},
+			"required": []string{"data"},
+		},
+
+		// ToolCatalogEntry mirrors GET /api/v1/tools item payloads.
+		"ToolCatalogEntry": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"name": map[string]any{
+					"type": "string",
+				},
+				"description": map[string]any{
+					"type": "string",
+				},
+				"input_schema": map[string]any{
+					"type":                 "object",
+					"additionalProperties": true,
+				},
+				"output_schema": map[string]any{
+					"type":                 "object",
+					"additionalProperties": true,
+				},
+				"required_scopes": map[string]any{
+					"type":  "array",
+					"items": map[string]any{"type": "string"},
+				},
+				"available": map[string]any{
+					"type": "boolean",
+				},
+			},
+			"required": []string{"name", "description", "input_schema", "output_schema", "required_scopes", "available"},
+		},
+
+		// ToolCatalogResponse is the list envelope returned by GET /api/v1/tools.
+		"ToolCatalogResponse": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"tools": map[string]any{
+					"type":  "array",
+					"items": map[string]any{"$ref": "#/components/schemas/ToolCatalogEntry"},
+				},
+			},
+			"required": []string{"tools"},
+		},
+
+		// ToolExecuteRequest is a permissive object because the concrete schema
+		// varies by tool name and is discoverable from the tool catalog.
+		"ToolExecuteRequest": map[string]any{
+			"type":                 "object",
+			"additionalProperties": true,
+			"description":          "Tool-specific JSON arguments. Use GET /api/v1/tools to discover the exact input schema for a tool name.",
+		},
+
+		// ToolExecuteResponse is a permissive object because the concrete schema
+		// varies by tool name and is discoverable from the tool catalog.
+		"ToolExecuteResponse": map[string]any{
+			"type":                 "object",
+			"additionalProperties": true,
+			"description":          "Tool-specific JSON response. Use GET /api/v1/tools to discover the exact output schema for a tool name.",
 		},
 
 		// CommunityResponse represents a detected knowledge community — a cluster

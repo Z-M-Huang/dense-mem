@@ -139,27 +139,19 @@ func (r *RetryVerifier) Verify(ctx context.Context, req Request) (Response, erro
 // ErrVerifierMalformedResponse is not retryable — the response shape is wrong,
 // not the network or the server; retrying would return the same malformed data.
 func (r *RetryVerifier) shouldRetry(err error) bool {
-	if err == nil {
-		return false
-	}
-	if errors.Is(err, ErrVerifierTimeout) {
-		return true
-	}
-	if errors.Is(err, ErrVerifierProvider) {
-		return true
-	}
-	if errors.Is(err, ErrVerifierRateLimit) {
-		return true
-	}
-	return false
+	return err != nil && (errors.Is(err, ErrVerifierTimeout) ||
+		errors.Is(err, ErrVerifierProvider) ||
+		errors.Is(err, ErrVerifierRateLimit))
 }
 
 // noopLogProvider discards all log output. Used when no logger is supplied
 // to NewRetryVerifier so that call sites never need nil checks.
 type noopLogProvider struct{}
 
-func (noopLogProvider) Info(string, ...observability.LogAttr)                  {}
-func (noopLogProvider) Error(string, error, ...observability.LogAttr)          {}
-func (noopLogProvider) Warn(string, ...observability.LogAttr)                  {}
-func (noopLogProvider) Debug(string, ...observability.LogAttr)                 {}
-func (noopLogProvider) With(...observability.LogAttr) observability.LogProvider { return noopLogProvider{} }
+func (noopLogProvider) Info(string, ...observability.LogAttr)         {}
+func (noopLogProvider) Error(string, error, ...observability.LogAttr) {}
+func (noopLogProvider) Warn(string, ...observability.LogAttr)         {}
+func (noopLogProvider) Debug(string, ...observability.LogAttr)        {}
+func (noopLogProvider) With(...observability.LogAttr) observability.LogProvider {
+	return noopLogProvider{}
+}

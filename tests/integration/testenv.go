@@ -3,8 +3,6 @@ package integration
 import (
 	"context"
 	"testing"
-
-	"github.com/testcontainers/testcontainers-go"
 )
 
 // TestEnvProvider is the companion interface for TestEnv to enable mockability
@@ -21,19 +19,11 @@ type TestEnvProvider interface {
 // TestEnv is a shared integration fixture that manages test containers
 // and in-process server lifecycle for UAT tests
 type TestEnv struct {
-	// Postgres container
-	postgresContainer testcontainers.Container
-	postgresDSN       string
-
-	// Neo4j container
-	neo4jContainer testcontainers.Container
-	neo4jURI       string
-	neo4jUser      string
-	neo4jPassword  string
-
-	// Redis container
-	redisContainer testcontainers.Container
-	redisAddr      string
+	postgresDSN   string
+	neo4jURI      string
+	neo4jUser     string
+	neo4jPassword string
+	redisAddr     string
 
 	// Server
 	serverBaseURL string

@@ -21,7 +21,7 @@ type CreateFragmentRequest struct {
 	Source         string         `json:"source,omitempty" validate:"max=256"`
 	IdempotencyKey string         `json:"idempotency_key,omitempty" validate:"max=128"`
 	Labels         []string       `json:"labels,omitempty" validate:"max=20,dive,max=64,notblank"`
-	Metadata       map[string]any `json:"metadata,omitempty"`        // size check in handler
+	Metadata       map[string]any `json:"metadata,omitempty"` // size check in handler
 	SourceQuality  float64        `json:"source_quality,omitempty" validate:"gte=0,lte=1"`
 	Classification map[string]any `json:"classification,omitempty"` // arbitrary classification labels
 }
@@ -74,7 +74,7 @@ const MaxMetadataBytes = 4096
 // This must be called in the handler because struct tag validation cannot
 // size arbitrary maps. Returns nil if metadata is nil or within limits.
 func ValidateMetadataSize(m map[string]any) error {
-	if m == nil || len(m) == 0 {
+	if len(m) == 0 {
 		return nil
 	}
 

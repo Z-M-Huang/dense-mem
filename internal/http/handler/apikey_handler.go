@@ -3,7 +3,6 @@ package handler
 import (
 	"context"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -323,28 +322,4 @@ func toAPIKeyListItem(k *domain.APIKey) dto.APIKeyListItem {
 		CreatedAt:  k.CreatedAt.Format("2006-01-02T15:04:05Z"),
 		RevokedAt:  revokedAt,
 	}
-}
-
-// parsePaginationParams extracts limit and offset from query params.
-// This is a copy from profile_handler to keep this file self-contained.
-func parsePaginationParamsForAPIKey(c echo.Context) (int, int) {
-	limit := 20
-	offset := 0
-
-	if l := c.QueryParam("limit"); l != "" {
-		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 {
-			if parsed > 100 {
-				parsed = 100
-			}
-			limit = parsed
-		}
-	}
-
-	if o := c.QueryParam("offset"); o != "" {
-		if parsed, err := strconv.Atoi(o); err == nil && parsed >= 0 {
-			offset = parsed
-		}
-	}
-
-	return limit, offset
 }

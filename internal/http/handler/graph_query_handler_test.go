@@ -43,8 +43,8 @@ func TestGraphQueryHandler_AcceptsParameters(t *testing.T) {
 			assert.Equal(t, "MATCH (n) RETURN n LIMIT 1", query)
 			receivedParams = params
 			return &graphquery.GraphQueryResult{
-				Columns: []string{"n"},
-				Rows:    []map[string]any{{"n": "test"}},
+				Columns:  []string{"n"},
+				Rows:     []map[string]any{{"n": "test"}},
 				RowCount: 1,
 			}, nil
 		},
@@ -85,8 +85,8 @@ func TestGraphQueryHandler_RejectsLegacyParamsField(t *testing.T) {
 		executeFunc: func(ctx context.Context, pid string, query string, params map[string]any) (*graphquery.GraphQueryResult, error) {
 			receivedParams = params
 			return &graphquery.GraphQueryResult{
-				Columns: []string{},
-				Rows:    []map[string]any{},
+				Columns:  []string{},
+				Rows:     []map[string]any{},
 				RowCount: 0,
 			}, nil
 		},
@@ -116,7 +116,7 @@ func TestGraphQueryHandler_RejectsLegacyParamsField(t *testing.T) {
 	// Request should still execute (not 500), but params must be empty/nil
 	assert.NotEqual(t, http.StatusInternalServerError, rec.Code)
 	// Parameters must NOT leak into service - should be nil or empty
-	assert.True(t, receivedParams == nil || len(receivedParams) == 0,
+	assert.True(t, len(receivedParams) == 0,
 		"params should not leak into service, got: %v", receivedParams)
 }
 
@@ -132,8 +132,8 @@ func TestGraphQueryHandler_TimeoutSeconds(t *testing.T) {
 			_, hasDeadline := ctx.Deadline()
 			timeoutReceived = hasDeadline
 			return &graphquery.GraphQueryResult{
-				Columns: []string{},
-				Rows:    []map[string]any{},
+				Columns:  []string{},
+				Rows:     []map[string]any{},
 				RowCount: 0,
 			}, nil
 		},
@@ -175,8 +175,8 @@ func TestGraphQueryHandler_TimeoutSecondsZero(t *testing.T) {
 			_, hasDeadline := ctx.Deadline()
 			timeoutReceived = hasDeadline
 			return &graphquery.GraphQueryResult{
-				Columns: []string{},
-				Rows:    []map[string]any{},
+				Columns:  []string{},
+				Rows:     []map[string]any{},
 				RowCount: 0,
 			}, nil
 		},

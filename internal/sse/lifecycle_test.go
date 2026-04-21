@@ -308,7 +308,7 @@ func TestDisconnectCleanup(t *testing.T) {
 	err := <-done
 
 	// Should have context canceled error
-	assert.True(t, errors.Is(err, context.Canceled) || errors.Is(err, context.Canceled))
+	assert.True(t, errors.Is(err, context.Canceled))
 
 	// Check that cleanup was called
 	cleanedUp, profileID := cleanupRepo.WasCleanedUp()

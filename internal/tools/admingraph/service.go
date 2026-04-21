@@ -75,11 +75,11 @@ func NewAdminGraphService(reader ScopedReaderInterface, validator AdminGraphVali
 
 // Execute validates, prepares, and executes a Cypher query for admin access.
 // It enforces:
-// - Validation against write clauses and unsafe procedures
-// - Timeout enforcement via context cancellation
-// - LIMIT 1000 injected into Cypher before execution (caps Neo4j-side work,
-//   not a post-collection slice — protects against memory/DoS on large results)
-// - Audit logging of all executions (success or failure)
+//   - Validation against write clauses and unsafe procedures
+//   - Timeout enforcement via context cancellation
+//   - LIMIT 1000 injected into Cypher before execution (caps Neo4j-side work,
+//     not a post-collection slice — protects against memory/DoS on large results)
+//   - Audit logging of all executions (success or failure)
 func (s *adminGraphService) Execute(ctx context.Context, profileID string, query string, params map[string]any) (*AdminGraphResult, error) {
 	// Create timeout context
 	timeoutCtx, cancel := context.WithTimeout(ctx, s.timeout)
@@ -202,10 +202,8 @@ func processLimitClause(query string) (string, error) {
 // prepareParams creates the params map with profile_id injected.
 func prepareParams(profileID string, params map[string]any) map[string]any {
 	prepared := make(map[string]any)
-	if params != nil {
-		for k, v := range params {
-			prepared[k] = v
-		}
+	for k, v := range params {
+		prepared[k] = v
 	}
 	prepared["profileId"] = profileID
 	return prepared
@@ -213,10 +211,6 @@ func prepareParams(profileID string, params map[string]any) map[string]any {
 
 // validateParams checks that params don't contain forbidden keys.
 func validateParams(params map[string]any) error {
-	if params == nil {
-		return nil
-	}
-
 	// Check for profileId and profile_id
 	forbiddenKeys := []string{"profileId", "profile_id"}
 	for _, key := range forbiddenKeys {

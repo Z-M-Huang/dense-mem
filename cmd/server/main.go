@@ -19,6 +19,10 @@ import (
 	"github.com/dense-mem/dense-mem/internal/openapi"
 	"github.com/dense-mem/dense-mem/internal/repository"
 	"github.com/dense-mem/dense-mem/internal/service"
+	"github.com/dense-mem/dense-mem/internal/service/claimdedupe"
+	"github.com/dense-mem/dense-mem/internal/service/claimservice"
+	"github.com/dense-mem/dense-mem/internal/service/communityservice"
+	"github.com/dense-mem/dense-mem/internal/service/factservice"
 	"github.com/dense-mem/dense-mem/internal/service/fragmentdedupe"
 	"github.com/dense-mem/dense-mem/internal/service/fragmentservice"
 	"github.com/dense-mem/dense-mem/internal/service/recallservice"
@@ -30,6 +34,7 @@ import (
 	"github.com/dense-mem/dense-mem/internal/tools/keywordsearch"
 	"github.com/dense-mem/dense-mem/internal/tools/registry"
 	"github.com/dense-mem/dense-mem/internal/tools/semanticsearch"
+	"github.com/dense-mem/dense-mem/internal/verifier"
 )
 
 // scopedReaderAdapter bridges neo4j.ScopedReader (which returns
@@ -205,22 +210,25 @@ func main() {
 	discoverabilityMetrics := observability.NewInMemoryDiscoverabilityMetrics()
 	readerAdapter := &scopedReaderAdapter{inner: profileScopeEnforcer}
 	fragmentAuditor := &fragmentAuditAdapter{inner: auditService}
+	claimAuditor := &claimAuditAdapter{inner: auditService}
+	factAuditor := &factAuditAdapter{inner: auditService}
 	dedupeLookup := fragmentdedupe.NewNeo4jDedupeLookup(readerAdapter)
+	claimDedupeLookup := claimdedupe.NewNeo4jDedupeLookup(readerAdapter)
 
 	// Embedding provider — constructed only when AI_* config is fully populated.
 	// When unconfigured, save_memory / recall_memory surface as Available=false
 	// entries in the tool registry and return ErrToolUnavailable if invoked.
 	var (
-		retryEmbedder     *embedding.RetryEmbeddingProvider
-		fragmentCreateSvc fragmentservice.CreateFragmentService
-		recallSvc         recallservice.RecallService
+		retryEmbedder             *embedding.RetryEmbeddingProvider
+		fragmentCreateRegistrySvc fragmentservice.CreateFragmentService
+		fragmentCreateHTTPSvc     fragmentservice.CreateFragmentService = unavailableFragmentCreateService{}
 	)
 	if cfg.IsEmbeddingConfigured() {
 		openaiProvider := embedding.NewOpenAIEmbeddingProvider(&cfg, nil)
 		retryEmbedder = embedding.NewRetryEmbeddingProviderWithKey(openaiProvider, logger, cfg.GetAIAPIKey())
 		retryEmbedder.SetMetrics(discoverabilityMetrics)
 
-		fragmentCreateSvc = fragmentservice.NewCreateFragmentService(
+		fragmentCreateRegistrySvc = fragmentservice.NewCreateFragmentService(
 			retryEmbedder,
 			profileScopeEnforcer,
 			dedupeLookup,
@@ -229,16 +237,70 @@ func main() {
 			slog.Default(),
 			discoverabilityMetrics,
 		)
+		fragmentCreateHTTPSvc = fragmentCreateRegistrySvc
 	}
 
 	// Read/list/delete work without embedding.
 	fragmentGetSvc := fragmentservice.NewGetFragmentService(readerAdapter)
 	fragmentListSvc := fragmentservice.NewListFragmentsService(readerAdapter)
 	fragmentDeleteSvc := fragmentservice.NewDeleteFragmentService(profileScopeEnforcer, readerAdapter, fragmentAuditor, slog.Default())
+	fragmentRetractSvc := fragmentservice.NewRetractFragmentService(profileScopeEnforcer, fragmentAuditor, slog.Default(), discoverabilityMetrics)
+
+	claimCreateSvc := claimservice.NewCreateClaimService(
+		claimDedupeLookup,
+		profileScopeEnforcer,
+		profileScopeEnforcer,
+		claimAuditor,
+		slog.Default(),
+		discoverabilityMetrics,
+	)
+	claimGetSvc := claimservice.NewGetClaimService(profileScopeEnforcer, slog.Default())
+	claimListFilteredSvc := claimservice.NewListClaimsFilteredService(profileScopeEnforcer)
+	claimListSvc := claimservice.NewListClaimsService(profileScopeEnforcer)
+	claimDeleteSvc := claimservice.NewDeleteClaimService(profileScopeEnforcer, claimAuditor, slog.Default())
+
+	claimLock := postgres.NewClaimLock(discoverabilityMetrics)
+	factPromoteSvc := factservice.NewPromoteClaimService(
+		profileScopeEnforcer,
+		claimLock,
+		pgDB.GetDB(),
+		factAuditor,
+		slog.Default(),
+		discoverabilityMetrics,
+		time.Duration(cfg.GetPromoteTxTimeoutSeconds())*time.Second,
+	)
+	factGetSvc := factservice.NewGetFactService(profileScopeEnforcer)
+	factListSvc := factservice.NewListFactsService(profileScopeEnforcer)
+
+	var (
+		claimVerifyRegistrySvc claimservice.VerifyClaimService
+		claimVerifyHTTPSvc     claimservice.VerifyClaimService = unavailableVerifyClaimService{}
+	)
+	if verifierConfigured(&cfg) {
+		baseVerifier := verifier.NewOpenAIVerifier(&cfg, nil)
+		retryVerifier := verifier.NewRetryVerifier(baseVerifier, &cfg, logger)
+		retryVerifier.SetMetrics(discoverabilityMetrics)
+
+		claimVerifyRegistrySvc = claimservice.NewVerifyClaimService(
+			profileScopeEnforcer,
+			profileScopeEnforcer,
+			profileScopeEnforcer,
+			retryVerifier,
+			cfg.GetAIVerifierModel(),
+			claimAuditor,
+			slog.Default(),
+			discoverabilityMetrics,
+		)
+		claimVerifyHTTPSvc = claimVerifyRegistrySvc
+	}
 
 	// Recall requires embedding (query vectors).
+	var (
+		recallRegistrySvc recallservice.RecallService
+		recallHTTPSvc     recallservice.RecallService = unavailableRecallService{}
+	)
 	if cfg.IsEmbeddingConfigured() {
-		recallSvc = recallservice.NewRecallService(
+		recallRegistrySvc = recallservice.NewRecallService(
 			retryEmbedder,
 			embeddingSearcher,
 			fragmentSearcher,
@@ -246,17 +308,50 @@ func main() {
 			logger,
 			discoverabilityMetrics,
 		)
+		recallHTTPSvc = recallservice.NewRecallServiceWithTiers(
+			retryEmbedder,
+			embeddingSearcher,
+			fragmentSearcher,
+			fragmentGetSvc,
+			recallActiveFactsLister{svc: factListSvc},
+			recallValidatedClaimsLister{svc: claimListFilteredSvc},
+			cfg.GetRecallValidatedClaimWeight(),
+			logger,
+			discoverabilityMetrics,
+		)
+	}
+
+	var (
+		communityDetectRegistrySvc communityservice.DetectCommunityService
+		communityDetectHTTPSvc     communityservice.DetectCommunityService = unavailableCommunityDetectService{}
+	)
+	communityAvailabilitySvc := communityservice.NewAvailabilityService(neo4jClient, slog.Default())
+	communityProbeCtx, communityProbeCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	communityAvailable := communityAvailabilitySvc.ProbeGDS(communityProbeCtx)
+	communityProbeCancel()
+	if communityAvailable {
+		communityDetectRegistrySvc = communityservice.NewLeidenService(pgDB.GetDB(), neo4jClient, &cfg, slog.Default())
+		communityDetectHTTPSvc = communityDetectRegistrySvc
 	}
 
 	// Tool registry is the single source of truth for MCP / HTTP catalog / OpenAPI.
 	toolRegistry, err := registry.BuildDefault(registry.Dependencies{
-		FragmentCreate:      fragmentCreateSvc,
+		FragmentCreate:      fragmentCreateRegistrySvc,
 		FragmentGet:         fragmentGetSvc,
 		FragmentList:        fragmentListSvc,
-		Recall:              recallSvc,
+		Recall:              recallRegistrySvc,
 		KeywordSearch:       keywordSearchService,
 		SemanticSearch:      semanticSearchService,
 		GraphQuery:          graphQueryService,
+		ClaimCreate:         claimCreateSvc,
+		ClaimGet:            claimGetSvc,
+		ClaimList:           claimListSvc,
+		ClaimVerify:         claimVerifyRegistrySvc,
+		FactPromote:         factPromoteSvc,
+		FactGet:             factGetSvc,
+		FactList:            factListSvc,
+		FragmentRetract:     fragmentRetractSvc,
+		CommunityDetect:     communityDetectRegistrySvc,
 		EmbeddingConfigured: cfg.IsEmbeddingConfigured(),
 	})
 	if err != nil {
@@ -284,24 +379,27 @@ func main() {
 	queryStreamHandler := handler.NewQueryStreamHandler(queryStreamOrchestrator, streamLifecycle)
 
 	// Fragment + catalog + openapi handlers
-	var fragmentCreateHandler *handler.FragmentCreateHandler
-	if fragmentCreateSvc != nil {
-		fragmentCreateHandler = handler.NewFragmentCreateHandler(fragmentCreateSvc)
-	}
+	fragmentCreateHandler := handler.NewFragmentCreateHandler(fragmentCreateHTTPSvc)
 	fragmentReadHandler := handler.NewFragmentReadHandler(fragmentGetSvc)
 	fragmentListHandler := handler.NewFragmentListHandler(fragmentListSvc)
 	fragmentDeleteHandler := handler.NewFragmentDeleteHandler(fragmentDeleteSvc)
+	fragmentRetractHandler := handler.NewFragmentRetractHandler(fragmentRetractSvc)
+	claimCreateHandler := handler.NewClaimCreateHandler(claimCreateSvc)
+	claimReadHandler := handler.NewClaimReadHandler(claimGetSvc)
+	claimListHandler := handler.NewClaimListHandler(claimListSvc)
+	claimDeleteHandler := handler.NewClaimDeleteHandler(claimDeleteSvc)
+	claimVerifyHandler := handler.NewClaimVerifyHandler(claimVerifyHTTPSvc)
+	claimPromoteHandler := handler.NewClaimPromoteHandler(factPromoteSvc)
+	factReadHandler := handler.NewFactReadHandler(factGetSvc)
+	factListHandler := handler.NewFactListHandler(factListSvc)
+	communityDetectHandler := handler.NewCommunityDetectHandler(communityDetectHTTPSvc)
 	toolCatalogHandler := handler.NewToolCatalogHandler(toolRegistry)
+	toolReadHandler := handler.NewToolReadHandler(toolRegistry)
+	toolExecuteHandler := handler.NewToolExecuteHandler(toolRegistry)
 	openAPIAISafeHandler := handler.NewOpenAPIHandler(openAPIGen, openapi.SpecVariantAISafe)
 	openAPIFullHandler := handler.NewOpenAPIHandler(openAPIGen, openapi.SpecVariantFull)
 
-	// Recall handler — only wired when recall service is available (requires
-	// embedding to be configured). Follows the same conditional pattern as
-	// fragmentCreateHandler.
-	var recallHandler *handler.RecallHandler
-	if recallSvc != nil {
-		recallHandler = handler.NewRecallHandler(recallSvc)
-	}
+	recallHandler := handler.NewRecallHandler(recallHTTPSvc)
 
 	// ========================================
 	// Health checks
@@ -359,16 +457,24 @@ func main() {
 		FragmentRead:    fragmentReadHandler.Handle,
 		FragmentList:    fragmentListHandler.Handle,
 		FragmentDelete:  fragmentDeleteHandler.Handle,
+		FragmentRetract: fragmentRetractHandler.Handle,
+		ClaimCreate:     claimCreateHandler.Handle,
+		ClaimRead:       claimReadHandler.Handle,
+		ClaimList:       claimListHandler.Handle,
+		ClaimDelete:     claimDeleteHandler.Handle,
+		ClaimVerify:     claimVerifyHandler.Handle,
+		ClaimPromote:    claimPromoteHandler.Handle,
+		FactGet:         factReadHandler.Handle,
+		FactList:        factListHandler.Handle,
+		CommunityDetect: communityDetectHandler.Handle,
 		ToolCatalog:     toolCatalogHandler.Handle,
+		GetTool:         toolReadHandler.Handle,
+		ExecuteTool:     toolExecuteHandler.Handle,
 		OpenAPIAISafe:   openAPIAISafeHandler.Handle,
 		OpenAPIFull:     openAPIFullHandler.Handle,
+		Recall:          recallHandler.Handle,
 	}
-	if fragmentCreateHandler != nil {
-		protectedHandlers.FragmentCreate = fragmentCreateHandler.Handle
-	}
-	if recallHandler != nil {
-		protectedHandlers.Recall = recallHandler.Handle
-	}
+	protectedHandlers.FragmentCreate = fragmentCreateHandler.Handle
 
 	http.RegisterProtectedRoutesWithHandlers(e, protectedDeps, protectedHandlers)
 

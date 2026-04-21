@@ -15,19 +15,19 @@ import (
 
 // AuditLogEntry represents a single audit log entry to be written.
 type AuditLogEntry struct {
-	ID             string
-	ProfileID      *string
-	Timestamp      time.Time
-	Operation      string
-	EntityType     string
-	EntityID       string
-	BeforePayload  map[string]interface{}
-	AfterPayload   map[string]interface{}
-	ActorKeyID     *string
-	ActorRole      string
-	ClientIP       string
-	CorrelationID  string
-	Metadata       map[string]interface{}
+	ID            string
+	ProfileID     *string
+	Timestamp     time.Time
+	Operation     string
+	EntityType    string
+	EntityID      string
+	BeforePayload map[string]interface{}
+	AfterPayload  map[string]interface{}
+	ActorKeyID    *string
+	ActorRole     string
+	ClientIP      string
+	CorrelationID string
+	Metadata      map[string]interface{}
 }
 
 // AuditService is the companion interface for audit logging operations.
@@ -116,21 +116,6 @@ func redactPayload(payload map[string]interface{}) map[string]interface{} {
 		}
 	}
 	return redacted
-}
-
-// logAuditError logs an audit service error with structured logging.
-// This ensures audit failures are not silently swallowed and can be monitored.
-func (s *AuditServiceImpl) logAuditError(ctx context.Context, err error, operation, entityType, entityID, correlationID string) {
-	if s.logger == nil {
-		return
-	}
-	s.logger.Error("audit_log_write_failed",
-		slog.String("error", err.Error()),
-		slog.String("operation", operation),
-		slog.String("entity_type", entityType),
-		slog.String("entity_id", entityID),
-		slog.String("correlation_id", correlationID),
-	)
 }
 
 // Append writes an audit log entry to the database.

@@ -410,22 +410,6 @@ func TestListFacts_CursorPagination(t *testing.T) {
 	require.Equal(t, "fact-1", page3[0].FactID)
 }
 
-// callbackFactReader is a test helper that delegates ScopedRead to a callback,
-// allowing per-call control over the response without the responsesByCall map.
-type callbackFactReader struct {
-	fn func() ([]map[string]any, error)
-}
-
-func (c *callbackFactReader) ScopedRead(
-	_ context.Context,
-	_ string,
-	_ string,
-	_ map[string]any,
-) (neo4j.ResultSummary, []map[string]any, error) {
-	rows, err := c.fn()
-	return nil, rows, err
-}
-
 // TestListFacts_CrossProfileIsolation verifies that facts belonging to profile A
 // are not returned when querying as profile B.
 //
