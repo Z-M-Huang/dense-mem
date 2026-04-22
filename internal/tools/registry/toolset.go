@@ -99,6 +99,7 @@ func saveMemoryTool(deps Dependencies) Tool {
 				"content":         schemaString("Fragment text.", 8192),
 				"source_type":     schemaEnum([]string{"conversation", "document", "observation", "manual"}),
 				"source":          schemaString("Free-form provenance.", 256),
+				"authority":       schemaEnum([]string{"authoritative", "primary", "secondary", "inferred", "unknown"}),
 				"idempotency_key": schemaString("Client-supplied dedupe key (scoped to profile).", 128),
 				"labels":          map[string]any{"type": "array", "items": map[string]any{"type": "string", "maxLength": 64}, "maxItems": 20},
 				"metadata":        map[string]any{"type": "object", "additionalProperties": true},
@@ -254,8 +255,11 @@ func recallMemoryTool(deps Dependencies) Tool {
 			"type":     "object",
 			"required": []string{"query"},
 			"properties": map[string]any{
-				"query": schemaString("Natural-language query.", 512),
-				"limit": map[string]any{"type": "integer", "minimum": 1, "maximum": 50},
+				"query":            schemaString("Natural-language query.", 512),
+				"limit":            map[string]any{"type": "integer", "minimum": 1, "maximum": 50},
+				"valid_at":         map[string]any{"type": "string", "format": "date-time"},
+				"known_at":         map[string]any{"type": "string", "format": "date-time"},
+				"include_evidence": map[string]any{"type": "boolean"},
 			},
 			"additionalProperties": false,
 		},
@@ -322,9 +326,12 @@ func keywordSearchTool(deps Dependencies) Tool {
 			"type":     "object",
 			"required": []string{"keywords"},
 			"properties": map[string]any{
-				"keywords": schemaString("Search phrase.", 512),
-				"limit":    map[string]any{"type": "integer", "minimum": 1, "maximum": 100},
-				"labels":   map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+				"keywords":         schemaString("Search phrase.", 512),
+				"limit":            map[string]any{"type": "integer", "minimum": 1, "maximum": 100},
+				"labels":           map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+				"valid_at":         map[string]any{"type": "string", "format": "date-time"},
+				"known_at":         map[string]any{"type": "string", "format": "date-time"},
+				"include_evidence": map[string]any{"type": "boolean"},
 			},
 			"additionalProperties": false,
 		},
@@ -340,8 +347,8 @@ func keywordSearchTool(deps Dependencies) Tool {
 				return nil, fmt.Errorf("keyword-search: invalid input: %w", err)
 			}
 			req := keywordsearch.KeywordSearchRequest{
-				Query:  dtoReq.Keywords,
-				Limit:  dtoReq.Limit,
+				Query: dtoReq.Keywords,
+				Limit: dtoReq.Limit,
 			}
 			res, err := deps.KeywordSearch.Search(ctx, profileID, &req)
 			if err != nil {
@@ -363,10 +370,13 @@ func semanticSearchTool(deps Dependencies) Tool {
 			"type":     "object",
 			"required": []string{"embedding"},
 			"properties": map[string]any{
-				"embedding": map[string]any{"type": "array", "items": map[string]any{"type": "number"}},
-				"query":     schemaString("Optional query string for logging.", 512),
-				"limit":     map[string]any{"type": "integer", "minimum": 1, "maximum": 100},
-				"threshold": map[string]any{"type": "number"},
+				"embedding":        map[string]any{"type": "array", "items": map[string]any{"type": "number"}},
+				"query":            schemaString("Optional query string for logging.", 512),
+				"limit":            map[string]any{"type": "integer", "minimum": 1, "maximum": 100},
+				"threshold":        map[string]any{"type": "number"},
+				"valid_at":         map[string]any{"type": "string", "format": "date-time"},
+				"known_at":         map[string]any{"type": "string", "format": "date-time"},
+				"include_evidence": map[string]any{"type": "boolean"},
 			},
 			"additionalProperties": false,
 		},
@@ -454,6 +464,7 @@ func fragmentObjectSchema() map[string]any {
 			"content":              map[string]any{"type": "string"},
 			"source_type":          map[string]any{"type": "string"},
 			"source":               map[string]any{"type": "string"},
+			"authority":            map[string]any{"type": "string"},
 			"labels":               map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
 			"metadata":             map[string]any{"type": "object"},
 			"content_hash":         map[string]any{"type": "string"},
@@ -462,6 +473,23 @@ func fragmentObjectSchema() map[string]any {
 			"embedding_dimensions": map[string]any{"type": "integer"},
 			"created_at":           map[string]any{"type": "string", "format": "date-time"},
 			"updated_at":           map[string]any{"type": "string", "format": "date-time"},
+		},
+	}
+}
+
+func evidenceObjectSchema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"fragment_id":        map[string]any{"type": "string"},
+			"speaker":            map[string]any{"type": "string"},
+			"span_start":         map[string]any{"type": "integer"},
+			"span_end":           map[string]any{"type": "integer"},
+			"extract_conf":       map[string]any{"type": "number"},
+			"extraction_model":   map[string]any{"type": "string"},
+			"extraction_version": map[string]any{"type": "string"},
+			"pipeline_run_id":    map[string]any{"type": "string"},
+			"authority":          map[string]any{"type": "string"},
 		},
 	}
 }

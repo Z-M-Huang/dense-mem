@@ -64,7 +64,7 @@ func NewServer(reg registry.Registry, profileID string, logger observability.Log
 // and falling back to deprecated aliases. A deprecation warning is written to
 // w whenever a deprecated alias is used and the canonical name is unset.
 //
-// Canonical names: DENSE_MEM_PROFILE_ID, DENSE_MEM_API_KEY, DENSE_MEM_URL
+// Canonical names: DENSE_MEM_PROFILE_ID, DENSE_MEM_API_KEY
 // Deprecated aliases: X_PROFILE_ID → DENSE_MEM_PROFILE_ID
 //
 //	DENSE_MEM_AUTH_KEY → DENSE_MEM_API_KEY
@@ -83,6 +83,14 @@ func LookupEnv(getenv func(string) string, w io.Writer) (profileID, apiKey strin
 			fmt.Fprintln(w, "warning: DENSE_MEM_AUTH_KEY is deprecated; use DENSE_MEM_API_KEY")
 		}
 	}
+	return
+}
+
+// LookupRuntimeEnv resolves the full MCP runtime environment, including the
+// dense-mem HTTP base URL used by the HTTP-backed MCP facade.
+func LookupRuntimeEnv(getenv func(string) string, w io.Writer) (profileID, apiKey, baseURL string) {
+	profileID, apiKey = LookupEnv(getenv, w)
+	baseURL = getenv("DENSE_MEM_URL")
 	return
 }
 

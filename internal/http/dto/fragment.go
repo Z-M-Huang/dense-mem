@@ -19,6 +19,7 @@ type CreateFragmentRequest struct {
 	Content        string         `json:"content" validate:"required,max=8192,notblank"`
 	SourceType     string         `json:"source_type,omitempty" validate:"omitempty,oneof=conversation document observation manual"`
 	Source         string         `json:"source,omitempty" validate:"max=256"`
+	Authority      string         `json:"authority,omitempty" validate:"omitempty,oneof=authoritative primary secondary inferred unknown"`
 	IdempotencyKey string         `json:"idempotency_key,omitempty" validate:"max=128"`
 	Labels         []string       `json:"labels,omitempty" validate:"max=20,dive,max=64,notblank"`
 	Metadata       map[string]any `json:"metadata,omitempty"` // size check in handler
@@ -35,6 +36,7 @@ type FragmentResponse struct {
 	Content             string         `json:"content"`
 	SourceType          string         `json:"source_type"`
 	Source              string         `json:"source,omitempty"`
+	Authority           string         `json:"authority,omitempty"`
 	Labels              []string       `json:"labels,omitempty"`
 	Metadata            map[string]any `json:"metadata,omitempty"`
 	ContentHash         string         `json:"content_hash"`

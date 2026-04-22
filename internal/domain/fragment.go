@@ -34,6 +34,7 @@ type Fragment struct {
 	Content             string         `json:"content"`
 	Source              string         `json:"source,omitempty"`
 	SourceType          SourceType     `json:"source_type"`
+	Authority           Authority      `json:"authority,omitempty"`
 	Labels              []string       `json:"labels,omitempty"`
 	Metadata            map[string]any `json:"metadata,omitempty"`
 	ContentHash         string         `json:"content_hash"`

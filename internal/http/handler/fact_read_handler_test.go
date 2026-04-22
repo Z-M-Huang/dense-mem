@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
@@ -104,6 +105,37 @@ func TestFactReadHandler_Returns404OnMissing(t *testing.T) {
 
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("status = %d; want 404", rec.Code)
+	}
+}
+
+func TestFactReadHandler_TemporalFilterReturns404WhenFactOutsideWindow(t *testing.T) {
+	e := echo.New()
+	profileID := uuid.New()
+	validFrom := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	validTo := time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC)
+	svc := &mockGetFactService{
+		getFunc: func(ctx context.Context, pid, fid string) (*domain.Fact, error) {
+			return &domain.Fact{
+				FactID:    fid,
+				ProfileID: pid,
+				Status:    domain.FactStatusActive,
+				ValidFrom: &validFrom,
+				ValidTo:   &validTo,
+			}, nil
+		},
+	}
+	h := NewFactReadHandler(svc)
+	e.HTTPErrorHandler = httperr.ErrorHandler
+
+	e.Use(injectProfileMiddleware(profileID))
+	e.GET("/api/v1/facts/:id", h.Handle)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/facts/fact-1?valid_at=2024-03-01T00:00:00Z", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d; want 404. body=%s", rec.Code, rec.Body.String())
 	}
 }
 

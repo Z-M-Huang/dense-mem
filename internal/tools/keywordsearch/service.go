@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sort"
+	"time"
 )
 
 const (
@@ -15,20 +16,23 @@ const (
 
 // SearchHit represents a single search result hit.
 type SearchHit struct {
-	ID         string         `json:"id"`
-	Type       string         `json:"type"`       // "fragment" or "fact"
-	Content    string         `json:"content"`
-	Score      float64        `json:"score"`
-	Labels     []string       `json:"labels"`
-	Metadata   map[string]any `json:"metadata,omitempty"`
-	ProfileID  string         `json:"profile_id"` // For defense-in-depth post-filter
+	ID        string         `json:"id"`
+	Type      string         `json:"type"` // "fragment" or "fact"
+	Content   string         `json:"content"`
+	Score     float64        `json:"score"`
+	Labels    []string       `json:"labels"`
+	Metadata  map[string]any `json:"metadata,omitempty"`
+	ProfileID string         `json:"profile_id"` // For defense-in-depth post-filter
 }
 
 // KeywordSearchRequest represents the request for keyword search.
 type KeywordSearchRequest struct {
-	Query  string   `json:"query"`
-	Limit  int      `json:"limit"`
-	Labels []string `json:"labels,omitempty"`
+	Query           string     `json:"query"`
+	Limit           int        `json:"limit"`
+	Labels          []string   `json:"labels,omitempty"`
+	ValidAt         *time.Time `json:"valid_at,omitempty"`
+	KnownAt         *time.Time `json:"known_at,omitempty"`
+	IncludeEvidence bool       `json:"include_evidence,omitempty"`
 }
 
 // KeywordSearchRequestInterface is the companion interface for KeywordSearchRequest.
@@ -76,7 +80,7 @@ func (m *KeywordSearchMeta) GetLimitApplied() int {
 
 // KeywordSearchResult represents the result of a keyword search.
 type KeywordSearchResult struct {
-	Data []SearchHit      `json:"data"`
+	Data []SearchHit       `json:"data"`
 	Meta KeywordSearchMeta `json:"meta"`
 }
 
@@ -160,12 +164,16 @@ type FragmentSearchResult struct {
 
 // FactSearchResult represents a result from Fact predicate full-text search.
 type FactSearchResult struct {
-	FactID    string         `json:"fact_id"`
-	Predicate string         `json:"predicate"`
-	Score     float64        `json:"score"`
-	Labels    []string       `json:"labels"`
-	Metadata  map[string]any `json:"metadata"`
-	ProfileID string         `json:"profile_id"`
+	FactID     string         `json:"fact_id"`
+	Predicate  string         `json:"predicate"`
+	Score      float64        `json:"score"`
+	Labels     []string       `json:"labels"`
+	Metadata   map[string]any `json:"metadata"`
+	ProfileID  string         `json:"profile_id"`
+	ValidFrom  *time.Time     `json:"valid_from,omitempty"`
+	ValidTo    *time.Time     `json:"valid_to,omitempty"`
+	RecordedAt time.Time      `json:"recorded_at"`
+	RecordedTo *time.Time     `json:"recorded_to,omitempty"`
 }
 
 // FragmentSearcherInterface defines the interface for fragment full-text search.
@@ -287,6 +295,9 @@ func (s *keywordSearchService) Search(ctx context.Context, profileID string, req
 		if fr.ProfileID != profileID {
 			continue // Skip results from other profiles
 		}
+		if !factResultMatchesWindow(fr, req.ValidAt, req.KnownAt) {
+			continue
+		}
 		// Optional labels filter - defense-in-depth
 		if !matchesLabels(fr.Labels, req.Labels) {
 			continue
@@ -323,6 +334,26 @@ func (s *keywordSearchService) Search(ctx context.Context, profileID string, req
 			LimitApplied: limitApplied,
 		},
 	}, nil
+}
+
+func factResultMatchesWindow(f FactSearchResult, validAt, knownAt *time.Time) bool {
+	if validAt != nil {
+		if f.ValidFrom != nil && f.ValidFrom.After(*validAt) {
+			return false
+		}
+		if f.ValidTo != nil && !f.ValidTo.After(*validAt) {
+			return false
+		}
+	}
+	if knownAt != nil {
+		if f.RecordedAt.After(*knownAt) {
+			return false
+		}
+		if f.RecordedTo != nil && !f.RecordedTo.After(*knownAt) {
+			return false
+		}
+	}
+	return true
 }
 
 // validateAndApplyLimit validates and applies limit rules.

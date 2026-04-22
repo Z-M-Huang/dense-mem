@@ -39,7 +39,7 @@ func TestExistingToolAdapters(t *testing.T) {
 			UpdatedAt:  time.Now(),
 		}
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			require.Equal(t, testAuthToken, r.Header.Get("X-API-Key"), "X-API-Key must be set")
+			require.Equal(t, "Bearer "+testAuthToken, r.Header.Get("Authorization"), "Authorization bearer token must be set")
 			require.Equal(t, testProfileA, r.Header.Get("X-Profile-ID"), "X-Profile-ID must match caller")
 			require.Equal(t, http.MethodPost, r.Method)
 			w.Header().Set("Content-Type", "application/json")
@@ -88,7 +88,7 @@ func TestExistingToolAdapters(t *testing.T) {
 			CreatedAt: time.Now(), UpdatedAt: time.Now(),
 		}
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			require.Equal(t, testAuthToken, r.Header.Get("X-API-Key"))
+			require.Equal(t, "Bearer "+testAuthToken, r.Header.Get("Authorization"))
 			require.Equal(t, testProfileA, r.Header.Get("X-Profile-ID"))
 			require.Equal(t, http.MethodGet, r.Method)
 			w.Header().Set("Content-Type", "application/json")
@@ -132,7 +132,7 @@ func TestExistingToolAdapters(t *testing.T) {
 			HasMore:    true,
 		}
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			require.Equal(t, testAuthToken, r.Header.Get("X-API-Key"))
+			require.Equal(t, "Bearer "+testAuthToken, r.Header.Get("Authorization"))
 			require.Equal(t, testProfileA, r.Header.Get("X-Profile-ID"))
 			require.Equal(t, http.MethodGet, r.Method)
 			w.Header().Set("Content-Type", "application/json")
@@ -161,7 +161,7 @@ func TestExistingToolAdapters(t *testing.T) {
 			},
 		}
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			require.Equal(t, testAuthToken, r.Header.Get("X-API-Key"))
+			require.Equal(t, "Bearer "+testAuthToken, r.Header.Get("Authorization"))
 			require.Equal(t, testProfileA, r.Header.Get("X-Profile-ID"))
 			require.Equal(t, http.MethodGet, r.Method)
 			w.Header().Set("Content-Type", "application/json")
@@ -189,7 +189,7 @@ func TestExistingToolAdapters(t *testing.T) {
 			Meta: keywordsearch.KeywordSearchMeta{LimitApplied: 10},
 		}
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			require.Equal(t, testAuthToken, r.Header.Get("X-API-Key"))
+			require.Equal(t, "Bearer "+testAuthToken, r.Header.Get("Authorization"))
 			require.Equal(t, testProfileA, r.Header.Get("X-Profile-ID"))
 			require.Equal(t, http.MethodPost, r.Method)
 			w.Header().Set("Content-Type", "application/json")
@@ -215,7 +215,7 @@ func TestExistingToolAdapters(t *testing.T) {
 			Meta: semanticsearch.SemanticSearchMeta{LimitApplied: 10},
 		}
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			require.Equal(t, testAuthToken, r.Header.Get("X-API-Key"))
+			require.Equal(t, "Bearer "+testAuthToken, r.Header.Get("Authorization"))
 			require.Equal(t, testProfileA, r.Header.Get("X-Profile-ID"))
 			require.Equal(t, http.MethodPost, r.Method)
 			w.Header().Set("Content-Type", "application/json")
@@ -246,7 +246,7 @@ func TestExistingToolAdapters(t *testing.T) {
 		gqResp.Meta.RowCapApplied = false
 
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			require.Equal(t, testAuthToken, r.Header.Get("X-API-Key"))
+			require.Equal(t, "Bearer "+testAuthToken, r.Header.Get("Authorization"))
 			require.Equal(t, testProfileA, r.Header.Get("X-Profile-ID"))
 			require.Equal(t, http.MethodPost, r.Method)
 			w.Header().Set("Content-Type", "application/json")

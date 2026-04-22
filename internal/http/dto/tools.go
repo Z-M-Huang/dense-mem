@@ -2,6 +2,7 @@ package dto
 
 import (
 	"github.com/google/uuid"
+	"time"
 )
 
 // GraphQueryRequest represents a request to execute a graph query.
@@ -20,8 +21,11 @@ type GraphQueryRequest struct {
 //   - Keywords: max 512 characters, not blank
 //   - Limit: optional result limit (default: 10, max: 100)
 type KeywordSearchRequest struct {
-	Keywords string   `json:"keywords" validate:"required,max=512,notblank"`
-	Limit    int      `json:"limit" validate:"min=1,max=100"`
+	Keywords        string     `json:"keywords" validate:"required,max=512,notblank"`
+	Limit           int        `json:"limit" validate:"min=1,max=100"`
+	ValidAt         *time.Time `json:"valid_at,omitempty"`
+	KnownAt         *time.Time `json:"known_at,omitempty"`
+	IncludeEvidence bool       `json:"include_evidence,omitempty"`
 }
 
 // SemanticSearchRequest represents a request for semantic search using embeddings.
@@ -31,8 +35,11 @@ type KeywordSearchRequest struct {
 //     validation.SetEmbeddingDimensions at startup to activate)
 //   - Limit: optional result limit (default: 10, max: 100)
 type SemanticSearchRequest struct {
-	Embedding []float32 `json:"embedding" validate:"required,embedding_dim"`
-	Limit     int       `json:"limit" validate:"min=1,max=100"`
+	Embedding       []float32  `json:"embedding" validate:"required,embedding_dim"`
+	Limit           int        `json:"limit" validate:"min=1,max=100"`
+	ValidAt         *time.Time `json:"valid_at,omitempty"`
+	KnownAt         *time.Time `json:"known_at,omitempty"`
+	IncludeEvidence bool       `json:"include_evidence,omitempty"`
 }
 
 // QueryStreamRequest represents a request to stream query results via SSE.
@@ -57,11 +64,11 @@ type AdminGraphQueryRequest struct {
 
 // SearchResult represents a single search result.
 type SearchResult struct {
-	ID          uuid.UUID      `json:"id"`
-	Type        string         `json:"type"`
-	Score       float64        `json:"score"`
-	Content     string         `json:"content"`
-	Metadata    map[string]any `json:"metadata"`
+	ID       uuid.UUID      `json:"id"`
+	Type     string         `json:"type"`
+	Score    float64        `json:"score"`
+	Content  string         `json:"content"`
+	Metadata map[string]any `json:"metadata"`
 }
 
 // GraphQueryResult represents the result of a graph query.
@@ -73,7 +80,7 @@ type GraphQueryResult struct {
 
 // StreamEvent represents a single event in a query stream.
 type StreamEvent struct {
-	Type    string         `json:"type"`
-	Data    map[string]any `json:"data"`
-	Error   string         `json:"error,omitempty"`
+	Type  string         `json:"type"`
+	Data  map[string]any `json:"data"`
+	Error string         `json:"error,omitempty"`
 }

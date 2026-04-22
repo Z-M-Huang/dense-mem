@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"time"
 
 	"github.com/dense-mem/dense-mem/internal/service/recallservice"
 )
@@ -35,6 +36,15 @@ func (a *recallAdapter) Recall(ctx context.Context, profileID string, req recall
 	q.Set("query", req.Query)
 	if req.Limit > 0 {
 		q.Set("limit", strconv.Itoa(req.Limit))
+	}
+	if req.ValidAt != nil {
+		q.Set("valid_at", req.ValidAt.UTC().Format(time.RFC3339))
+	}
+	if req.KnownAt != nil {
+		q.Set("known_at", req.KnownAt.UTC().Format(time.RFC3339))
+	}
+	if req.IncludeEvidence {
+		q.Set("include_evidence", "true")
 	}
 
 	httpReq, err := a.c.newRequest(ctx, http.MethodGet, "/api/v1/recall?"+q.Encode(), profileID, nil)

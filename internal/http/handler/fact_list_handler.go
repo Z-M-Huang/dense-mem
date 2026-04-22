@@ -61,6 +61,8 @@ func (h *FactListHandler) Handle(c echo.Context) error {
 	filters := factservice.FactListFilters{
 		Subject:   req.Subject,
 		Predicate: req.Predicate,
+		ValidAt:   req.ValidAt,
+		KnownAt:   req.KnownAt,
 	}
 	if req.Status != "" {
 		filters.Status = domain.FactStatus(req.Status)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/dense-mem/dense-mem/internal/domain"
 	"github.com/dense-mem/dense-mem/internal/service/claimservice"
@@ -236,9 +237,14 @@ func getFactTool(deps Dependencies) Tool {
 		Name:        "get_fact",
 		Description: "Fetch a single Fact by ID within the caller's profile scope.",
 		InputSchema: map[string]any{
-			"type":                 "object",
-			"required":             []string{"id"},
-			"properties":           map[string]any{"id": schemaString("Fact ID.", 128)},
+			"type":     "object",
+			"required": []string{"id"},
+			"properties": map[string]any{
+				"id":               schemaString("Fact ID.", 128),
+				"valid_at":         map[string]any{"type": "string", "format": "date-time"},
+				"known_at":         map[string]any{"type": "string", "format": "date-time"},
+				"include_evidence": map[string]any{"type": "boolean"},
+			},
 			"additionalProperties": false,
 		},
 		OutputSchema:   factObjectSchema(),
@@ -248,13 +254,29 @@ func getFactTool(deps Dependencies) Tool {
 			if !available {
 				return nil, ErrToolUnavailable
 			}
-			id, _ := input["id"].(string)
-			if id == "" {
+			var req struct {
+				ID              string     `json:"id"`
+				ValidAt         *time.Time `json:"valid_at"`
+				KnownAt         *time.Time `json:"known_at"`
+				IncludeEvidence bool       `json:"include_evidence"`
+			}
+			if err := remapInput(input, &req); err != nil {
+				return nil, fmt.Errorf("get_fact: invalid input: %w", err)
+			}
+			if req.ID == "" {
 				return nil, errors.New("get_fact: id is required")
 			}
-			fact, err := deps.FactGet.Get(ctx, profileID, id)
+			fact, err := deps.FactGet.Get(ctx, profileID, req.ID)
 			if err != nil {
 				return nil, err
+			}
+			if !factMatchesTemporalWindow(fact, req.ValidAt, req.KnownAt) {
+				return nil, factservice.ErrFactNotFound
+			}
+			if !req.IncludeEvidence {
+				factCopy := *fact
+				factCopy.Evidence = nil
+				fact = &factCopy
 			}
 			return structToMap(fact)
 		},
@@ -271,11 +293,14 @@ func listFactsTool(deps Dependencies) Tool {
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"limit":     map[string]any{"type": "integer", "minimum": 0, "maximum": 100},
-				"cursor":    schemaString("Pagination cursor from a previous response.", 256),
-				"subject":   schemaString("Filter by subject.", 256),
-				"predicate": schemaString("Filter by predicate.", 128),
-				"status":    schemaEnum([]string{"active", "retracted", "superseded"}),
+				"limit":            map[string]any{"type": "integer", "minimum": 0, "maximum": 100},
+				"cursor":           schemaString("Pagination cursor from a previous response.", 256),
+				"subject":          schemaString("Filter by subject.", 256),
+				"predicate":        schemaString("Filter by predicate.", 128),
+				"status":           schemaEnum([]string{"active", "retracted", "superseded", "needs_revalidation"}),
+				"valid_at":         map[string]any{"type": "string", "format": "date-time"},
+				"known_at":         map[string]any{"type": "string", "format": "date-time"},
+				"include_evidence": map[string]any{"type": "boolean"},
 			},
 			"additionalProperties": false,
 		},
@@ -293,27 +318,41 @@ func listFactsTool(deps Dependencies) Tool {
 			if !available {
 				return nil, ErrToolUnavailable
 			}
-			limit := 20
-			if v, ok := input["limit"].(float64); ok {
-				limit = int(v)
+			var req struct {
+				Limit           int        `json:"limit"`
+				Cursor          string     `json:"cursor"`
+				Subject         string     `json:"subject"`
+				Predicate       string     `json:"predicate"`
+				Status          string     `json:"status"`
+				ValidAt         *time.Time `json:"valid_at"`
+				KnownAt         *time.Time `json:"known_at"`
+				IncludeEvidence bool       `json:"include_evidence"`
 			}
-			cursor, _ := input["cursor"].(string)
-			filters := factservice.FactListFilters{}
-			if v, ok := input["subject"].(string); ok {
-				filters.Subject = v
+			if err := remapInput(input, &req); err != nil {
+				return nil, fmt.Errorf("list_facts: invalid input: %w", err)
 			}
-			if v, ok := input["predicate"].(string); ok {
-				filters.Predicate = v
+			limit := req.Limit
+			if limit == 0 {
+				limit = 20
 			}
-			if v, ok := input["status"].(string); ok {
-				filters.Status = domain.FactStatus(v)
+			filters := factservice.FactListFilters{
+				Subject:   req.Subject,
+				Predicate: req.Predicate,
+				Status:    domain.FactStatus(req.Status),
+				ValidAt:   req.ValidAt,
+				KnownAt:   req.KnownAt,
 			}
-			facts, nextCursor, err := deps.FactList.List(ctx, profileID, filters, limit, cursor)
+			facts, nextCursor, err := deps.FactList.List(ctx, profileID, filters, limit, req.Cursor)
 			if err != nil {
 				return nil, err
 			}
 			items := make([]map[string]any, 0, len(facts))
 			for _, f := range facts {
+				if !req.IncludeEvidence {
+					factCopy := *f
+					factCopy.Evidence = nil
+					f = &factCopy
+				}
 				m, err := structToMap(f)
 				if err != nil {
 					return nil, err
@@ -398,6 +437,29 @@ func detectCommunityTool(deps Dependencies) Tool {
 	}
 }
 
+func factMatchesTemporalWindow(f *domain.Fact, validAt, knownAt *time.Time) bool {
+	if f == nil {
+		return false
+	}
+	if validAt != nil {
+		if f.ValidFrom != nil && f.ValidFrom.After(*validAt) {
+			return false
+		}
+		if f.ValidTo != nil && !f.ValidTo.After(*validAt) {
+			return false
+		}
+	}
+	if knownAt != nil {
+		if f.RecordedAt.After(*knownAt) {
+			return false
+		}
+		if f.RecordedTo != nil && !f.RecordedTo.After(*knownAt) {
+			return false
+		}
+	}
+	return true
+}
+
 // --- schema helpers -------------------------------------------------------
 
 // claimObjectSchema mirrors dto.ClaimResponse. Hand-built to avoid reflection.
@@ -405,29 +467,34 @@ func claimObjectSchema() map[string]any {
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"claim_id":             map[string]any{"type": "string"},
-			"profile_id":           map[string]any{"type": "string"},
-			"subject":              map[string]any{"type": "string"},
-			"predicate":            map[string]any{"type": "string"},
-			"object":               map[string]any{"type": "string"},
-			"modality":             map[string]any{"type": "string"},
-			"polarity":             map[string]any{"type": "string"},
-			"speaker":              map[string]any{"type": "string"},
-			"span_start":           map[string]any{"type": "integer"},
-			"span_end":             map[string]any{"type": "integer"},
-			"valid_from":           map[string]any{"type": "string", "format": "date-time"},
-			"valid_to":             map[string]any{"type": "string", "format": "date-time"},
-			"recorded_at":          map[string]any{"type": "string", "format": "date-time"},
-			"extract_conf":         map[string]any{"type": "number"},
-			"resolution_conf":      map[string]any{"type": "number"},
-			"source_quality":       map[string]any{"type": "number"},
-			"entailment_verdict":   map[string]any{"type": "string"},
-			"status":               map[string]any{"type": "string"},
-			"extraction_model":     map[string]any{"type": "string"},
-			"content_hash":         map[string]any{"type": "string"},
-			"idempotency_key":      map[string]any{"type": "string"},
-			"classification":       map[string]any{"type": "object"},
-			"supported_by":         map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+			"claim_id":           map[string]any{"type": "string"},
+			"profile_id":         map[string]any{"type": "string"},
+			"subject":            map[string]any{"type": "string"},
+			"predicate":          map[string]any{"type": "string"},
+			"object":             map[string]any{"type": "string"},
+			"modality":           map[string]any{"type": "string"},
+			"polarity":           map[string]any{"type": "string"},
+			"speaker":            map[string]any{"type": "string"},
+			"span_start":         map[string]any{"type": "integer"},
+			"span_end":           map[string]any{"type": "integer"},
+			"valid_from":         map[string]any{"type": "string", "format": "date-time"},
+			"valid_to":           map[string]any{"type": "string", "format": "date-time"},
+			"recorded_at":        map[string]any{"type": "string", "format": "date-time"},
+			"recorded_to":        map[string]any{"type": "string", "format": "date-time"},
+			"extract_conf":       map[string]any{"type": "number"},
+			"resolution_conf":    map[string]any{"type": "number"},
+			"source_quality":     map[string]any{"type": "number"},
+			"entailment_verdict": map[string]any{"type": "string"},
+			"status":             map[string]any{"type": "string"},
+			"extraction_model":   map[string]any{"type": "string"},
+			"extraction_version": map[string]any{"type": "string"},
+			"verifier_model":     map[string]any{"type": "string"},
+			"pipeline_run_id":    map[string]any{"type": "string"},
+			"content_hash":       map[string]any{"type": "string"},
+			"idempotency_key":    map[string]any{"type": "string"},
+			"classification":     map[string]any{"type": "object"},
+			"supported_by":       map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+			"evidence":           map[string]any{"type": "array", "items": evidenceObjectSchema()},
 		},
 	}
 }
@@ -447,6 +514,7 @@ func factObjectSchema() map[string]any {
 			"valid_from":                     map[string]any{"type": "string", "format": "date-time"},
 			"valid_to":                       map[string]any{"type": "string", "format": "date-time"},
 			"recorded_at":                    map[string]any{"type": "string", "format": "date-time"},
+			"recorded_to":                    map[string]any{"type": "string", "format": "date-time"},
 			"retracted_at":                   map[string]any{"type": "string", "format": "date-time"},
 			"last_confirmed_at":              map[string]any{"type": "string", "format": "date-time"},
 			"promoted_from_claim_id":         map[string]any{"type": "string"},
@@ -455,7 +523,7 @@ func factObjectSchema() map[string]any {
 			"source_quality":                 map[string]any{"type": "number"},
 			"labels":                         map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
 			"metadata":                       map[string]any{"type": "object"},
+			"evidence":                       map[string]any{"type": "array", "items": evidenceObjectSchema()},
 		},
 	}
 }
-

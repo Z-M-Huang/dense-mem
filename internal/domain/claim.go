@@ -174,5 +174,6 @@ type Claim struct {
 	ClassificationLatticeVersion string         `json:"classification_lattice_version,omitempty"`
 
 	// Graph relationships: IDs of SourceFragments that support this claim.
-	SupportedBy []string `json:"supported_by,omitempty"`
+	SupportedBy []string   `json:"supported_by,omitempty"`
+	Evidence    []Evidence `json:"evidence,omitempty"`
 }

@@ -192,8 +192,10 @@ func (s *promoteClaimServiceImpl) doPromote(ctx context.Context, profileID, clai
 		return nil, fmt.Errorf("%w: predicate=%s", ErrPredicateNotPoliced, claim.Predicate)
 	}
 
-	// Step 4: reject unimplemented policies.
-	if gate.Policy == Versioned || gate.Policy == AppendOnly {
+	// Step 4: reject unknown policies defensively.
+	switch gate.Policy {
+	case MultiValued, SingleCurrent, Versioned, AppendOnly:
+	default:
 		return nil, fmt.Errorf("%w: policy=%s", ErrUnsupportedPolicy, gate.Policy)
 	}
 
@@ -226,6 +228,16 @@ func (s *promoteClaimServiceImpl) doPromote(ctx context.Context, profileID, clai
 		}
 	case SingleCurrent:
 		fact, err = s.handleSingleCurrent(ctx, profileID, claim, gate)
+		if err != nil {
+			return nil, err
+		}
+	case Versioned:
+		fact, err = s.handleVersioned(ctx, profileID, claim, gate)
+		if err != nil {
+			return nil, err
+		}
+	case AppendOnly:
+		fact, err = s.createNewFact(ctx, profileID, claim, gate)
 		if err != nil {
 			return nil, err
 		}
@@ -313,7 +325,7 @@ func (s *promoteClaimServiceImpl) handleSingleCurrent(
 		case math.Abs(diff) <= strengthEpsilon:
 			// Scores are within epsilon — defer to human review.
 			comparableFacts = append(comparableFacts, f)
-		// else: claim TruthScore > fact TruthScore — fact will be superseded.
+			// else: claim TruthScore > fact TruthScore — fact will be superseded.
 		}
 	}
 
@@ -337,6 +349,27 @@ func (s *promoteClaimServiceImpl) handleSingleCurrent(
 	// and create a new active Fact.
 	if err := supersedePath(ctx, s.db, profileID, differingObj, claim.ClaimID, claim.ValidFrom); err != nil {
 		return nil, fmt.Errorf("promote: supersede path: %w", err)
+	}
+	return s.createNewFact(ctx, profileID, claim, gate)
+}
+
+// handleVersioned creates a new fact version and closes any older active
+// versions for the same subject/predicate pair without running contradiction
+// strength comparisons. This is intended for temporally evolving knowledge.
+func (s *promoteClaimServiceImpl) handleVersioned(
+	ctx context.Context,
+	profileID string,
+	claim *domain.Claim,
+	gate PromotionGate,
+) (*domain.Fact, error) {
+	activeFacts, err := findActiveFactsBySubjectPredicate(ctx, s.db, profileID, claim.Subject, claim.Predicate)
+	if err != nil {
+		return nil, fmt.Errorf("promote: find active versioned facts: %w", err)
+	}
+	if len(activeFacts) > 0 {
+		if err := supersedePath(ctx, s.db, profileID, activeFacts, claim.ClaimID, claim.ValidFrom); err != nil {
+			return nil, fmt.Errorf("promote: versioned supersede path: %w", err)
+		}
 	}
 	return s.createNewFact(ctx, profileID, claim, gate)
 }
@@ -679,6 +712,7 @@ RETURN
     f.valid_from                     AS valid_from,
     f.valid_to                       AS valid_to,
     f.recorded_at                    AS recorded_at,
+    f.recorded_to                    AS recorded_to,
     f.retracted_at                   AS retracted_at,
     f.last_confirmed_at              AS last_confirmed_at,
     f.promoted_from_claim_id         AS promoted_from_claim_id,

@@ -150,6 +150,28 @@ func TestDeprecatedEnvAliases(t *testing.T) {
 	})
 }
 
+func TestLookupRuntimeEnv_IncludesBaseURL(t *testing.T) {
+	env := map[string]string{
+		"DENSE_MEM_PROFILE_ID": "profile-1",
+		"DENSE_MEM_API_KEY":    "key-1",
+		"DENSE_MEM_URL":        "http://dense-mem.test",
+	}
+	var warn bytes.Buffer
+	profileID, apiKey, baseURL := LookupRuntimeEnv(func(k string) string { return env[k] }, &warn)
+	if profileID != "profile-1" {
+		t.Errorf("profileID = %q; want profile-1", profileID)
+	}
+	if apiKey != "key-1" {
+		t.Errorf("apiKey = %q; want key-1", apiKey)
+	}
+	if baseURL != "http://dense-mem.test" {
+		t.Errorf("baseURL = %q; want http://dense-mem.test", baseURL)
+	}
+	if warn.Len() != 0 {
+		t.Errorf("unexpected warnings: %q", warn.String())
+	}
+}
+
 // testLogger returns a LogProvider that writes to a bytes.Buffer so tests can
 // assert the server never writes diagnostics to the stdout writer.
 func testLogger(t *testing.T) (observability.LogProvider, *bytes.Buffer) {

@@ -27,16 +27,21 @@ func ToClaimResponse(c *domain.Claim, _ string) *dto.ClaimResponse {
 		ValidFrom:         c.ValidFrom,
 		ValidTo:           c.ValidTo,
 		RecordedAt:        c.RecordedAt,
+		RecordedTo:        c.RecordedTo,
 		ExtractConf:       c.ExtractConf,
 		ResolutionConf:    c.ResolutionConf,
 		SourceQuality:     c.SourceQuality,
 		EntailmentVerdict: string(c.EntailmentVerdict),
 		Status:            string(c.Status),
 		ExtractionModel:   c.ExtractionModel,
+		ExtractionVersion: c.ExtractionVersion,
+		VerifierModel:     c.VerifierModel,
+		PipelineRunID:     c.PipelineRunID,
 		ContentHash:       c.ContentHash,
 		IdempotencyKey:    c.IdempotencyKey,
 		Classification:    c.Classification,
 		SupportedBy:       c.SupportedBy,
+		Evidence:          toEvidenceResponses(c.Evidence),
 	}
 }
 

@@ -3,7 +3,7 @@
 //
 // A Client is bound to a single (baseURL, apiKey, profileID) triple — matching
 // the "single-profile MCP instance" design decision. Every outgoing request
-// carries X-API-Key and X-Profile-ID headers automatically.
+// carries Authorization: Bearer <key> and X-Profile-ID automatically.
 package mcpclient
 
 import (
@@ -16,7 +16,7 @@ import (
 )
 
 // Client is an HTTP client bound to a single dense-mem base URL, API key, and
-// profile ID. Adapter methods send X-API-Key and X-Profile-ID on every request.
+// profile ID. Adapter methods send Authorization and X-Profile-ID on every request.
 //
 // Security invariant: one Client instance maps to exactly one profile (the
 // "single-profile MCP instance" plan key decision). The profileID stored at
@@ -88,9 +88,9 @@ func (c *Client) newRequest(ctx context.Context, method, path, profileID string,
 		return nil, fmt.Errorf("mcpclient: new request: %w", err)
 	}
 
-	// Security invariant: both auth headers are set on every request.
-	// X-API-Key authenticates the client; X-Profile-ID scopes the operation.
-	req.Header.Set("X-API-Key", c.apiKey)
+	// Security invariant: Authorization authenticates the client and
+	// X-Profile-ID scopes the operation.
+	req.Header.Set("Authorization", "Bearer "+c.apiKey)
 	req.Header.Set("X-Profile-ID", profileID)
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")

@@ -120,7 +120,14 @@ MATCH (sf:SourceFragment {profile_id: $profileId, fragment_id: edge.fragment_id}
 MERGE (c)-[r:SUPPORTED_BY {profile_id: $profileId, fragment_id: edge.fragment_id}]->(sf)
 ON CREATE SET
     r.extracted_at = edge.extracted_at,
-    r.extract_conf = edge.extract_conf`
+    r.extract_conf = edge.extract_conf,
+    r.speaker = edge.speaker,
+    r.span_start = edge.span_start,
+    r.span_end = edge.span_end,
+    r.extraction_model = edge.extraction_model,
+    r.extraction_version = edge.extraction_version,
+    r.pipeline_run_id = edge.pipeline_run_id,
+    r.authority = edge.authority`
 
 // Create persists a new claim scoped to profileID.
 //
@@ -254,13 +261,14 @@ func (s *createClaimServiceImpl) Create(ctx context.Context, profileID string, c
 		ContentHash:    contentHash,
 		IdempotencyKey: claim.IdempotencyKey,
 		// Classification computed via lattice.
-		Classification:               mergedClass,
+		Classification: mergedClass,
 		// "v1" is the canonical lattice version. DefaultLattice (consumed by
 		// support.go in this package) is built against this schema version.
 		ClassificationLatticeVersion: "v1",
 		// Supporting fragment IDs.
 		SupportedBy: claim.SupportedBy,
 	}
+	newClaim.Evidence = make([]domain.Evidence, 0, len(support.Fragments))
 
 	// Step 8: persist to graph.
 	//
@@ -275,10 +283,29 @@ func (s *createClaimServiceImpl) Create(ctx context.Context, profileID string, c
 	// written by the ON CREATE SET clause in createClaimCypher.
 	edges := make([]map[string]any, 0, len(support.Fragments))
 	for _, frag := range support.Fragments {
+		evidence := domain.Evidence{
+			FragmentID:        frag.FragmentID,
+			Speaker:           newClaim.Speaker,
+			SpanStart:         newClaim.SpanStart,
+			SpanEnd:           newClaim.SpanEnd,
+			ExtractConf:       newClaim.ExtractConf,
+			ExtractionModel:   newClaim.ExtractionModel,
+			ExtractionVersion: newClaim.ExtractionVersion,
+			PipelineRunID:     newClaim.PipelineRunID,
+			Authority:         frag.Authority,
+		}
+		newClaim.Evidence = append(newClaim.Evidence, evidence)
 		edges = append(edges, map[string]any{
-			"fragment_id":  frag.FragmentID,
-			"extracted_at": newClaim.RecordedAt,
-			"extract_conf": newClaim.ExtractConf,
+			"fragment_id":        frag.FragmentID,
+			"extracted_at":       newClaim.RecordedAt,
+			"extract_conf":       newClaim.ExtractConf,
+			"speaker":            newClaim.Speaker,
+			"span_start":         newClaim.SpanStart,
+			"span_end":           newClaim.SpanEnd,
+			"extraction_model":   newClaim.ExtractionModel,
+			"extraction_version": newClaim.ExtractionVersion,
+			"pipeline_run_id":    newClaim.PipelineRunID,
+			"authority":          string(frag.Authority),
 		})
 	}
 

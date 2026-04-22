@@ -18,6 +18,7 @@ func ToFragmentResponse(f *domain.Fragment) *dto.FragmentResponse {
 		Content:             f.Content,
 		SourceType:          string(f.SourceType),
 		Source:              f.Source,
+		Authority:           string(f.Authority),
 		Labels:              f.Labels,
 		Metadata:            f.Metadata,
 		ContentHash:         f.ContentHash,

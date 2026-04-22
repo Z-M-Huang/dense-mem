@@ -76,8 +76,12 @@ func TestGenerator_SecuritySchemesPresent(t *testing.T) {
 	if !ok {
 		t.Fatalf("securitySchemes missing")
 	}
-	if _, has := ss["ApiKeyAuth"]; !has {
-		t.Errorf("ApiKeyAuth scheme missing")
+	bearer, has := ss["BearerAuth"].(map[string]any)
+	if !has {
+		t.Fatalf("BearerAuth scheme missing")
+	}
+	if bearer["type"] != "http" || bearer["scheme"] != "bearer" {
+		t.Errorf("BearerAuth = %#v; want http bearer scheme", bearer)
 	}
 	if _, has := ss["ProfileHeader"]; !has {
 		t.Errorf("ProfileHeader scheme missing")

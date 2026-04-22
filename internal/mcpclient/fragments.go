@@ -49,9 +49,15 @@ func (a *fragmentCreateAdapter) Create(ctx context.Context, profileID string, re
 	}
 
 	duplicate := res.Header.Get("X-Idempotent-Replay") == "true"
+	fragment := fragmentFromResponse(&resp, profileID)
+	duplicateOf := ""
+	if duplicate {
+		duplicateOf = fragment.FragmentID
+	}
 	return &fragmentservice.CreateResult{
-		Fragment:  fragmentFromResponse(&resp, profileID),
-		Duplicate: duplicate,
+		Fragment:    fragment,
+		Duplicate:   duplicate,
+		DuplicateOf: duplicateOf,
 	}, nil
 }
 
@@ -170,6 +176,7 @@ func fragmentFromResponse(r *httpDto.FragmentResponse, profileID string) *domain
 		Content:             r.Content,
 		SourceType:          domain.SourceType(r.SourceType),
 		Source:              r.Source,
+		Authority:           domain.Authority(r.Authority),
 		Labels:              r.Labels,
 		Metadata:            r.Metadata,
 		ContentHash:         r.ContentHash,

@@ -134,6 +134,10 @@ func knowledgeSchemas() map[string]any {
 					"type":   "string",
 					"format": "date-time",
 				},
+				"recorded_to": map[string]any{
+					"type":   "string",
+					"format": "date-time",
+				},
 				"extract_conf": map[string]any{
 					"type":   "number",
 					"format": "float",
@@ -158,6 +162,15 @@ func knowledgeSchemas() map[string]any {
 				"extraction_model": map[string]any{
 					"type": "string",
 				},
+				"extraction_version": map[string]any{
+					"type": "string",
+				},
+				"verifier_model": map[string]any{
+					"type": "string",
+				},
+				"pipeline_run_id": map[string]any{
+					"type": "string",
+				},
 				"content_hash": map[string]any{
 					"type": "string",
 				},
@@ -170,6 +183,10 @@ func knowledgeSchemas() map[string]any {
 				"supported_by": map[string]any{
 					"type":  "array",
 					"items": map[string]any{"type": "string", "format": "uuid"},
+				},
+				"evidence": map[string]any{
+					"type":  "array",
+					"items": knowledgeEvidenceSchema(),
 				},
 			},
 			"required": []string{"claim_id", "profile_id", "subject", "predicate", "object", "modality", "polarity", "span_start", "span_end", "recorded_at", "extract_conf", "resolution_conf", "source_quality", "entailment_verdict", "status", "extraction_model", "content_hash"},
@@ -205,7 +222,7 @@ func knowledgeSchemas() map[string]any {
 				},
 				"status": map[string]any{
 					"type":        "string",
-					"enum":        []string{"active", "retracted", "superseded"},
+					"enum":        []string{"active", "retracted", "superseded", "needs_revalidation"},
 					"description": "Lifecycle state of the fact.",
 				},
 				"truth_score": map[string]any{
@@ -229,6 +246,11 @@ func knowledgeSchemas() map[string]any {
 					"type":        "string",
 					"format":      "date-time",
 					"description": "Timestamp when the fact was recorded in the graph.",
+				},
+				"recorded_to": map[string]any{
+					"type":        "string",
+					"format":      "date-time",
+					"description": "Timestamp when the fact stopped being current in transaction time.",
 				},
 				"retracted_at": map[string]any{
 					"type":        "string",
@@ -268,6 +290,11 @@ func knowledgeSchemas() map[string]any {
 				"metadata": map[string]any{
 					"type":        "object",
 					"description": "Arbitrary key-value metadata attached at promotion time.",
+				},
+				"evidence": map[string]any{
+					"type":        "array",
+					"items":       knowledgeEvidenceSchema(),
+					"description": "Supporting evidence lineage for the fact.",
 				},
 			},
 			"required": []string{"fact_id", "profile_id", "subject", "predicate", "object", "status", "truth_score", "recorded_at", "promoted_from_claim_id", "source_quality"},
@@ -513,6 +540,26 @@ func knowledgeSchemas() map[string]any {
 				},
 			},
 			"required": []string{"id", "profile_id", "member_count"},
+		},
+	}
+}
+
+func knowledgeEvidenceSchema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"fragment_id":        map[string]any{"type": "string", "format": "uuid"},
+			"speaker":            map[string]any{"type": "string"},
+			"span_start":         map[string]any{"type": "integer"},
+			"span_end":           map[string]any{"type": "integer"},
+			"extract_conf":       map[string]any{"type": "number", "format": "float"},
+			"extraction_model":   map[string]any{"type": "string"},
+			"extraction_version": map[string]any{"type": "string"},
+			"pipeline_run_id":    map[string]any{"type": "string"},
+			"authority": map[string]any{
+				"type": "string",
+				"enum": []string{"authoritative", "primary", "secondary", "inferred", "unknown"},
+			},
 		},
 	}
 }

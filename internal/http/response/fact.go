@@ -22,6 +22,7 @@ func ToFactResponse(f *domain.Fact) *dto.FactResponse {
 		ValidFrom:                    f.ValidFrom,
 		ValidTo:                      f.ValidTo,
 		RecordedAt:                   f.RecordedAt,
+		RecordedTo:                   f.RecordedTo,
 		RetractedAt:                  f.RetractedAt,
 		LastConfirmedAt:              f.LastConfirmedAt,
 		PromotedFromClaimID:          f.PromotedFromClaimID,
@@ -30,6 +31,7 @@ func ToFactResponse(f *domain.Fact) *dto.FactResponse {
 		SourceQuality:                f.SourceQuality,
 		Labels:                       f.Labels,
 		Metadata:                     f.Metadata,
+		Evidence:                     toEvidenceResponses(f.Evidence),
 	}
 }
 

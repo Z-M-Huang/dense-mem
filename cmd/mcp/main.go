@@ -13,23 +13,28 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/dense-mem/dense-mem/internal/mcp"
+	"github.com/dense-mem/dense-mem/internal/mcpclient"
 	"github.com/dense-mem/dense-mem/internal/observability"
-	"github.com/dense-mem/dense-mem/internal/tools/registry"
 )
 
 func main() {
 	// Resolve env vars, accepting canonical names with fallback to deprecated
 	// aliases. Deprecation warnings are printed to stderr so they appear in
 	// operator logs but never pollute the JSON-RPC stdout channel.
-	profileID, apiKey := mcp.LookupEnv(os.Getenv, os.Stderr)
+	profileID, apiKey, baseURL := mcp.LookupRuntimeEnv(os.Getenv, os.Stderr)
 	if profileID == "" {
 		fmt.Fprintln(os.Stderr, "DENSE_MEM_PROFILE_ID (or deprecated X_PROFILE_ID) is required")
 		os.Exit(2)
 	}
 	if apiKey == "" {
 		fmt.Fprintln(os.Stderr, "DENSE_MEM_API_KEY (or deprecated DENSE_MEM_AUTH_KEY) is required")
+		os.Exit(2)
+	}
+	if baseURL == "" {
+		fmt.Fprintln(os.Stderr, "DENSE_MEM_URL is required")
 		os.Exit(2)
 	}
 
@@ -41,13 +46,19 @@ func main() {
 	}
 	logger := observability.NewWithHandler(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
 
-	// Build the registry through the same entry point the HTTP server uses so
-	// MCP and HTTP always expose the same tool surface (AC-37). Services are
-	// left nil in this minimal binary — tools return ErrToolUnavailable until
-	// the full service bootstrap lands in Unit 25.
-	reg, err := registry.BuildDefault(registry.Dependencies{})
+	httpClient := mcpclient.NewClient(baseURL, apiKey, profileID)
+	bootstrapCtx, bootstrapCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer bootstrapCancel()
+
+	// MCP is an HTTP-backed facade over the live dense-mem server. Tool
+	// metadata comes from GET /api/v1/tools; invokers are bound through the
+	// existing mcpclient service adapters so stdio and HTTP share behavior.
+	reg, err := buildRemoteRegistry(bootstrapCtx, httpClient, profileID)
 	if err != nil {
-		logger.Error("build registry", err)
+		logger.Error("build registry", err,
+			observability.ProfileID(profileID),
+			observability.String("base_url", baseURL),
+		)
 		os.Exit(1)
 	}
 
@@ -56,6 +67,7 @@ func main() {
 
 	logger.Info("mcp server starting",
 		observability.ProfileID(profileID),
+		observability.String("base_url", baseURL),
 		observability.String("protocol_version", mcp.ProtocolVersion),
 	)
 

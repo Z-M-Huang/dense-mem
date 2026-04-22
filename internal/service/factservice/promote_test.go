@@ -27,10 +27,10 @@ import (
 // Query-level correctness is covered by integration tests; unit tests here
 // focus on decision-tree routing, profileID propagation, and error handling.
 type stubPromoteDB struct {
-	responsesByCall map[int][]map[string]any
-	readErr         error
-	writeTxErr      error
-	callCount       int
+	responsesByCall  map[int][]map[string]any
+	readErr          error
+	writeTxErr       error
+	callCount        int
 	lastWriteProfile string
 }
 
@@ -262,8 +262,8 @@ func TestPromoteHappyPaths(t *testing.T) {
 		existingFactRow["object"] = "Acme Corp" // same object as claim
 		db := &stubPromoteDB{
 			responsesByCall: map[int][]map[string]any{
-				0: {claimRow},       // loadClaim
-				1: {},               // idempotency → empty
+				0: {claimRow},        // loadClaim
+				1: {},                // idempotency → empty
 				2: {existingFactRow}, // findActiveFactsBySubjectPredicate → same object
 			},
 		}
@@ -287,7 +287,7 @@ func TestPromoteHappyPaths(t *testing.T) {
 		existingFactRow := makeFactRow("fact-idem", "Alice", "likes", "active", now)
 		db := &stubPromoteDB{
 			responsesByCall: map[int][]map[string]any{
-				0: {claimRow},       // loadClaim
+				0: {claimRow},        // loadClaim
 				1: {existingFactRow}, // idempotency → fact already exists
 			},
 		}
@@ -328,8 +328,8 @@ func TestPromoteHappyPaths(t *testing.T) {
 		// Lattice fills absent known dimensions with their minima.
 		require.NotNil(t, got.Classification)
 		require.Equal(t, "internal", got.Classification["confidentiality"])
-		require.Equal(t, "ephemeral", got.Classification["retention"])  // lattice minimum
-		require.Equal(t, "none", got.Classification["pii"])              // lattice minimum
+		require.Equal(t, "ephemeral", got.Classification["retention"]) // lattice minimum
+		require.Equal(t, "none", got.Classification["pii"])            // lattice minimum
 	})
 }
 
@@ -435,7 +435,7 @@ func TestPromoteContradictionMatrix(t *testing.T) {
 	makeContradictingFactRow := func(factID string, truthScore float64) map[string]any {
 		now := time.Now().UTC()
 		row := makeFactRow(factID, "Alice", "works_at", "active", now)
-		row["object"] = "Corp Y"    // different from claim object "Corp X"
+		row["object"] = "Corp Y" // different from claim object "Corp X"
 		row["truth_score"] = truthScore
 		return row
 	}
@@ -619,8 +619,8 @@ func TestPromote_ErrorPaths(t *testing.T) {
 		// Here: 0 fragments → count gate fails. max_quality is disabled → quality gate
 		// cannot pass. Both fail → ErrGateRejected.
 		row := makeClaimRow("claim-no-support", "Alice", "likes", "x", string(domain.StatusValidated))
-		row["supported_by"] = []any{}  // count = 0 < 1
-		row["source_quality"] = 0.5    // max_quality gate disabled for likes (threshold=0.0)
+		row["supported_by"] = []any{} // count = 0 < 1
+		row["source_quality"] = 0.5   // max_quality gate disabled for likes (threshold=0.0)
 		db := &stubPromoteDB{
 			responsesByCall: map[int][]map[string]any{
 				0: {row},
@@ -645,15 +645,15 @@ func TestPromote_ErrorPaths(t *testing.T) {
 
 		now := time.Now().UTC()
 		existingFactRow := makeFactRow("fact-strong", "Alice", "works_at", "active", now)
-		existingFactRow["object"] = "Acme Corp"       // different object from claim
-		existingFactRow["truth_score"] = 0.99          // very high existing truth score
+		existingFactRow["object"] = "Acme Corp" // different object from claim
+		existingFactRow["truth_score"] = 0.99   // very high existing truth score
 		existingFactRow["source_quality"] = 0.99
 
 		db := &stubPromoteDB{
 			responsesByCall: map[int][]map[string]any{
 				0: {claimRow},
-				1: {},                   // idempotency → empty
-				2: {existingFactRow},    // find active facts → one differing-object fact
+				1: {},                // idempotency → empty
+				2: {existingFactRow}, // find active facts → one differing-object fact
 			},
 		}
 		svc := newTestService(db, &stubClaimLocker{}, &captureAuditEmitter{}, observability.NewInMemoryDiscoverabilityMetrics())
@@ -677,5 +677,86 @@ func TestPromote_ErrorPaths(t *testing.T) {
 		require.Contains(t, err.Error(), "pg advisory lock timeout")
 		// Error metric emitted for lock failure.
 		require.Equal(t, 1, metrics.PromotionOutcomeCount("error"))
+	})
+}
+
+func TestPromote_AdditionalPolicies(t *testing.T) {
+	ctx := context.Background()
+	const profileID = "00000000-0000-0000-0000-000000000001"
+
+	restoreGate := func(predicate string, gate PromotionGate, ok bool) {
+		if ok {
+			DefaultPromotionGates[predicate] = gate
+		} else {
+			delete(DefaultPromotionGates, predicate)
+		}
+	}
+
+	t.Run("versioned: supersedes older active versions without contradiction rejection", func(t *testing.T) {
+		const predicate = "employment_versioned_test"
+		origGate, hadGate := DefaultPromotionGates[predicate]
+		defer restoreGate(predicate, origGate, hadGate)
+		DefaultPromotionGates[predicate] = PromotionGate{
+			Policy:              Versioned,
+			MinExtractConf:      0.70,
+			MinResolutionConf:   0.60,
+			RequiresAssertion:   true,
+			RequiresEntailed:    true,
+			MinSourceCount:      1,
+			MinMaxSourceQuality: 0.0,
+		}
+
+		claimRow := makeClaimRow("claim-versioned", "Alice", predicate, "Acme Corp", string(domain.StatusValidated))
+		existingFactRow := makeFactRow("fact-old-version", "Alice", predicate, "active", time.Now().UTC())
+		existingFactRow["object"] = "Old Corp"
+
+		db := &stubPromoteDB{
+			responsesByCall: map[int][]map[string]any{
+				0: {claimRow},
+				1: {},
+				2: {existingFactRow},
+			},
+		}
+		svc := newTestService(db, &stubClaimLocker{}, &captureAuditEmitter{}, observability.NewInMemoryDiscoverabilityMetrics())
+
+		got, err := svc.Promote(ctx, profileID, "claim-versioned")
+
+		require.NoError(t, err)
+		require.NotNil(t, got)
+		require.Equal(t, predicate, got.Predicate)
+		require.Equal(t, domain.FactStatusActive, got.Status)
+		require.NotEqual(t, "fact-old-version", got.FactID)
+	})
+
+	t.Run("append_only: creates a new fact without rejecting on prior history", func(t *testing.T) {
+		const predicate = "timeline_append_only_test"
+		origGate, hadGate := DefaultPromotionGates[predicate]
+		defer restoreGate(predicate, origGate, hadGate)
+		DefaultPromotionGates[predicate] = PromotionGate{
+			Policy:              AppendOnly,
+			MinExtractConf:      0.70,
+			MinResolutionConf:   0.60,
+			RequiresAssertion:   true,
+			RequiresEntailed:    true,
+			MinSourceCount:      1,
+			MinMaxSourceQuality: 0.0,
+		}
+
+		claimRow := makeClaimRow("claim-append", "Alice", predicate, "joined_project_x", string(domain.StatusValidated))
+		db := &stubPromoteDB{
+			responsesByCall: map[int][]map[string]any{
+				0: {claimRow},
+				1: {},
+			},
+		}
+		svc := newTestService(db, &stubClaimLocker{}, &captureAuditEmitter{}, observability.NewInMemoryDiscoverabilityMetrics())
+
+		got, err := svc.Promote(ctx, profileID, "claim-append")
+
+		require.NoError(t, err)
+		require.NotNil(t, got)
+		require.Equal(t, predicate, got.Predicate)
+		require.Equal(t, domain.FactStatusActive, got.Status)
+		require.Equal(t, "joined_project_x", got.Object)
 	})
 }

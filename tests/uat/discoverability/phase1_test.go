@@ -233,13 +233,23 @@ func TestUAT11_MCPStdioDiscovery(t *testing.T) {
 	mcpMain := readFile(t, "cmd/mcp/main.go")
 	assert.Contains(t, mcpMain, "X_PROFILE_ID",
 		"MCP must fail fast when X_PROFILE_ID is missing (single-profile instance)")
-	assert.Contains(t, mcpMain, "DENSE_MEM_AUTH",
+	assert.Contains(t, mcpMain, "DENSE_MEM_API_KEY",
 		"MCP must read the dense-mem auth key from env")
-	assert.Contains(t, mcpMain, "registry.BuildDefault",
-		"MCP must reuse the shared registry — no duplicate tool surface (AC-37)")
+	assert.Contains(t, mcpMain, "DENSE_MEM_URL",
+		"MCP must require the dense-mem HTTP base URL")
+	assert.Contains(t, mcpMain, "buildRemoteRegistry",
+		"MCP must bootstrap from the live HTTP tool catalog (AC-37)")
 	// Stdout reserved for JSON-RPC: logs must go to stderr.
 	assert.Contains(t, mcpMain, "os.Stderr",
 		"MCP logs must target stderr; stdout is reserved for JSON-RPC (AC-36)")
+
+	remoteRegistry := readFile(t, "cmd/mcp/remote_registry.go")
+	assert.Contains(t, remoteRegistry, "client.ListTools",
+		"MCP bootstrap must fetch the remote tool catalog")
+	assert.Contains(t, remoteRegistry, "requiredMCPTools",
+		"MCP bootstrap must enforce the required memory tool contract")
+	assert.Contains(t, remoteRegistry, "registry.BuildDefault",
+		"MCP must still reuse the shared registry for local invokers (AC-37)")
 
 	server := readFile(t, "internal/mcp/server.go")
 	assert.Contains(t, server, "ProtocolVersion",

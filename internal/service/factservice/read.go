@@ -50,6 +50,22 @@ func NewGetFactService(reader factReader) GetFactService {
 // indication of whether the fact exists under another profile.
 const getFactCypher = `
 MATCH (f:Fact {profile_id: $profileId, fact_id: $factId})
+OPTIONAL MATCH (f)<-[:PROMOTES_TO {profile_id: $profileId}]-(c:Claim {profile_id: $profileId})
+OPTIONAL MATCH (c)-[r:SUPPORTED_BY {profile_id: $profileId}]->(sf:SourceFragment {profile_id: $profileId})
+WITH f, collect(CASE
+    WHEN sf.fragment_id IS NULL THEN NULL
+    ELSE {
+        fragment_id: sf.fragment_id,
+        speaker: r.speaker,
+        span_start: r.span_start,
+        span_end: r.span_end,
+        extract_conf: r.extract_conf,
+        extraction_model: r.extraction_model,
+        extraction_version: r.extraction_version,
+        pipeline_run_id: r.pipeline_run_id,
+        authority: coalesce(r.authority, sf.authority, 'unknown')
+    }
+END) AS evidence
 RETURN
     f.fact_id                        AS fact_id,
     f.subject                        AS subject,
@@ -60,6 +76,7 @@ RETURN
     f.valid_from                     AS valid_from,
     f.valid_to                       AS valid_to,
     f.recorded_at                    AS recorded_at,
+    f.recorded_to                    AS recorded_to,
     f.retracted_at                   AS retracted_at,
     f.last_confirmed_at              AS last_confirmed_at,
     f.promoted_from_claim_id         AS promoted_from_claim_id,
@@ -67,7 +84,8 @@ RETURN
     f.classification_lattice_version AS classification_lattice_version,
     f.source_quality                 AS source_quality,
     f.labels                         AS labels,
-    f.metadata                       AS metadata`
+    f.metadata                       AS metadata,
+    evidence                         AS evidence`
 
 // Get retrieves the fact identified by factID within profileID.
 //
@@ -136,6 +154,32 @@ func rowToFact(profileID string, row map[string]any) *domain.Fact {
 		metadata = m
 	}
 
+	var evidence []domain.Evidence
+	if raw, ok := row["evidence"].([]any); ok {
+		evidence = make([]domain.Evidence, 0, len(raw))
+		for _, item := range raw {
+			m, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			fragmentID, _ := m["fragment_id"].(string)
+			if fragmentID == "" {
+				continue
+			}
+			evidence = append(evidence, domain.Evidence{
+				FragmentID:        fragmentID,
+				Speaker:           factStrFromMap(m, "speaker"),
+				SpanStart:         factIntFromMap(m, "span_start"),
+				SpanEnd:           factIntFromMap(m, "span_end"),
+				ExtractConf:       factFloat64FromMap(m, "extract_conf"),
+				ExtractionModel:   factStrFromMap(m, "extraction_model"),
+				ExtractionVersion: factStrFromMap(m, "extraction_version"),
+				PipelineRunID:     factStrFromMap(m, "pipeline_run_id"),
+				Authority:         domain.Authority(factStrFromMap(m, "authority")),
+			})
+		}
+	}
+
 	return &domain.Fact{
 		FactID:    strVal("fact_id"),
 		ProfileID: profileID,
@@ -150,6 +194,7 @@ func rowToFact(profileID string, row map[string]any) *domain.Fact {
 		ValidFrom:       timePtr("valid_from"),
 		ValidTo:         timePtr("valid_to"),
 		RecordedAt:      timeVal("recorded_at"),
+		RecordedTo:      timePtr("recorded_to"),
 		RetractedAt:     timePtr("retracted_at"),
 		LastConfirmedAt: timePtr("last_confirmed_at"),
 
@@ -161,5 +206,31 @@ func rowToFact(profileID string, row map[string]any) *domain.Fact {
 		SourceQuality: float64Val("source_quality"),
 		Labels:        labels,
 		Metadata:      metadata,
+		Evidence:      evidence,
 	}
+}
+
+func factStrFromMap(m map[string]any, key string) string {
+	v, _ := m[key].(string)
+	return v
+}
+
+func factIntFromMap(m map[string]any, key string) int {
+	switch v := m[key].(type) {
+	case int64:
+		return int(v)
+	case int:
+		return v
+	}
+	return 0
+}
+
+func factFloat64FromMap(m map[string]any, key string) float64 {
+	switch v := m[key].(type) {
+	case float64:
+		return v
+	case float32:
+		return float64(v)
+	}
+	return 0
 }

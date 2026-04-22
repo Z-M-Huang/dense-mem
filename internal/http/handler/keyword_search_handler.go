@@ -54,8 +54,11 @@ func (h *KeywordSearchHandler) Handle(c echo.Context) error {
 
 	// Convert DTO to service request
 	svcReq := &keywordsearch.KeywordSearchRequest{
-		Query: req.Keywords,
-		Limit: req.Limit,
+		Query:           req.Keywords,
+		Limit:           req.Limit,
+		ValidAt:         req.ValidAt,
+		KnownAt:         req.KnownAt,
+		IncludeEvidence: req.IncludeEvidence,
 	}
 
 	// Execute search

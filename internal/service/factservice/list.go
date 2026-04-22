@@ -23,6 +23,8 @@ type FactListFilters struct {
 	Subject   string
 	Predicate string
 	Status    domain.FactStatus
+	ValidAt   *time.Time
+	KnownAt   *time.Time
 }
 
 // listFactServiceImpl implements ListFactsService.
@@ -105,6 +107,10 @@ MATCH (f:Fact {profile_id: $profileId})
 WHERE ($subject = '' OR f.subject = $subject)
   AND ($predicate = '' OR f.predicate = $predicate)
   AND ($status = '' OR f.status = $status)
+  AND ($validAt IS NULL OR ((f.valid_from IS NULL OR f.valid_from <= $validAt)
+       AND (f.valid_to IS NULL OR f.valid_to > $validAt)))
+  AND ($knownAt IS NULL OR (f.recorded_at <= $knownAt
+       AND (f.recorded_to IS NULL OR f.recorded_to > $knownAt)))
   AND (
     NOT $hasCursor
     OR f.recorded_at < $cursorTime
@@ -120,6 +126,7 @@ RETURN
     f.valid_from                     AS valid_from,
     f.valid_to                       AS valid_to,
     f.recorded_at                    AS recorded_at,
+    f.recorded_to                    AS recorded_to,
     f.retracted_at                   AS retracted_at,
     f.last_confirmed_at              AS last_confirmed_at,
     f.promoted_from_claim_id         AS promoted_from_claim_id,
@@ -159,6 +166,8 @@ func (s *listFactServiceImpl) List(
 		"subject":      filters.Subject,
 		"predicate":    filters.Predicate,
 		"status":       string(filters.Status),
+		"validAt":      filters.ValidAt,
+		"knownAt":      filters.KnownAt,
 		"hasCursor":    hasCursor,
 		"cursorTime":   cur.RecordedAt,
 		"cursorFactID": cur.FactID,

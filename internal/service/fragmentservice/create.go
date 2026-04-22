@@ -124,6 +124,10 @@ func (s *createFragmentService) Create(ctx context.Context, profileID string, re
 	if sourceType == "" {
 		sourceType = domain.SourceTypeManual
 	}
+	authority := domain.Authority(req.Authority)
+	if authority == "" {
+		authority = domain.AuthorityUnknown
+	}
 
 	// Step 2: Compute content hash (AC-20)
 	contentHash := fragmentidentity.ContentHash(req.Content).Hex
@@ -201,6 +205,7 @@ func (s *createFragmentService) Create(ctx context.Context, profileID string, re
 		Content:             req.Content,
 		Source:              req.Source,
 		SourceType:          sourceType,
+		Authority:           authority,
 		Labels:              req.Labels,
 		Metadata:            req.Metadata,
 		ContentHash:         contentHash,
@@ -224,6 +229,7 @@ func (s *createFragmentService) Create(ctx context.Context, profileID string, re
 			idempotency_key: $idempotencyKey,
 			source: $source,
 			source_type: $sourceType,
+			authority: $authority,
 			labels: $labels,
 			metadata: $metadata,
 			embedding: $embedding,
@@ -243,6 +249,7 @@ func (s *createFragmentService) Create(ctx context.Context, profileID string, re
 		"idempotencyKey":      fragment.IdempotencyKey,
 		"source":              fragment.Source,
 		"sourceType":          string(fragment.SourceType),
+		"authority":           string(fragment.Authority),
 		"labels":              fragment.Labels,
 		"metadata":            fragment.Metadata,
 		"embedding":           vec,

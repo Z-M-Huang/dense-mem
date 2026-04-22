@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sort"
 	"strconv"
+	"time"
 )
 
 const (
@@ -76,10 +77,13 @@ func (h *SearchHit) GetProfileID() string {
 
 // SemanticSearchRequest represents the request for semantic search.
 type SemanticSearchRequest struct {
-	Embedding  []float32 `json:"embedding"`
-	Query      string    `json:"query,omitempty"`   // Optional, for logging/debugging
-	Limit      int       `json:"limit"`
-	Threshold  float64   `json:"threshold,omitempty"` // Optional similarity threshold
+	Embedding       []float32  `json:"embedding"`
+	Query           string     `json:"query,omitempty"` // Optional, for logging/debugging
+	Limit           int        `json:"limit"`
+	Threshold       float64    `json:"threshold,omitempty"` // Optional similarity threshold
+	ValidAt         *time.Time `json:"valid_at,omitempty"`
+	KnownAt         *time.Time `json:"known_at,omitempty"`
+	IncludeEvidence bool       `json:"include_evidence,omitempty"`
 }
 
 // SemanticSearchRequestInterface is the companion interface for SemanticSearchRequest.
@@ -173,8 +177,8 @@ type SemanticSearchServiceInterface interface {
 
 // semanticSearchService implements SemanticSearchService.
 type semanticSearchService struct {
-	embeddingSearcher    EmbeddingSearcherInterface
-	embeddingDimensions  int
+	embeddingSearcher   EmbeddingSearcherInterface
+	embeddingDimensions int
 }
 
 // Ensure semanticSearchService implements SemanticSearchService.

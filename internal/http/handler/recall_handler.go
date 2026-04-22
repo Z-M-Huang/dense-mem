@@ -65,8 +65,11 @@ func (h *RecallHandler) Handle(c echo.Context) error {
 	}
 
 	hits, err := h.svc.Recall(ctx, profileID.String(), recallservice.RecallRequest{
-		Query: req.Query,
-		Limit: req.Limit,
+		Query:           req.Query,
+		Limit:           req.Limit,
+		ValidAt:         req.ValidAt,
+		KnownAt:         req.KnownAt,
+		IncludeEvidence: req.IncludeEvidence,
 	})
 	if err != nil {
 		if errors.Is(err, recallservice.ErrEmbeddingUnavailable) {

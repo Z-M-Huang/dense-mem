@@ -1,10 +1,15 @@
 package dto
 
+import "time"
+
 // RecallRequest represents query parameters for GET /api/v1/recall.
 // The query parameter is the natural-language query; limit caps returned hits.
 type RecallRequest struct {
-	Query string `query:"query" validate:"required,max=512"`
-	Limit int    `query:"limit" validate:"min=0,max=50"`
+	Query           string     `query:"query" validate:"required,max=512"`
+	Limit           int        `query:"limit" validate:"min=0,max=50"`
+	ValidAt         *time.Time `query:"valid_at"`
+	KnownAt         *time.Time `query:"known_at"`
+	IncludeEvidence bool       `query:"include_evidence"`
 }
 
 // RecallHitResponse is one ranked result returned by the recall endpoint.

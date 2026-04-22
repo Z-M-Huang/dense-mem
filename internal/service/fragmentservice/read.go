@@ -52,6 +52,7 @@ func (s *getFragmentService) GetByID(ctx context.Context, profileID, fragmentID 
 		       sf.content AS content,
 		       sf.source AS source,
 		       sf.source_type AS source_type,
+		       sf.authority AS authority,
 		       sf.labels AS labels,
 		       sf.metadata AS metadata,
 		       sf.content_hash AS content_hash,
@@ -99,6 +100,11 @@ func mapRowToFragment(row map[string]any) *domain.Fragment {
 	}
 
 	f.SourceType = neo4j.CoerceSourceType(row["source_type"])
+	if v, ok := row["authority"].(string); ok && v != "" {
+		f.Authority = domain.Authority(v)
+	} else {
+		f.Authority = domain.AuthorityUnknown
+	}
 
 	if v, ok := row["labels"].([]any); ok {
 		labels := make([]string, 0, len(v))

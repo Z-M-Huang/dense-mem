@@ -2,9 +2,7 @@ package factservice
 
 // Policy defines how fact promotion behaves for a given predicate.
 //
-// R2 (binding): All four policy values are defined here. Only SingleCurrent
-// and MultiValued are implemented in v1. Attempting to use Versioned or
-// AppendOnly returns ErrUnsupportedPolicy.
+// R2 (binding): All four policy values are defined here.
 type Policy string
 
 const (
@@ -17,12 +15,12 @@ const (
 	// (subject, predicate) pair. No contradiction logic runs.
 	MultiValued Policy = "multi_valued"
 
-	// Versioned is defined by the spec but is not implemented in v1.
-	// Promote calls on predicates with this policy return ErrUnsupportedPolicy.
+	// Versioned creates a new fact version and closes the transaction/valid time
+	// window on older active versions without contradiction strength checks.
 	Versioned Policy = "versioned"
 
-	// AppendOnly is defined by the spec but is not implemented in v1.
-	// Promote calls on predicates with this policy return ErrUnsupportedPolicy.
+	// AppendOnly creates a new immutable fact record without replacing prior
+	// facts for the same subject/predicate pair.
 	AppendOnly Policy = "append_only"
 )
 

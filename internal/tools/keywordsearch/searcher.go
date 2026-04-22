@@ -4,12 +4,12 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 
 	neo4jstore "github.com/dense-mem/dense-mem/internal/storage/neo4j"
 )
-
 
 // neo4jFragmentSearcher implements FragmentSearcherInterface using Neo4j.
 type neo4jFragmentSearcher struct {
@@ -109,7 +109,8 @@ func (s *neo4jFactSearcher) SearchPredicate(ctx context.Context, profileID strin
 	cypherQuery := `
 		CALL db.index.fulltext.queryNodes('fact_predicate_idx', $searchQuery) YIELD node AS r, score
 		WHERE r.profile_id = $profileId
-		RETURN r.fact_id AS fact_id, r.predicate AS predicate, r.labels AS labels, r.metadata AS metadata, r.profile_id AS profile_id, score
+		RETURN r.fact_id AS fact_id, r.predicate AS predicate, r.labels AS labels, r.metadata AS metadata, r.profile_id AS profile_id,
+		       r.valid_from AS valid_from, r.valid_to AS valid_to, r.recorded_at AS recorded_at, r.recorded_to AS recorded_to, score
 		LIMIT $limit
 	`
 
@@ -136,12 +137,16 @@ func (s *neo4jFactSearcher) SearchPredicate(ctx context.Context, profileID strin
 	searchResults := make([]FactSearchResult, len(results))
 	for i, row := range results {
 		searchResults[i] = FactSearchResult{
-			FactID:    getString(row, "fact_id"),
-			Predicate: getString(row, "predicate"),
-			Score:     getFloat64Val(row, "score"),
-			Labels:    getLabels(row, "labels"),
-			Metadata:  getMetadata(row, "metadata"),
-			ProfileID: getString(row, "profile_id"),
+			FactID:     getString(row, "fact_id"),
+			Predicate:  getString(row, "predicate"),
+			Score:      getFloat64Val(row, "score"),
+			Labels:     getLabels(row, "labels"),
+			Metadata:   getMetadata(row, "metadata"),
+			ProfileID:  getString(row, "profile_id"),
+			ValidFrom:  getTimePtr(row, "valid_from"),
+			ValidTo:    getTimePtr(row, "valid_to"),
+			RecordedAt: getTimeVal(row, "recorded_at"),
+			RecordedTo: getTimePtr(row, "recorded_to"),
 		}
 	}
 
@@ -194,4 +199,18 @@ func getFloat64Val(row map[string]any, key string) float64 {
 		}
 	}
 	return 0.0
+}
+
+func getTimePtr(row map[string]any, key string) *time.Time {
+	if val, ok := row[key].(time.Time); ok {
+		return &val
+	}
+	return nil
+}
+
+func getTimeVal(row map[string]any, key string) time.Time {
+	if val, ok := row[key].(time.Time); ok {
+		return val
+	}
+	return time.Time{}
 }

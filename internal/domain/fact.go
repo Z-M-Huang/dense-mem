@@ -13,12 +13,15 @@ const (
 	FactStatusRetracted FactStatus = "retracted"
 	// FactStatusSuperseded is a fact replaced by a newer promoted fact.
 	FactStatusSuperseded FactStatus = "superseded"
+	// FactStatusNeedsRevalidation is a fact whose remaining support no longer
+	// satisfies the public confidence contract.
+	FactStatusNeedsRevalidation FactStatus = "needs_revalidation"
 )
 
 // IsValid reports whether s is a recognised FactStatus value.
 func (s FactStatus) IsValid() bool {
 	switch s {
-	case FactStatusActive, FactStatusRetracted, FactStatusSuperseded:
+	case FactStatusActive, FactStatusRetracted, FactStatusSuperseded, FactStatusNeedsRevalidation:
 		return true
 	}
 	return false
@@ -53,6 +56,7 @@ type Fact struct {
 	ValidFrom       *time.Time `json:"valid_from,omitempty"`
 	ValidTo         *time.Time `json:"valid_to,omitempty"`
 	RecordedAt      time.Time  `json:"recorded_at"`
+	RecordedTo      *time.Time `json:"recorded_to,omitempty"`
 	RetractedAt     *time.Time `json:"retracted_at,omitempty"`
 	LastConfirmedAt *time.Time `json:"last_confirmed_at,omitempty"`
 
@@ -62,7 +66,7 @@ type Fact struct {
 	// Classification holds arbitrary key-value labels (e.g. topic, domain)
 	// propagated from the promoting Claim.
 	// Classification must be a structured map, not a string blob.
-	Classification              map[string]any `json:"classification,omitempty"`
+	Classification               map[string]any `json:"classification,omitempty"`
 	ClassificationLatticeVersion string         `json:"classification_lattice_version,omitempty"`
 
 	// SourceQuality is a [0,1] signal inherited from the supporting fragments
@@ -74,4 +78,7 @@ type Fact struct {
 
 	// Metadata holds arbitrary additional data not captured by typed fields.
 	Metadata map[string]any `json:"metadata,omitempty"`
+
+	// Evidence exposes the supporting lineage used to ground the fact.
+	Evidence []Evidence `json:"evidence,omitempty"`
 }

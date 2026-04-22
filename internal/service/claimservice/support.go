@@ -52,7 +52,8 @@ WHERE sf.fragment_id IN $fragmentIds
 RETURN sf.fragment_id  AS fragment_id,
        sf.content       AS content,
        sf.source_quality AS source_quality,
-       sf.classification AS classification`
+       sf.classification AS classification,
+       sf.authority AS authority`
 
 // loadSupportingFragments fetches one or more SourceFragment nodes by ID,
 // scoped to profileID. It returns ErrSupportingFragmentMissing when any
@@ -91,6 +92,7 @@ func loadSupportingFragments(
 		sq, _ := row["source_quality"].(float64)
 		// classification is stored as a nested map by the Neo4j driver.
 		classRaw, _ := row["classification"].(map[string]any)
+		authority, _ := row["authority"].(string)
 
 		found[fid] = struct{}{}
 
@@ -110,6 +112,7 @@ func loadSupportingFragments(
 			Content:        content,
 			SourceQuality:  sq,
 			Classification: classRaw,
+			Authority:      domain.Authority(authority),
 		})
 
 		if sq > maxSQ {

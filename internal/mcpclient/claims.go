@@ -264,15 +264,41 @@ func claimFromResponse(r *httpDto.ClaimResponse) *domain.Claim {
 		ValidFrom:         r.ValidFrom,
 		ValidTo:           r.ValidTo,
 		RecordedAt:        r.RecordedAt,
+		RecordedTo:        r.RecordedTo,
 		ExtractConf:       r.ExtractConf,
 		ResolutionConf:    r.ResolutionConf,
 		SourceQuality:     r.SourceQuality,
 		EntailmentVerdict: domain.EntailmentVerdict(r.EntailmentVerdict),
 		Status:            domain.ClaimStatus(r.Status),
 		ExtractionModel:   r.ExtractionModel,
+		ExtractionVersion: r.ExtractionVersion,
+		VerifierModel:     r.VerifierModel,
+		PipelineRunID:     r.PipelineRunID,
 		ContentHash:       r.ContentHash,
 		IdempotencyKey:    r.IdempotencyKey,
 		Classification:    r.Classification,
 		SupportedBy:       r.SupportedBy,
+		Evidence:          evidenceFromResponse(r.Evidence),
 	}
+}
+
+func evidenceFromResponse(items []httpDto.Evidence) []domain.Evidence {
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]domain.Evidence, 0, len(items))
+	for _, item := range items {
+		out = append(out, domain.Evidence{
+			FragmentID:        item.FragmentID,
+			Speaker:           item.Speaker,
+			SpanStart:         item.SpanStart,
+			SpanEnd:           item.SpanEnd,
+			ExtractConf:       item.ExtractConf,
+			ExtractionModel:   item.ExtractionModel,
+			ExtractionVersion: item.ExtractionVersion,
+			PipelineRunID:     item.PipelineRunID,
+			Authority:         domain.Authority(item.Authority),
+		})
+	}
+	return out
 }

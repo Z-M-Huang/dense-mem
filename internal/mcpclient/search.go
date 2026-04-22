@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/dense-mem/dense-mem/internal/tools/graphquery"
 	"github.com/dense-mem/dense-mem/internal/tools/keywordsearch"
@@ -28,14 +29,24 @@ func NewKeywordSearch(c *Client) keywordsearch.KeywordSearchService {
 // keywordSearchHTTPRequest is the wire format for POST /api/v1/tools/keyword-search.
 // The HTTP handler maps req.Keywords → svc.Query, so we invert that mapping here.
 type keywordSearchHTTPRequest struct {
-	Keywords string `json:"keywords"`
-	Limit    int    `json:"limit"`
+	Keywords        string `json:"keywords"`
+	Limit           int    `json:"limit"`
+	ValidAt         string `json:"valid_at,omitempty"`
+	KnownAt         string `json:"known_at,omitempty"`
+	IncludeEvidence bool   `json:"include_evidence,omitempty"`
 }
 
 func (a *keywordSearchAdapter) Search(ctx context.Context, profileID string, req *keywordsearch.KeywordSearchRequest) (*keywordsearch.KeywordSearchResult, error) {
 	httpBody := keywordSearchHTTPRequest{
-		Keywords: req.Query,
-		Limit:    req.Limit,
+		Keywords:        req.Query,
+		Limit:           req.Limit,
+		IncludeEvidence: req.IncludeEvidence,
+	}
+	if req.ValidAt != nil {
+		httpBody.ValidAt = req.ValidAt.UTC().Format(time.RFC3339)
+	}
+	if req.KnownAt != nil {
+		httpBody.KnownAt = req.KnownAt.UTC().Format(time.RFC3339)
 	}
 
 	httpReq, err := a.c.newRequest(ctx, http.MethodPost, "/api/v1/tools/keyword-search", profileID, httpBody)

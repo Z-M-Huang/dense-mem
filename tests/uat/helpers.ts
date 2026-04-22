@@ -10,6 +10,9 @@ export const BASE_URL = process.env.BASE_URL || 'http://localhost:8080';
 export const API_KEY = process.env.API_KEY || 'test-api-key';
 export const ADMIN_KEY = process.env.ADMIN_KEY || 'test-admin-key';
 export const PROFILE_ID = process.env.PROFILE_ID || 'test-profile-id';
+export const DENSE_MEM_URL = process.env.DENSE_MEM_URL || BASE_URL;
+export const DENSE_MEM_API_KEY = process.env.DENSE_MEM_API_KEY || API_KEY;
+export const DENSE_MEM_PROFILE_ID = process.env.DENSE_MEM_PROFILE_ID || PROFILE_ID;
 
 const NEO4J_URI = process.env.NEO4J_URI || 'bolt://localhost:7687';
 const NEO4J_USER = process.env.NEO4J_USER || 'neo4j';
@@ -107,7 +110,8 @@ export interface McpHandle {
 
 /**
  * Spawn the dense-mem MCP server binary for MCP UAT tests.
- * The binary is expected to read JSON-RPC from stdin and write to stdout.
+ * The MCP binary is an HTTP-backed facade and requires DENSE_MEM_URL,
+ * DENSE_MEM_API_KEY, and DENSE_MEM_PROFILE_ID.
  */
 export async function spawnMcp(
   env: Record<string, string> = {},

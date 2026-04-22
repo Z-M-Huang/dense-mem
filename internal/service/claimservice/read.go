@@ -60,7 +60,7 @@ func NewGetClaimService(reader claimReader, logger *slog.Logger) GetClaimService
 // profile.
 const getClaimCypher = `
 MATCH (c:Claim {profile_id: $profileId, claim_id: $claimId})
-OPTIONAL MATCH (c)-[:SUPPORTED_BY {profile_id: $profileId}]->(sf:SourceFragment {profile_id: $profileId})
+OPTIONAL MATCH (c)-[r:SUPPORTED_BY {profile_id: $profileId}]->(sf:SourceFragment {profile_id: $profileId})
 RETURN
     c.claim_id                        AS claim_id,
     c.subject                         AS subject,
@@ -90,7 +90,21 @@ RETURN
     c.idempotency_key                 AS idempotency_key,
     c.classification                  AS classification,
     c.classification_lattice_version  AS classification_lattice_version,
-    collect(sf.fragment_id)           AS supported_by`
+    collect(sf.fragment_id)           AS supported_by,
+    collect(CASE
+        WHEN sf.fragment_id IS NULL THEN NULL
+        ELSE {
+            fragment_id: sf.fragment_id,
+            speaker: r.speaker,
+            span_start: r.span_start,
+            span_end: r.span_end,
+            extract_conf: r.extract_conf,
+            extraction_model: r.extraction_model,
+            extraction_version: r.extraction_version,
+            pipeline_run_id: r.pipeline_run_id,
+            authority: coalesce(r.authority, sf.authority, 'unknown')
+        }
+    END) AS evidence`
 
 // Get retrieves the claim identified by claimID within profileID.
 //
@@ -176,6 +190,32 @@ func rowToClaim(profileID string, row map[string]any) *domain.Claim {
 		classification = m
 	}
 
+	var evidence []domain.Evidence
+	if raw, ok := row["evidence"].([]any); ok {
+		evidence = make([]domain.Evidence, 0, len(raw))
+		for _, item := range raw {
+			m, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			fragmentID, _ := m["fragment_id"].(string)
+			if fragmentID == "" {
+				continue
+			}
+			evidence = append(evidence, domain.Evidence{
+				FragmentID:        fragmentID,
+				Speaker:           strFromMap(m, "speaker"),
+				SpanStart:         intFromMap(m, "span_start"),
+				SpanEnd:           intFromMap(m, "span_end"),
+				ExtractConf:       float64FromMap(m, "extract_conf"),
+				ExtractionModel:   strFromMap(m, "extraction_model"),
+				ExtractionVersion: strFromMap(m, "extraction_version"),
+				PipelineRunID:     strFromMap(m, "pipeline_run_id"),
+				Authority:         domain.Authority(strFromMap(m, "authority")),
+			})
+		}
+	}
+
 	return &domain.Claim{
 		ClaimID:   strVal("claim_id"),
 		ProfileID: profileID,
@@ -216,5 +256,31 @@ func rowToClaim(profileID string, row map[string]any) *domain.Claim {
 		ClassificationLatticeVersion: strVal("classification_lattice_version"),
 
 		SupportedBy: supportedBy,
+		Evidence:    evidence,
 	}
+}
+
+func strFromMap(m map[string]any, key string) string {
+	v, _ := m[key].(string)
+	return v
+}
+
+func intFromMap(m map[string]any, key string) int {
+	switch v := m[key].(type) {
+	case int64:
+		return int(v)
+	case int:
+		return v
+	}
+	return 0
+}
+
+func float64FromMap(m map[string]any, key string) float64 {
+	switch v := m[key].(type) {
+	case float64:
+		return v
+	case float32:
+		return float64(v)
+	}
+	return 0
 }

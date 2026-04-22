@@ -48,7 +48,7 @@ func TestKnowledgeToolAdapters(t *testing.T) {
 			RecordedAt:        time.Now(),
 		}
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			require.Equal(t, testAuthToken, r.Header.Get("X-API-Key"), "X-API-Key must be set")
+			require.Equal(t, "Bearer "+testAuthToken, r.Header.Get("Authorization"), "Authorization bearer token must be set")
 			require.Equal(t, profileA, r.Header.Get("X-Profile-ID"), "X-Profile-ID must match caller")
 			require.Equal(t, http.MethodPost, r.Method)
 			w.Header().Set("Content-Type", "application/json")
@@ -102,15 +102,15 @@ func TestKnowledgeToolAdapters(t *testing.T) {
 	// -----------------------------------------------------------------------
 	t.Run("GetClaim_sends_correct_headers_and_returns_claim", func(t *testing.T) {
 		claimResp := httpDto.ClaimResponse{
-			ClaimID:   "claim-002",
-			ProfileID: profileA,
-			Subject:   "water",
-			Predicate: "is",
-			Object:    "wet",
+			ClaimID:    "claim-002",
+			ProfileID:  profileA,
+			Subject:    "water",
+			Predicate:  "is",
+			Object:     "wet",
 			RecordedAt: time.Now(),
 		}
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			require.Equal(t, testAuthToken, r.Header.Get("X-API-Key"))
+			require.Equal(t, "Bearer "+testAuthToken, r.Header.Get("Authorization"))
 			require.Equal(t, profileA, r.Header.Get("X-Profile-ID"))
 			require.Equal(t, http.MethodGet, r.Method)
 			w.Header().Set("Content-Type", "application/json")
@@ -157,7 +157,7 @@ func TestKnowledgeToolAdapters(t *testing.T) {
 			HasMore:    true,
 		}
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			require.Equal(t, testAuthToken, r.Header.Get("X-API-Key"))
+			require.Equal(t, "Bearer "+testAuthToken, r.Header.Get("Authorization"))
 			require.Equal(t, profileA, r.Header.Get("X-Profile-ID"))
 			require.Equal(t, http.MethodGet, r.Method)
 			w.Header().Set("Content-Type", "application/json")
@@ -217,7 +217,7 @@ func TestKnowledgeToolAdapters(t *testing.T) {
 			VerifiedAt:        &now,
 		}
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			require.Equal(t, testAuthToken, r.Header.Get("X-API-Key"))
+			require.Equal(t, "Bearer "+testAuthToken, r.Header.Get("Authorization"))
 			require.Equal(t, profileA, r.Header.Get("X-Profile-ID"))
 			require.Equal(t, http.MethodPost, r.Method)
 			w.Header().Set("Content-Type", "application/json")
@@ -267,7 +267,7 @@ func TestKnowledgeToolAdapters(t *testing.T) {
 			RecordedAt:          time.Now(),
 		}
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			require.Equal(t, testAuthToken, r.Header.Get("X-API-Key"))
+			require.Equal(t, "Bearer "+testAuthToken, r.Header.Get("Authorization"))
 			require.Equal(t, profileA, r.Header.Get("X-Profile-ID"))
 			require.Equal(t, http.MethodPost, r.Method)
 			w.Header().Set("Content-Type", "application/json")
@@ -302,7 +302,7 @@ func TestKnowledgeToolAdapters(t *testing.T) {
 			RecordedAt: time.Now(),
 		}
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			require.Equal(t, testAuthToken, r.Header.Get("X-API-Key"))
+			require.Equal(t, "Bearer "+testAuthToken, r.Header.Get("Authorization"))
 			require.Equal(t, profileA, r.Header.Get("X-Profile-ID"))
 			require.Equal(t, http.MethodGet, r.Method)
 			w.Header().Set("Content-Type", "application/json")
@@ -348,7 +348,7 @@ func TestKnowledgeToolAdapters(t *testing.T) {
 			HasMore:    true,
 		}
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			require.Equal(t, testAuthToken, r.Header.Get("X-API-Key"))
+			require.Equal(t, "Bearer "+testAuthToken, r.Header.Get("Authorization"))
 			require.Equal(t, profileA, r.Header.Get("X-Profile-ID"))
 			require.Equal(t, http.MethodGet, r.Method)
 			w.Header().Set("Content-Type", "application/json")
@@ -403,7 +403,7 @@ func TestKnowledgeToolAdapters(t *testing.T) {
 	// -----------------------------------------------------------------------
 	t.Run("RetractFragment_sends_correct_headers_and_succeeds", func(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			require.Equal(t, testAuthToken, r.Header.Get("X-API-Key"))
+			require.Equal(t, "Bearer "+testAuthToken, r.Header.Get("Authorization"))
 			require.Equal(t, profileA, r.Header.Get("X-Profile-ID"))
 			require.Equal(t, http.MethodPost, r.Method)
 			w.Header().Set("Content-Type", "application/json")
@@ -438,7 +438,7 @@ func TestKnowledgeToolAdapters(t *testing.T) {
 	// -----------------------------------------------------------------------
 	t.Run("DetectCommunity_sends_correct_headers_and_succeeds", func(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			require.Equal(t, testAuthToken, r.Header.Get("X-API-Key"))
+			require.Equal(t, "Bearer "+testAuthToken, r.Header.Get("Authorization"))
 			require.Equal(t, profileA, r.Header.Get("X-Profile-ID"))
 			require.Equal(t, http.MethodPost, r.Method)
 			w.Header().Set("Content-Type", "application/json")
@@ -520,13 +520,13 @@ func TestKnowledgeToolAdapters(t *testing.T) {
 // Compile-time interface checks: ensure every new adapter satisfies its service interface.
 // These fail at build time (not just test time) if a signature drifts.
 var (
-	_ claimservice.CreateClaimService        = (*claimCreateAdapter)(nil)
-	_ claimservice.GetClaimService           = (*claimGetAdapter)(nil)
-	_ claimservice.ListClaimsService         = (*claimListAdapter)(nil)
-	_ claimservice.VerifyClaimService        = (*claimVerifyAdapter)(nil)
-	_ factservice.PromoteClaimService        = (*claimPromoteAdapter)(nil)
-	_ factservice.GetFactService             = (*factGetAdapter)(nil)
-	_ factservice.ListFactsService           = (*factListAdapter)(nil)
-	_ fragmentservice.RetractFragmentService = (*fragmentRetractAdapter)(nil)
+	_ claimservice.CreateClaimService         = (*claimCreateAdapter)(nil)
+	_ claimservice.GetClaimService            = (*claimGetAdapter)(nil)
+	_ claimservice.ListClaimsService          = (*claimListAdapter)(nil)
+	_ claimservice.VerifyClaimService         = (*claimVerifyAdapter)(nil)
+	_ factservice.PromoteClaimService         = (*claimPromoteAdapter)(nil)
+	_ factservice.GetFactService              = (*factGetAdapter)(nil)
+	_ factservice.ListFactsService            = (*factListAdapter)(nil)
+	_ fragmentservice.RetractFragmentService  = (*fragmentRetractAdapter)(nil)
 	_ communityservice.DetectCommunityService = (*communityDetectAdapter)(nil)
 )

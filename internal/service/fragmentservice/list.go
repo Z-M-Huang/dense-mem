@@ -114,6 +114,7 @@ func (s *listFragmentsService) List(ctx context.Context, profileID string, opts 
 		       sf.content AS content,
 		       sf.source AS source,
 		       sf.source_type AS source_type,
+		       sf.authority AS authority,
 		       sf.labels AS labels,
 		       sf.metadata AS metadata,
 		       sf.content_hash AS content_hash,

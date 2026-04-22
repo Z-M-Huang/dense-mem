@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"time"
 
 	"github.com/dense-mem/dense-mem/internal/domain"
 	httpDto "github.com/dense-mem/dense-mem/internal/http/dto"
@@ -135,6 +136,12 @@ func (a *factListAdapter) List(ctx context.Context, profileID string, filters fa
 	if filters.Status != "" {
 		q.Set("status", string(filters.Status))
 	}
+	if filters.ValidAt != nil {
+		q.Set("valid_at", filters.ValidAt.UTC().Format(time.RFC3339))
+	}
+	if filters.KnownAt != nil {
+		q.Set("known_at", filters.KnownAt.UTC().Format(time.RFC3339))
+	}
 
 	path := "/api/v1/facts"
 	if len(q) > 0 {
@@ -184,6 +191,7 @@ func factFromResponse(r *httpDto.FactResponse) *domain.Fact {
 		ValidFrom:                    r.ValidFrom,
 		ValidTo:                      r.ValidTo,
 		RecordedAt:                   r.RecordedAt,
+		RecordedTo:                   r.RecordedTo,
 		RetractedAt:                  r.RetractedAt,
 		LastConfirmedAt:              r.LastConfirmedAt,
 		PromotedFromClaimID:          r.PromotedFromClaimID,
@@ -192,5 +200,6 @@ func factFromResponse(r *httpDto.FactResponse) *domain.Fact {
 		SourceQuality:                r.SourceQuality,
 		Labels:                       r.Labels,
 		Metadata:                     r.Metadata,
+		Evidence:                     evidenceFromResponse(r.Evidence),
 	}
 }

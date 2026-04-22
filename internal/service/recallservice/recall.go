@@ -78,8 +78,11 @@ var ErrKeywordUnavailable = errors.New("recall: keyword search unavailable")
 // HTTP handlers via the shared BindAndValidate middleware; the service also
 // enforces the clamp + non-empty invariants defensively.
 type RecallRequest struct {
-	Query string `json:"query" validate:"required,max=512"`
-	Limit int    `json:"limit" validate:"gte=0,lte=50"`
+	Query           string     `json:"query" validate:"required,max=512"`
+	Limit           int        `json:"limit" validate:"gte=0,lte=50"`
+	ValidAt         *time.Time `json:"valid_at,omitempty"`
+	KnownAt         *time.Time `json:"known_at,omitempty"`
+	IncludeEvidence bool       `json:"include_evidence,omitempty"`
 }
 
 // RecallHit is one merged, hydrated recall result.
@@ -94,8 +97,8 @@ type RecallRequest struct {
 // and preserved for backward compatibility.
 type RecallHit struct {
 	Fragment     *domain.Fragment `json:"fragment,omitempty"`
-	Claim        *domain.Claim    `json:"claim,omitempty"`  // tier 1.5
-	Fact         *domain.Fact     `json:"fact,omitempty"`   // tier 1
+	Claim        *domain.Claim    `json:"claim,omitempty"` // tier 1.5
+	Fact         *domain.Fact     `json:"fact,omitempty"`  // tier 1
 	Tier         string           `json:"tier,omitempty"`
 	Score        float64          `json:"score,omitempty"`
 	SemanticRank int              `json:"semantic_rank"` // 1-based; 0 if absent from that branch
@@ -151,15 +154,15 @@ type ClaimsLister interface {
 
 // recallService implements RecallService.
 type recallService struct {
-	embedder    EmbeddingProvider
-	semantic    SemanticSearcher
-	keyword     KeywordSearcher
-	hydrator    FragmentHydrator
-	factsLister FactsLister   // optional; nil → tier-1 results omitted
+	embedder     EmbeddingProvider
+	semantic     SemanticSearcher
+	keyword      KeywordSearcher
+	hydrator     FragmentHydrator
+	factsLister  FactsLister  // optional; nil → tier-1 results omitted
 	claimsLister ClaimsLister // optional; nil → tier-1.5 results omitted
-	claimWeight float64       // weight applied to claim scores (default DefaultRecallValidatedClaimWeight)
-	logger      observability.LogProvider
-	metrics     observability.DiscoverabilityMetrics
+	claimWeight  float64      // weight applied to claim scores (default DefaultRecallValidatedClaimWeight)
+	logger       observability.LogProvider
+	metrics      observability.DiscoverabilityMetrics
 }
 
 var _ RecallService = (*recallService)(nil)
@@ -208,15 +211,15 @@ func NewRecallServiceWithTiers(
 		claimWeight = DefaultRecallValidatedClaimWeight
 	}
 	return &recallService{
-		embedder:    embedder,
-		semantic:    semantic,
-		keyword:     keyword,
-		hydrator:    hydrator,
-		factsLister: factsLister,
+		embedder:     embedder,
+		semantic:     semantic,
+		keyword:      keyword,
+		hydrator:     hydrator,
+		factsLister:  factsLister,
 		claimsLister: claimsLister,
-		claimWeight: claimWeight,
-		logger:      logger,
-		metrics:     metrics,
+		claimWeight:  claimWeight,
+		logger:       logger,
+		metrics:      metrics,
 	}
 }
 
@@ -322,7 +325,7 @@ func (s *recallService) Recall(ctx context.Context, profileID string, req Recall
 	}
 
 	// Collect tier-1 (active facts) and tier-1.5 (validated claims) enrichment.
-	tierHits := s.enrichTierHits(ctx, profileID, limit)
+	tierHits := s.enrichTierHits(ctx, profileID, limit, req)
 
 	// Merge fragment hits with tier hits, sort by (tier ASC, score DESC).
 	all := append(tierHits, fragmentHits...) //nolint:gocritic
@@ -345,7 +348,7 @@ func (s *recallService) Recall(ctx context.Context, profileID string, req Recall
 //
 // Profile isolation invariant: both FactsLister and ClaimsLister receive
 // profileID as an explicit parameter and must scope all queries to that profile.
-func (s *recallService) enrichTierHits(ctx context.Context, profileID string, limit int) []RecallHit {
+func (s *recallService) enrichTierHits(ctx context.Context, profileID string, limit int, req RecallRequest) []RecallHit {
 	var hits []RecallHit
 
 	if s.factsLister != nil {
@@ -360,6 +363,14 @@ func (s *recallService) enrichTierHits(ctx context.Context, profileID string, li
 			for _, f := range facts {
 				if f == nil {
 					continue
+				}
+				if !factMatchesRecallWindow(f, req.ValidAt, req.KnownAt) {
+					continue
+				}
+				if !req.IncludeEvidence {
+					factCopy := *f
+					factCopy.Evidence = nil
+					f = &factCopy
 				}
 				hits = append(hits, RecallHit{
 					Fact:  f,
@@ -382,6 +393,14 @@ func (s *recallService) enrichTierHits(ctx context.Context, profileID string, li
 			for _, c := range claims {
 				if c == nil {
 					continue
+				}
+				if !claimMatchesRecallWindow(c, req.ValidAt, req.KnownAt) {
+					continue
+				}
+				if !req.IncludeEvidence {
+					claimCopy := *c
+					claimCopy.Evidence = nil
+					c = &claimCopy
 				}
 				score := c.ExtractConf * s.claimWeight
 				hits = append(hits, RecallHit{
@@ -437,6 +456,52 @@ func rrfMerge(sem []semanticsearch.SearchHit, kw []keywordsearch.FragmentSearchR
 		out = append(out, *e)
 	}
 	return out
+}
+
+func factMatchesRecallWindow(f *domain.Fact, validAt, knownAt *time.Time) bool {
+	if f == nil {
+		return false
+	}
+	if validAt != nil {
+		if f.ValidFrom != nil && f.ValidFrom.After(*validAt) {
+			return false
+		}
+		if f.ValidTo != nil && !f.ValidTo.After(*validAt) {
+			return false
+		}
+	}
+	if knownAt != nil {
+		if f.RecordedAt.After(*knownAt) {
+			return false
+		}
+		if f.RecordedTo != nil && !f.RecordedTo.After(*knownAt) {
+			return false
+		}
+	}
+	return true
+}
+
+func claimMatchesRecallWindow(c *domain.Claim, validAt, knownAt *time.Time) bool {
+	if c == nil {
+		return false
+	}
+	if validAt != nil {
+		if c.ValidFrom != nil && c.ValidFrom.After(*validAt) {
+			return false
+		}
+		if c.ValidTo != nil && !c.ValidTo.After(*validAt) {
+			return false
+		}
+	}
+	if knownAt != nil {
+		if c.RecordedAt.After(*knownAt) {
+			return false
+		}
+		if c.RecordedTo != nil && !c.RecordedTo.After(*knownAt) {
+			return false
+		}
+	}
+	return true
 }
 
 // filterSemanticFragments drops hits outside the caller's profile and any

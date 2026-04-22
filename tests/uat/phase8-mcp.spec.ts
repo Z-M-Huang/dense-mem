@@ -3,25 +3,34 @@
  *
  * Verifies that the dense-mem MCP binary:
  * - responds to JSON-RPC initialize with a valid tools list
- * - exposes expected tools (recall, add_fragment, claim_status)
+ * - exposes the dense-mem memory contract tools
  * - enforces profile isolation through the MCP layer
  * - returns structured errors for unknown tools
  *
- * Will be RED until Units 57-60 (MCP server wiring) are complete.
- *
- * NOTE: These tests spawn the MCP binary via `go run`. They require the
- * repository root in PATH and valid API_KEY / PROFILE_ID env vars.
+ * NOTE: These tests spawn the MCP binary via `go run`. The MCP process is
+ * an HTTP-backed facade over the live dense-mem server, so it requires
+ * DENSE_MEM_URL, DENSE_MEM_API_KEY, and DENSE_MEM_PROFILE_ID.
  */
 
 import { test, expect } from '@playwright/test';
-import { spawnMcp, API_KEY, PROFILE_ID } from './helpers';
+import {
+  spawnMcp,
+  DENSE_MEM_API_KEY,
+  DENSE_MEM_PROFILE_ID,
+  DENSE_MEM_URL,
+} from './helpers';
+
+function mcpEnv(): Record<string, string> {
+  return {
+    DENSE_MEM_URL,
+    DENSE_MEM_API_KEY,
+    DENSE_MEM_PROFILE_ID,
+  };
+}
 
 // UAT-11a: MCP server responds to initialize with tools list
 test('UAT-11a: MCP initialize returns tools list', async () => {
-  const mcp = await spawnMcp({
-    API_KEY,
-    PROFILE_ID,
-  });
+  const mcp = await spawnMcp(mcpEnv());
 
   try {
     const response = await mcp.call('initialize', {
@@ -41,11 +50,8 @@ test('UAT-11a: MCP initialize returns tools list', async () => {
 });
 
 // UAT-11b: MCP server exposes expected tools
-test('UAT-11b: MCP server exposes recall, add_fragment, claim_status tools', async () => {
-  const mcp = await spawnMcp({
-    API_KEY,
-    PROFILE_ID,
-  });
+test('UAT-11b: MCP server exposes required memory tools', async () => {
+  const mcp = await spawnMcp(mcpEnv());
 
   try {
     // Initialize first
@@ -63,9 +69,15 @@ test('UAT-11b: MCP server exposes recall, add_fragment, claim_status tools', asy
 
     const tools = result.tools as Array<{ name: string }>;
     const toolNames = tools.map((t) => t.name);
-    // Expected tool names — red until MCP is wired
     expect(toolNames).toEqual(
-      expect.arrayContaining(['recall', 'add_fragment', 'claim_status']),
+      expect.arrayContaining([
+        'save_memory',
+        'get_memory',
+        'list_recent_memories',
+        'recall_memory',
+        'post_claim',
+        'get_fact',
+      ]),
     );
   } finally {
     await mcp.close();
@@ -74,10 +86,7 @@ test('UAT-11b: MCP server exposes recall, add_fragment, claim_status tools', asy
 
 // UAT-11c: MCP unknown tool returns JSON-RPC error
 test('UAT-11c: calling unknown MCP tool returns JSON-RPC error', async () => {
-  const mcp = await spawnMcp({
-    API_KEY,
-    PROFILE_ID,
-  });
+  const mcp = await spawnMcp(mcpEnv());
 
   try {
     await mcp.call('initialize', {
@@ -102,11 +111,8 @@ test('UAT-11c: calling unknown MCP tool returns JSON-RPC error', async () => {
 });
 
 // UAT-11d: MCP recall tool returns profile-scoped results
-test('UAT-11d: MCP recall tool is profile-scoped', async () => {
-  const mcp = await spawnMcp({
-    API_KEY,
-    PROFILE_ID,
-  });
+test('UAT-11d: MCP recall_memory tool is profile-scoped', async () => {
+  const mcp = await spawnMcp(mcpEnv());
 
   try {
     await mcp.call('initialize', {
@@ -116,7 +122,7 @@ test('UAT-11d: MCP recall tool is profile-scoped', async () => {
     });
 
     const response = await mcp.call('tools/call', {
-      name: 'recall',
+      name: 'recall_memory',
       arguments: {
         query: 'test query for profile isolation',
         limit: 5,
