@@ -82,7 +82,7 @@ func NewAvailabilityService(client gdsClient, logger *slog.Logger) AvailabilityS
 	}
 }
 
-// ProbeGDS calls gds.list() to verify GDS procedures are reachable.
+// ProbeGDS calls gds.version() to verify GDS procedures are reachable.
 // Any error is swallowed and logged; the method always returns a bool so that
 // a missing GDS plugin never prevents application startup.
 func (s *availabilityServiceImpl) ProbeGDS(ctx context.Context) bool {
@@ -123,15 +123,14 @@ type neo4jGDSQuerier struct {
 	client gdsClient
 }
 
-// ProbeAvailability runs CALL gds.list() in a read transaction. The procedure
+// ProbeAvailability runs CALL gds.version() in a read transaction. The procedure
 // succeeds when GDS is installed and fails with a ClientError otherwise.
 func (q *neo4jGDSQuerier) ProbeAvailability(ctx context.Context) error {
 	_, err := q.client.ExecuteRead(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
-		// gds.list() is the lightest GDS procedure available; it returns an
-		// empty result set when no graphs are projected and raises a
-		// ClientError when GDS is not installed.
+		// gds.version() has a stable single-column output across GDS versions
+		// and raises a ClientError when the plugin is not installed.
 		result, runErr := tx.Run(ctx,
-			"CALL gds.list() YIELD graphName RETURN count(*) AS cnt LIMIT 1",
+			"CALL gds.version() YIELD gdsVersion RETURN gdsVersion LIMIT 1",
 			nil,
 		)
 		if runErr != nil {

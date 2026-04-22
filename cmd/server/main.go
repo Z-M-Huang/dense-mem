@@ -271,6 +271,8 @@ func main() {
 	)
 	factGetSvc := factservice.NewGetFactService(profileScopeEnforcer)
 	factListSvc := factservice.NewListFactsService(profileScopeEnforcer)
+	communityGetSvc := communityservice.NewGetCommunitySummaryService(neo4jClient)
+	communityListSvc := communityservice.NewListCommunitiesService(neo4jClient)
 
 	var (
 		claimVerifyRegistrySvc claimservice.VerifyClaimService
@@ -352,6 +354,8 @@ func main() {
 		FactList:            factListSvc,
 		FragmentRetract:     fragmentRetractSvc,
 		CommunityDetect:     communityDetectRegistrySvc,
+		CommunityGet:        communityGetSvc,
+		CommunityList:       communityListSvc,
 		EmbeddingConfigured: cfg.IsEmbeddingConfigured(),
 	})
 	if err != nil {
@@ -392,7 +396,9 @@ func main() {
 	claimPromoteHandler := handler.NewClaimPromoteHandler(factPromoteSvc)
 	factReadHandler := handler.NewFactReadHandler(factGetSvc)
 	factListHandler := handler.NewFactListHandler(factListSvc)
-	communityDetectHandler := handler.NewCommunityDetectHandler(communityDetectHTTPSvc)
+	communityReadHandler := handler.NewCommunityReadHandler(communityGetSvc)
+	communityListHandler := handler.NewCommunityListHandler(communityListSvc)
+	communityDetectHandler := handler.NewCommunityDetectHandler(communityDetectHTTPSvc, communityListSvc)
 	toolCatalogHandler := handler.NewToolCatalogHandler(toolRegistry)
 	toolReadHandler := handler.NewToolReadHandler(toolRegistry)
 	toolExecuteHandler := handler.NewToolExecuteHandler(toolRegistry)
@@ -466,6 +472,8 @@ func main() {
 		ClaimPromote:    claimPromoteHandler.Handle,
 		FactGet:         factReadHandler.Handle,
 		FactList:        factListHandler.Handle,
+		CommunityRead:   communityReadHandler.Handle,
+		CommunityList:   communityListHandler.Handle,
 		CommunityDetect: communityDetectHandler.Handle,
 		ToolCatalog:     toolCatalogHandler.Handle,
 		GetTool:         toolReadHandler.Handle,

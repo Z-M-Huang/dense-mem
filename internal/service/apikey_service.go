@@ -404,6 +404,7 @@ func (s *APIKeyServiceImpl) BootstrapAdminKey(ctx context.Context, rawEnvKey str
 	key := &domain.APIKey{
 		Label:     "bootstrap-admin",
 		KeyHash:   keyHash,
+		KeyPrefix: crypto.GetKeyPrefix(rawEnvKey),
 		Scopes:    []string{"admin", "read", "write"},
 		RateLimit: 0, // No rate limit for admin
 	}

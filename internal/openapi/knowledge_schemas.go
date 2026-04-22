@@ -394,6 +394,25 @@ func knowledgeSchemas() map[string]any {
 				},
 			},
 		},
+		"CommunityDetectResponse": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"detected": map[string]any{
+					"type": "boolean",
+				},
+				"community_count": map[string]any{
+					"type": "integer",
+				},
+				"node_count": map[string]any{
+					"type": "integer",
+				},
+				"communities": map[string]any{
+					"type":  "array",
+					"items": map[string]any{"$ref": "#/components/schemas/CommunityResponse"},
+				},
+			},
+			"required": []string{"detected", "community_count", "node_count"},
+		},
 
 		// RecallHitResponse is one ranked result returned by GET /api/v1/recall.
 		// Tier classifies the knowledge-pipeline level:
@@ -510,36 +529,55 @@ func knowledgeSchemas() map[string]any {
 			"description":          "Tool-specific JSON response. Use GET /api/v1/tools to discover the exact output schema for a tool name.",
 		},
 
-		// CommunityResponse represents a detected knowledge community — a cluster
-		// of related facts grouped by graph community detection algorithms.
+		// CommunityResponse represents one persisted community summary.
 		"CommunityResponse": map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"id": map[string]any{
-					"type":   "string",
-					"format": "uuid",
+				"community_id": map[string]any{
+					"type": "string",
 				},
 				"profile_id": map[string]any{
-					"type":   "string",
-					"format": "uuid",
+					"type": "string",
 				},
-				"label": map[string]any{
-					"type":        "string",
-					"description": "Human-readable label inferred for the community.",
+				"level": map[string]any{
+					"type": "integer",
+				},
+				"summary": map[string]any{
+					"type": "string",
+				},
+				"summary_version": map[string]any{
+					"type": "string",
 				},
 				"member_count": map[string]any{
-					"type":        "integer",
-					"description": "Number of fact nodes in this community.",
+					"type": "integer",
 				},
-				"metadata": map[string]any{
-					"type": "object",
+				"top_entities": map[string]any{
+					"type":  "array",
+					"items": map[string]any{"type": "string"},
 				},
-				"created_at": map[string]any{
+				"top_predicates": map[string]any{
+					"type":  "array",
+					"items": map[string]any{"type": "string"},
+				},
+				"last_summarized_at": map[string]any{
 					"type":   "string",
 					"format": "date-time",
 				},
 			},
-			"required": []string{"id", "profile_id", "member_count"},
+			"required": []string{"community_id", "profile_id", "level", "summary", "summary_version", "member_count", "last_summarized_at"},
+		},
+		"ListCommunitiesResponse": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"items": map[string]any{
+					"type":  "array",
+					"items": map[string]any{"$ref": "#/components/schemas/CommunityResponse"},
+				},
+				"total": map[string]any{
+					"type": "integer",
+				},
+			},
+			"required": []string{"items", "total"},
 		},
 	}
 }

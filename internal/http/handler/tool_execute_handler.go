@@ -171,6 +171,8 @@ func mapToolExecuteError(err error) *httperr.APIError {
 		return httperr.New(httperr.SERVICE_UNAVAILABLE, "community detection service unavailable")
 	case errors.Is(err, communityservice.ErrCommunityGraphTooLarge):
 		return httperr.New(httperr.ErrCommunityGraphTooLarge, "knowledge graph too large for community detection")
+	case errors.Is(err, communityservice.ErrCommunityNotFound):
+		return httperr.New(httperr.NOT_FOUND, "community not found")
 	case errors.Is(err, factservice.ErrPredicateNotPoliced):
 		return httperr.New(httperr.ErrPredicateNotPoliced, "predicate not policed for promotion")
 	case errors.Is(err, factservice.ErrUnsupportedPolicy):

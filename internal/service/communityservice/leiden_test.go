@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/dense-mem/dense-mem/internal/domain"
 	"github.com/stretchr/testify/require"
 )
 
@@ -39,6 +40,7 @@ var _ communityLocker = (*stubCommunityLocker)(nil)
 //   - estimateNodeCount: returned by EstimateProjection
 //   - estimateErr:       error returned by EstimateProjection
 //   - projectErr:        error returned by ProjectGraph
+//   - toUndirectedErr:   error returned by ToUndirected
 //   - leidenErr:         error returned by RunLeiden
 //   - dropErr:           error returned by DropGraph
 //
@@ -46,17 +48,20 @@ var _ communityLocker = (*stubCommunityLocker)(nil)
 //   - estimatedProfiles: profileID passed to EstimateProjection in order
 //   - projectedProfiles: profileID passed to ProjectGraph in order
 //   - projectedGraphs:   graphName passed to ProjectGraph in order
+//   - undirectedGraphs:  graphName passed to ToUndirected in order
 //   - droppedGraphs:     graphName passed to DropGraph in order
 type stubLeidenQuerier struct {
 	estimateNodeCount int64
 	estimateErr       error
 	projectErr        error
+	toUndirectedErr   error
 	leidenErr         error
 	dropErr           error
 
 	estimatedProfiles []string
 	projectedProfiles []string
 	projectedGraphs   []string
+	undirectedGraphs  []string
 	droppedGraphs     []string
 }
 
@@ -74,6 +79,11 @@ func (s *stubLeidenQuerier) ProjectGraph(_ context.Context, profileID, graphName
 	return s.projectErr
 }
 
+func (s *stubLeidenQuerier) ToUndirected(_ context.Context, graphName string) error {
+	s.undirectedGraphs = append(s.undirectedGraphs, graphName)
+	return s.toUndirectedErr
+}
+
 func (s *stubLeidenQuerier) RunLeiden(_ context.Context, _ string) error {
 	return s.leidenErr
 }
@@ -86,6 +96,32 @@ func (s *stubLeidenQuerier) DropGraph(_ context.Context, graphName string) error
 // Compile-time check that stubLeidenQuerier satisfies leidenQuerier.
 var _ leidenQuerier = (*stubLeidenQuerier)(nil)
 
+type stubCommunitySummaryStore struct {
+	inputs              []communitySummaryInput
+	loadErr             error
+	replaceErr          error
+	replacedProfiles    []string
+	replacedCommunities [][]*domain.Community
+}
+
+func (s *stubCommunitySummaryStore) LoadSummaryInputs(_ context.Context, _ string) ([]communitySummaryInput, error) {
+	if s.loadErr != nil {
+		return nil, s.loadErr
+	}
+	return s.inputs, nil
+}
+
+func (s *stubCommunitySummaryStore) Replace(_ context.Context, profileID string, communities []*domain.Community) error {
+	if s.replaceErr != nil {
+		return s.replaceErr
+	}
+	s.replacedProfiles = append(s.replacedProfiles, profileID)
+	s.replacedCommunities = append(s.replacedCommunities, communities)
+	return nil
+}
+
+var _ communitySummaryStore = (*stubCommunitySummaryStore)(nil)
+
 // stubConfigProvider is a minimal test-only implementation of
 // config.ConfigProvider that returns only the fields relevant to Leiden.
 type stubConfigProvider struct {
@@ -96,41 +132,41 @@ func (s *stubConfigProvider) GetAICommunityMaxNodes() int { return s.maxNodes }
 
 // Implement the remaining ConfigProvider methods with zero/empty returns so
 // the stub compiles as a config.ConfigProvider without importing that package.
-func (s *stubConfigProvider) GetHTTPAddr() string                  { return "" }
-func (s *stubConfigProvider) GetPostgresDSN() string               { return "" }
-func (s *stubConfigProvider) GetNeo4jURI() string                  { return "" }
-func (s *stubConfigProvider) GetNeo4jUser() string                 { return "" }
-func (s *stubConfigProvider) GetNeo4jPassword() string             { return "" }
-func (s *stubConfigProvider) GetNeo4jDatabase() string             { return "" }
-func (s *stubConfigProvider) GetRedisAddr() string                 { return "" }
-func (s *stubConfigProvider) GetRedisPassword() string             { return "" }
-func (s *stubConfigProvider) GetRedisDB() int                      { return 0 }
-func (s *stubConfigProvider) GetBootstrapAdminKey() string         { return "" }
-func (s *stubConfigProvider) GetArgonMemoryKB() int                { return 0 }
-func (s *stubConfigProvider) GetArgonTime() int                    { return 0 }
-func (s *stubConfigProvider) GetArgonThreads() int                 { return 0 }
-func (s *stubConfigProvider) GetRateLimitPerMinute() int           { return 0 }
-func (s *stubConfigProvider) GetAdminRateLimitPerMinute() int      { return 0 }
-func (s *stubConfigProvider) GetFragmentCreateRateLimit() int      { return 0 }
-func (s *stubConfigProvider) GetFragmentReadRateLimit() int        { return 0 }
-func (s *stubConfigProvider) GetSSEHeartbeatSeconds() int          { return 0 }
-func (s *stubConfigProvider) GetSSEMaxDurationSeconds() int        { return 0 }
-func (s *stubConfigProvider) GetSSEMaxConcurrentStreams() int      { return 0 }
-func (s *stubConfigProvider) GetAdminQueryTimeoutSeconds() int     { return 0 }
-func (s *stubConfigProvider) GetAdminQueryRowCap() int             { return 0 }
-func (s *stubConfigProvider) GetEmbeddingDimensions() int          { return 0 }
-func (s *stubConfigProvider) GetAIAPIURL() string                  { return "" }
-func (s *stubConfigProvider) GetAIAPIKey() string                  { return "" }
-func (s *stubConfigProvider) GetAIEmbeddingModel() string          { return "" }
-func (s *stubConfigProvider) GetAIEmbeddingDimensions() int        { return 0 }
-func (s *stubConfigProvider) GetAIEmbeddingTimeoutSeconds() int    { return 0 }
-func (s *stubConfigProvider) IsEmbeddingConfigured() bool          { return false }
-func (s *stubConfigProvider) GetAIVerifierModel() string           { return "" }
-func (s *stubConfigProvider) GetAIVerifierMaxConcurrency() int     { return 0 }
-func (s *stubConfigProvider) GetClaimWriteRateLimit() int          { return 0 }
-func (s *stubConfigProvider) GetClaimReadRateLimit() int           { return 0 }
+func (s *stubConfigProvider) GetHTTPAddr() string                    { return "" }
+func (s *stubConfigProvider) GetPostgresDSN() string                 { return "" }
+func (s *stubConfigProvider) GetNeo4jURI() string                    { return "" }
+func (s *stubConfigProvider) GetNeo4jUser() string                   { return "" }
+func (s *stubConfigProvider) GetNeo4jPassword() string               { return "" }
+func (s *stubConfigProvider) GetNeo4jDatabase() string               { return "" }
+func (s *stubConfigProvider) GetRedisAddr() string                   { return "" }
+func (s *stubConfigProvider) GetRedisPassword() string               { return "" }
+func (s *stubConfigProvider) GetRedisDB() int                        { return 0 }
+func (s *stubConfigProvider) GetBootstrapAdminKey() string           { return "" }
+func (s *stubConfigProvider) GetArgonMemoryKB() int                  { return 0 }
+func (s *stubConfigProvider) GetArgonTime() int                      { return 0 }
+func (s *stubConfigProvider) GetArgonThreads() int                   { return 0 }
+func (s *stubConfigProvider) GetRateLimitPerMinute() int             { return 0 }
+func (s *stubConfigProvider) GetAdminRateLimitPerMinute() int        { return 0 }
+func (s *stubConfigProvider) GetFragmentCreateRateLimit() int        { return 0 }
+func (s *stubConfigProvider) GetFragmentReadRateLimit() int          { return 0 }
+func (s *stubConfigProvider) GetSSEHeartbeatSeconds() int            { return 0 }
+func (s *stubConfigProvider) GetSSEMaxDurationSeconds() int          { return 0 }
+func (s *stubConfigProvider) GetSSEMaxConcurrentStreams() int        { return 0 }
+func (s *stubConfigProvider) GetAdminQueryTimeoutSeconds() int       { return 0 }
+func (s *stubConfigProvider) GetAdminQueryRowCap() int               { return 0 }
+func (s *stubConfigProvider) GetEmbeddingDimensions() int            { return 0 }
+func (s *stubConfigProvider) GetAIAPIURL() string                    { return "" }
+func (s *stubConfigProvider) GetAIAPIKey() string                    { return "" }
+func (s *stubConfigProvider) GetAIEmbeddingModel() string            { return "" }
+func (s *stubConfigProvider) GetAIEmbeddingDimensions() int          { return 0 }
+func (s *stubConfigProvider) GetAIEmbeddingTimeoutSeconds() int      { return 0 }
+func (s *stubConfigProvider) IsEmbeddingConfigured() bool            { return false }
+func (s *stubConfigProvider) GetAIVerifierModel() string             { return "" }
+func (s *stubConfigProvider) GetAIVerifierMaxConcurrency() int       { return 0 }
+func (s *stubConfigProvider) GetClaimWriteRateLimit() int            { return 0 }
+func (s *stubConfigProvider) GetClaimReadRateLimit() int             { return 0 }
 func (s *stubConfigProvider) GetRecallValidatedClaimWeight() float64 { return 0 }
-func (s *stubConfigProvider) GetPromoteTxTimeoutSeconds() int      { return 0 }
+func (s *stubConfigProvider) GetPromoteTxTimeoutSeconds() int        { return 0 }
 
 // newTestLeidenService constructs a leidenServiceImpl with injected stubs.
 // Used only in tests; production callers use NewLeidenService.
@@ -181,6 +217,8 @@ func TestLeidenDetect(t *testing.T) {
 		// Drop must always be called (deferred).
 		require.Contains(t, querier.droppedGraphs, wantGraph,
 			"Detect must always drop the projected graph on return")
+		require.Contains(t, querier.undirectedGraphs, wantGraph,
+			"Detect must convert the projected graph to undirected edges before Leiden")
 	})
 
 	t.Run("rejects when estimated node count exceeds cap", func(t *testing.T) {
@@ -203,6 +241,33 @@ func TestLeidenDetect(t *testing.T) {
 		// Drop must NOT have been called because projection never happened.
 		require.Empty(t, querier.droppedGraphs,
 			"Detect must not attempt a graph drop when projection was skipped")
+	})
+
+	t.Run("empty graph clears persisted summaries and skips projection", func(t *testing.T) {
+		locker := &stubCommunityLocker{}
+		querier := &stubLeidenQuerier{estimateNodeCount: 0}
+		store := &stubCommunitySummaryStore{}
+		svc := &leidenServiceImpl{
+			locker:  locker,
+			querier: querier,
+			store:   store,
+			cfg:     &stubConfigProvider{maxNodes: maxNodes},
+		}
+
+		err := svc.Detect(ctx, profileID)
+
+		require.NoError(t, err)
+		require.Equal(t, []string{profileID}, locker.locked,
+			"Detect must still acquire the advisory lock for empty graphs")
+		require.Equal(t, []string{profileID}, store.replacedProfiles,
+			"Detect must clear persisted summaries for the requested profile")
+		require.Len(t, store.replacedCommunities, 1)
+		require.Empty(t, store.replacedCommunities[0],
+			"Detect must replace empty-graph summaries with an empty set")
+		require.Empty(t, querier.projectedGraphs,
+			"Detect must not project a GDS graph when the estimate is zero")
+		require.Empty(t, querier.droppedGraphs,
+			"Detect must not drop a projected graph when none was created")
 	})
 
 	t.Run("node count exactly at cap is allowed", func(t *testing.T) {
@@ -234,6 +299,49 @@ func TestLeidenDetect(t *testing.T) {
 		wantGraph := GraphNamePrefix + profileID + "-leiden"
 		require.Contains(t, querier.droppedGraphs, wantGraph,
 			"Detect must drop the projected graph even when leiden write fails")
+	})
+
+	t.Run("graph is always dropped even when undirected conversion fails", func(t *testing.T) {
+		undirectedErr := errors.New("gds.graph.relationships.toUndirected failed")
+		locker := &stubCommunityLocker{}
+		querier := &stubLeidenQuerier{
+			estimateNodeCount: 50,
+			toUndirectedErr:   undirectedErr,
+		}
+		svc := newTestLeidenService(locker, querier, maxNodes)
+
+		err := svc.Detect(ctx, profileID)
+
+		require.Error(t, err)
+		require.ErrorContains(t, err, "leiden make undirected")
+		wantGraph := GraphNamePrefix + profileID + "-leiden"
+		require.Contains(t, querier.droppedGraphs, wantGraph,
+			"Detect must drop the projected graph even when undirected conversion fails")
+	})
+
+	t.Run("empty projection error clears persisted summaries", func(t *testing.T) {
+		locker := &stubCommunityLocker{}
+		querier := &stubLeidenQuerier{
+			estimateNodeCount: 1,
+			projectErr:        errors.New("Node-Query returned no nodes"),
+		}
+		store := &stubCommunitySummaryStore{}
+		svc := &leidenServiceImpl{
+			locker:  locker,
+			querier: querier,
+			store:   store,
+			cfg:     &stubConfigProvider{maxNodes: maxNodes},
+		}
+
+		err := svc.Detect(ctx, profileID)
+
+		require.NoError(t, err)
+		require.Equal(t, []string{profileID}, store.replacedProfiles,
+			"Detect must clear persisted summaries when projection reports no nodes")
+		require.Len(t, store.replacedCommunities, 1)
+		require.Empty(t, store.replacedCommunities[0])
+		require.Empty(t, querier.droppedGraphs,
+			"Detect must not drop a graph when projection never succeeded")
 	})
 
 	t.Run("propagates estimate error", func(t *testing.T) {

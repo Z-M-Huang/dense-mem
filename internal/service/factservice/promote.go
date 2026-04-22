@@ -11,6 +11,7 @@ import (
 	"github.com/dense-mem/dense-mem/internal/domain"
 	"github.com/dense-mem/dense-mem/internal/observability"
 	classificationSvc "github.com/dense-mem/dense-mem/internal/service/classification"
+	"github.com/dense-mem/dense-mem/internal/service/fragmentcodec"
 	neo4jstorage "github.com/dense-mem/dense-mem/internal/storage/neo4j"
 	postgresstorage "github.com/dense-mem/dense-mem/internal/storage/postgres"
 	"github.com/google/uuid"
@@ -413,8 +414,12 @@ func (s *promoteClaimServiceImpl) createNewFact(
 		ClassificationLatticeVersion: classificationSvc.LatticeVersion,
 		SourceQuality:                claim.SourceQuality,
 	}
+	classificationJSON, err := fragmentcodec.EncodeOptionalMap(fact.Classification)
+	if err != nil {
+		return nil, fmt.Errorf("promote: encode fact classification: %w", err)
+	}
 
-	err := s.db.ScopedWriteTx(ctx, profileID, func(tx neo4j.ManagedTransaction) error {
+	err = s.db.ScopedWriteTx(ctx, profileID, func(tx neo4j.ManagedTransaction) error {
 		result, err := neo4jstorage.RunScoped(ctx, tx, profileID,
 			createFactAndEdgeCypher,
 			map[string]any{
@@ -429,7 +434,7 @@ func (s *promoteClaimServiceImpl) createNewFact(
 				"validTo":                      fact.ValidTo,
 				"recordedAt":                   fact.RecordedAt,
 				"promotedFromClaimId":          fact.PromotedFromClaimID,
-				"classification":               fact.Classification,
+				"classificationJSON":           classificationJSON,
 				"classificationLatticeVersion": fact.ClassificationLatticeVersion,
 				"sourceQuality":                fact.SourceQuality,
 				"claimStatus":                  string(domain.StatusSuperseded),
@@ -644,8 +649,10 @@ func rowToClaimForPromote(profileID string, row map[string]any) *domain.Claim {
 	}
 
 	var classification map[string]any
-	if m, ok := row["classification"].(map[string]any); ok {
-		classification = m
+	if decoded := fragmentcodec.DecodeOptionalMap(row["classification"]); decoded != nil {
+		classification = decoded
+	} else if decoded := fragmentcodec.DecodeOptionalMap(row["classification_json"]); decoded != nil {
+		classification = decoded
 	}
 
 	return &domain.Claim{
@@ -692,6 +699,7 @@ RETURN
     c.source_quality                  AS source_quality,
     c.valid_from                      AS valid_from,
     c.classification                  AS classification,
+    c.classification_json             AS classification_json,
     c.classification_lattice_version  AS classification_lattice_version,
     collect(sf.fragment_id)           AS supported_by`
 
@@ -717,6 +725,7 @@ RETURN
     f.last_confirmed_at              AS last_confirmed_at,
     f.promoted_from_claim_id         AS promoted_from_claim_id,
     f.classification                 AS classification,
+    f.classification_json            AS classification_json,
     f.classification_lattice_version AS classification_lattice_version,
     f.source_quality                 AS source_quality,
     f.labels                         AS labels,
@@ -743,7 +752,7 @@ CREATE (f:Fact {
     valid_to:                      $validTo,
     recorded_at:                   $recordedAt,
     promoted_from_claim_id:        $promotedFromClaimId,
-    classification:                $classification,
+    classification_json:           $classificationJSON,
     classification_lattice_version: $classificationLatticeVersion,
     source_quality:                $sourceQuality
 })

@@ -294,6 +294,20 @@ func RegisterProtectedRoutesWithHandlers(e *echo.Echo, deps ProtectedDeps, handl
 		factGroup.GET("", handlers.FactList, middleware.RequireScopes("read"))
 	}
 
+	// Community routes — canonical /api/v1/communities
+	communityGroup := e.Group("/api/v1/communities")
+	communityGroup.Use(middleware.AuthMiddleware(deps.APIKeyRepo, deps.AuditService))
+	communityGroup.Use(middleware.ProfileResolutionMiddleware(deps.ProfileService))
+	communityGroup.Use(middleware.AuthorizeProfile(profileAuthzSvc))
+	communityGroup.Use(middleware.RateLimitMiddleware(deps.RateLimitService, deps.Config, deps.AuditService))
+
+	if handlers.CommunityList != nil {
+		communityGroup.GET("", handlers.CommunityList, middleware.RequireScopes("read"))
+	}
+	if handlers.CommunityRead != nil {
+		communityGroup.GET("/:id", handlers.CommunityRead, middleware.RequireScopes("read"))
+	}
+
 	// Tool routes
 	toolGroup := e.Group("/api/v1/tools")
 	toolGroup.Use(middleware.AuthMiddleware(deps.APIKeyRepo, deps.AuditService))
@@ -414,6 +428,10 @@ type ProtectedHandlers struct {
 	FragmentRetract echo.HandlerFunc
 	// CommunityDetect handles POST /api/v1/admin/profiles/:profileId/community/detect (Phase 7)
 	CommunityDetect echo.HandlerFunc
+	// CommunityRead handles GET /api/v1/communities/:id.
+	CommunityRead echo.HandlerFunc
+	// CommunityList handles GET /api/v1/communities.
+	CommunityList echo.HandlerFunc
 	// Recall handles GET /api/v1/recall?q=...&limit=... (Phase 9 hybrid recall)
 	Recall echo.HandlerFunc
 }

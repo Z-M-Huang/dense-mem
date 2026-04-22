@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/dense-mem/dense-mem/internal/domain"
+	"github.com/dense-mem/dense-mem/internal/service/fragmentcodec"
 	"github.com/dense-mem/dense-mem/internal/storage/neo4j"
 )
 
@@ -55,12 +56,14 @@ func (s *getFragmentService) GetByID(ctx context.Context, profileID, fragmentID 
 		       sf.authority AS authority,
 		       sf.labels AS labels,
 		       sf.metadata AS metadata,
+		       sf.metadata_json AS metadata_json,
 		       sf.content_hash AS content_hash,
 		       sf.idempotency_key AS idempotency_key,
 		       sf.embedding_model AS embedding_model,
 		       sf.embedding_dimensions AS embedding_dimensions,
 		       sf.source_quality AS source_quality,
 		       sf.classification AS classification,
+		       sf.classification_json AS classification_json,
 		       sf.created_at AS created_at,
 		       sf.updated_at AS updated_at
 		LIMIT 1
@@ -115,7 +118,9 @@ func mapRowToFragment(row map[string]any) *domain.Fragment {
 		}
 		f.Labels = labels
 	}
-	if v, ok := row["metadata"].(map[string]any); ok {
+	if v := fragmentcodec.DecodeOptionalMap(row["metadata"]); v != nil {
+		f.Metadata = v
+	} else if v := fragmentcodec.DecodeOptionalMap(row["metadata_json"]); v != nil {
 		f.Metadata = v
 	}
 	if v, ok := row["content_hash"].(string); ok {
@@ -139,7 +144,9 @@ func mapRowToFragment(row map[string]any) *domain.Fragment {
 	case float32:
 		f.SourceQuality = float64(sq)
 	}
-	if v, ok := row["classification"].(map[string]any); ok {
+	if v := fragmentcodec.DecodeOptionalMap(row["classification"]); v != nil {
+		f.Classification = v
+	} else if v := fragmentcodec.DecodeOptionalMap(row["classification_json"]); v != nil {
 		f.Classification = v
 	}
 	if v, ok := row["created_at"].(time.Time); ok {

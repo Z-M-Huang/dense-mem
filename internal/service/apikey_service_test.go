@@ -451,9 +451,17 @@ func TestAPIKeyServiceBootstrap(t *testing.T) {
 
 	// First call: no admin key exists, should create one
 	mockRepo.On("AdminKeyExists", ctx).Return(false, nil).Once()
-	mockRepo.On("CreateAdminKey", ctx, mock.AnythingOfType("*domain.APIKey")).Return(nil).Once()
 
 	rawEnvKey := "dm_live_testbootstrapkey123456789"
+	mockRepo.On("CreateAdminKey", ctx, mock.MatchedBy(func(key *domain.APIKey) bool {
+		if key == nil {
+			return false
+		}
+		return key.Label == "bootstrap-admin" &&
+			key.KeyPrefix == crypto.GetKeyPrefix(rawEnvKey) &&
+			assert.ObjectsAreEqual([]string{"admin", "read", "write"}, key.Scopes)
+	})).Return(nil).Once()
+
 	err := service.BootstrapAdminKey(ctx, rawEnvKey)
 	require.NoError(t, err)
 

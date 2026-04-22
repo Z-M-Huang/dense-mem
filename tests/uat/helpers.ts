@@ -198,10 +198,9 @@ export async function seedFragmentForProfile(
       labels: opts.labels ?? ['fact', 'science'],
     },
   });
-  expect(res.status(), `seedFragment: expected 201, got ${res.status()}`).toBe(201);
+  expect([200, 201], `seedFragment: expected 200 or 201, got ${res.status()}`).toContain(res.status());
   const body = await res.json();
-  expect(body).toHaveProperty('data');
-  return body.data as { id: string; fragment_id: string };
+  return body as { id: string; fragment_id: string };
 }
 
 /**
@@ -217,6 +216,9 @@ export async function createAndVerifyClaim(
     object?: string;
     fragmentId?: string;
     verifier_model?: string;
+    modality?: string;
+    extract_conf?: number;
+    resolution_conf?: number;
   } = {},
 ): Promise<{ id: string; status: string; [k: string]: unknown }> {
   // If no fragment provided, seed one first
@@ -230,15 +232,18 @@ export async function createAndVerifyClaim(
   const createRes = await request.post(`${BASE_URL}/api/v1/claims`, {
     headers: headers(profileId),
     data: {
-      predicate: opts.predicate ?? 'IS',
+      predicate: opts.predicate ?? 'likes',
       subject: opts.subject ?? 'sky',
       object: opts.object ?? 'blue',
-      supporting_fragment_ids: [fragmentId],
+      modality: opts.modality ?? 'assertion',
+      extract_conf: opts.extract_conf ?? 0.95,
+      resolution_conf: opts.resolution_conf ?? 0.95,
+      supported_by: [fragmentId],
     },
   });
-  expect(createRes.status(), `createClaim: expected 201, got ${createRes.status()}`).toBe(201);
+  expect([200, 201], `createClaim: expected 200 or 201, got ${createRes.status()}`).toContain(createRes.status());
   const createBody = await createRes.json();
-  const claimId: string = createBody.data.id;
+  const claimId: string = createBody.claim_id;
 
   // Verify claim
   const verifyRes = await request.post(
@@ -252,7 +257,12 @@ export async function createAndVerifyClaim(
   );
   expect(verifyRes.status(), `verifyClaim: expected 200, got ${verifyRes.status()}`).toBe(200);
   const verifyBody = await verifyRes.json();
-  return verifyBody.data as { id: string; status: string };
+  return {
+    id: verifyBody.claim_id as string,
+    claim_id: verifyBody.claim_id as string,
+    status: verifyBody.status as string,
+    entailment_verdict: verifyBody.entailment_verdict as string,
+  };
 }
 
 /**
@@ -288,7 +298,11 @@ export async function createAndPromoteClaim(
   );
   expect(promoteRes.status(), `promoteClaim: expected 201, got ${promoteRes.status()}`).toBe(201);
   const promoteBody = await promoteRes.json();
-  return promoteBody.data as { id: string };
+  return {
+    id: promoteBody.fact_id as string,
+    fact_id: promoteBody.fact_id as string,
+    ...promoteBody,
+  } as { id: string };
 }
 
 /**

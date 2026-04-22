@@ -162,6 +162,55 @@ func TestGetClaim(t *testing.T) {
 			"supported_by must be hydrated from outgoing Claim→SourceFragment SUPPORTED_BY edge collect")
 	})
 
+	t.Run("decodes JSON encoded classification", func(t *testing.T) {
+		row := map[string]any{
+			"claim_id":                       claimID,
+			"subject":                        "Alice",
+			"predicate":                      "works_at",
+			"object":                         "Acme",
+			"modality":                       "assertion",
+			"polarity":                       "+",
+			"speaker":                        "",
+			"span_start":                     int64(0),
+			"span_end":                       int64(0),
+			"valid_from":                     nil,
+			"valid_to":                       nil,
+			"recorded_at":                    time.Now().UTC(),
+			"recorded_to":                    nil,
+			"extract_conf":                   0.0,
+			"resolution_conf":                0.0,
+			"source_quality":                 0.0,
+			"entailment_verdict":             "insufficient",
+			"status":                         "candidate",
+			"last_verifier_response":         "",
+			"verified_at":                    nil,
+			"extraction_model":               "",
+			"extraction_version":             "",
+			"verifier_model":                 "",
+			"pipeline_run_id":                "",
+			"content_hash":                   "hash-json",
+			"idempotency_key":                "",
+			"classification":                 nil,
+			"classification_json":            `{"confidentiality":"internal","pii":"sensitive"}`,
+			"classification_lattice_version": "v1",
+			"supported_by":                   []any{},
+		}
+
+		reader := &stubClaimReader{
+			rowsByProfile: map[string][]map[string]any{
+				profileID: {row},
+			},
+		}
+		svc := NewGetClaimService(reader, nil)
+
+		got, err := svc.Get(ctx, profileID, claimID)
+
+		require.NoError(t, err)
+		require.NotNil(t, got)
+		require.Equal(t, "internal", got.Classification["confidentiality"])
+		require.Equal(t, "sensitive", got.Classification["pii"])
+	})
+
 	t.Run("returns empty supported_by when no outgoing Claim→SourceFragment SUPPORTED_BY edges exist", func(t *testing.T) {
 		row := map[string]any{
 			"claim_id":                       claimID,

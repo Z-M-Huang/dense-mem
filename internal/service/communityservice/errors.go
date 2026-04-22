@@ -17,3 +17,7 @@ var ErrCommunityUnavailable = errors.New("community detection service unavailabl
 //
 // Callers may wrap this error: errors.Is(err, ErrCommunityGraphTooLarge).
 var ErrCommunityGraphTooLarge = errors.New("community graph too large")
+
+// ErrCommunityNotFound is returned when a persisted community summary does not
+// exist or belongs to a different profile.
+var ErrCommunityNotFound = errors.New("community not found")

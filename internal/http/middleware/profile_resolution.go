@@ -27,6 +27,25 @@ type ResolvedProfileKey struct{}
 // ProfileIDHeader is the HTTP header for profile ID (used by tool routes).
 const ProfileIDHeader = "X-Profile-ID"
 
+func isHeaderScopedProfileRoute(path string) bool {
+	headerScopedPrefixes := []string{
+		"/api/v1/tools",
+		"/api/v1/fragments",
+		"/api/v1/claims",
+		"/api/v1/facts",
+		"/api/v1/communities",
+		"/api/v1/recall",
+	}
+
+	for _, prefix := range headerScopedPrefixes {
+		if strings.HasPrefix(path, prefix) {
+			return true
+		}
+	}
+
+	return false
+}
+
 // ProfileResolutionMiddleware creates a middleware that resolves and validates
 // profile IDs from either path parameters or headers.
 //
@@ -52,8 +71,8 @@ func ProfileResolutionMiddleware(svc ProfileResolutionServiceInterface) echo.Mid
 			// Determine route type and extract profile ID accordingly
 			path := c.Request().URL.Path
 
-			if strings.HasPrefix(path, "/api/v1/tools") {
-				// Tool route: read from X-Profile-ID header
+			if isHeaderScopedProfileRoute(path) {
+				// Canonical profile-scoped routes read from X-Profile-ID header.
 				isToolRoute = true
 				profileIDStr = c.Request().Header.Get(ProfileIDHeader)
 			} else if strings.HasPrefix(path, "/api/v1/profiles/") {
@@ -98,7 +117,7 @@ func ProfileResolutionMiddleware(svc ProfileResolutionServiceInterface) echo.Mid
 			c.SetRequest(c.Request().WithContext(resolvedCtx))
 
 			// Continue to next handler
-			_ = principal // Principal is available for authorization decisions in downstream middleware
+			_ = principal   // Principal is available for authorization decisions in downstream middleware
 			_ = isToolRoute // Route type available for future authorization logic
 
 			return next(c)

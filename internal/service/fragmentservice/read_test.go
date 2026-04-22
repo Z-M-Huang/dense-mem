@@ -88,6 +88,33 @@ func TestGetByID_CoercesLegacyNullSourceType(t *testing.T) {
 	}
 }
 
+func TestGetByID_DecodesJSONEncodedMaps(t *testing.T) {
+	reader := &fakeScopedReader{
+		results: []map[string]any{
+			{
+				"fragment_id":         "frag-json",
+				"profile_id":          "pA",
+				"content":             "json encoded",
+				"source_type":         "manual",
+				"metadata_json":       `{"origin":"uat"}`,
+				"classification_json": `{"topic":"science"}`,
+			},
+		},
+	}
+	svc := NewGetFragmentService(reader)
+
+	got, err := svc.GetByID(context.Background(), "pA", "frag-json")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.Metadata["origin"] != "uat" {
+		t.Fatalf("Metadata[origin] = %v; want uat", got.Metadata["origin"])
+	}
+	if got.Classification["topic"] != "science" {
+		t.Fatalf("Classification[topic] = %v; want science", got.Classification["topic"])
+	}
+}
+
 func TestGetByID_PropagatesReaderError(t *testing.T) {
 	reader := &fakeScopedReader{err: errors.New("neo4j down")}
 	svc := NewGetFragmentService(reader)

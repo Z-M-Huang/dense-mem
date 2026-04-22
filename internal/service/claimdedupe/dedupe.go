@@ -63,6 +63,7 @@ RETURN
     c.content_hash                    AS content_hash,
     c.idempotency_key                 AS idempotency_key,
     c.classification                  AS classification,
+    c.classification_json             AS classification_json,
     c.classification_lattice_version  AS classification_lattice_version,
     coalesce(c.supported_by, [])      AS supported_by
 LIMIT 1`

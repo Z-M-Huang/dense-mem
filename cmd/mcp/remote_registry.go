@@ -26,6 +26,8 @@ var requiredMCPTools = []string{
 	"list_facts",
 	"retract_fragment",
 	"detect_community",
+	"get_community_summary",
+	"list_communities",
 }
 
 func buildRemoteRegistry(ctx context.Context, client *mcpclient.Client, profileID string) (registry.Registry, error) {
@@ -51,6 +53,8 @@ func buildRemoteRegistry(ctx context.Context, client *mcpclient.Client, profileI
 		FactList:            mcpclient.NewFactList(client),
 		FragmentRetract:     mcpclient.NewFragmentRetract(client),
 		CommunityDetect:     mcpclient.NewCommunityDetect(client),
+		CommunityGet:        mcpclient.NewCommunityGet(client),
+		CommunityList:       mcpclient.NewCommunityList(client),
 		EmbeddingConfigured: true,
 	})
 	if err != nil {

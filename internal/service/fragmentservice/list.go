@@ -117,12 +117,14 @@ func (s *listFragmentsService) List(ctx context.Context, profileID string, opts 
 		       sf.authority AS authority,
 		       sf.labels AS labels,
 		       sf.metadata AS metadata,
+		       sf.metadata_json AS metadata_json,
 		       sf.content_hash AS content_hash,
 		       sf.idempotency_key AS idempotency_key,
 		       sf.embedding_model AS embedding_model,
 		       sf.embedding_dimensions AS embedding_dimensions,
 		       sf.source_quality AS source_quality,
 		       sf.classification AS classification,
+		       sf.classification_json AS classification_json,
 		       sf.created_at AS created_at,
 		       sf.updated_at AS updated_at
 		ORDER BY sf.created_at DESC, sf.fragment_id DESC

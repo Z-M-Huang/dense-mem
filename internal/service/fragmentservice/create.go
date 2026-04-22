@@ -23,6 +23,7 @@ import (
 	"github.com/dense-mem/dense-mem/internal/embedding"
 	"github.com/dense-mem/dense-mem/internal/http/dto"
 	"github.com/dense-mem/dense-mem/internal/observability"
+	"github.com/dense-mem/dense-mem/internal/service/fragmentcodec"
 	"github.com/dense-mem/dense-mem/internal/service/fragmentdedupe"
 	"github.com/dense-mem/dense-mem/internal/service/fragmentidentity"
 	"github.com/dense-mem/dense-mem/internal/storage/neo4j"
@@ -136,6 +137,12 @@ func (s *createFragmentService) Create(ctx context.Context, profileID string, re
 	if req.IdempotencyKey != "" {
 		existing, err := s.lookup.ByIdempotencyKey(ctx, profileID, req.IdempotencyKey)
 		if err != nil {
+			if s.logger != nil {
+				s.logger.Error("fragment create: idempotency lookup failed",
+					slog.String("profile_id", profileID),
+					slog.String("error", err.Error()),
+				)
+			}
 			s.metrics.IncFragmentCreate("error")
 			return nil, fmt.Errorf("failed to check idempotency key: %w", err)
 		}
@@ -151,6 +158,13 @@ func (s *createFragmentService) Create(ctx context.Context, profileID string, re
 		// Step 4: Check content hash deduplication (AC-22)
 		existing, err := s.lookup.ByContentHash(ctx, profileID, contentHash)
 		if err != nil {
+			if s.logger != nil {
+				s.logger.Error("fragment create: content-hash lookup failed",
+					slog.String("profile_id", profileID),
+					slog.String("content_hash", contentHash),
+					slog.String("error", err.Error()),
+				)
+			}
 			s.metrics.IncFragmentCreate("error")
 			return nil, fmt.Errorf("failed to check content hash: %w", err)
 		}
@@ -218,6 +232,17 @@ func (s *createFragmentService) Create(ctx context.Context, profileID string, re
 		UpdatedAt:           now,
 	}
 
+	metadataJSON, err := fragmentcodec.EncodeOptionalMap(fragment.Metadata)
+	if err != nil {
+		s.metrics.IncFragmentCreate("error")
+		return nil, fmt.Errorf("failed to encode fragment metadata: %w", err)
+	}
+	classificationJSON, err := fragmentcodec.EncodeOptionalMap(fragment.Classification)
+	if err != nil {
+		s.metrics.IncFragmentCreate("error")
+		return nil, fmt.Errorf("failed to encode fragment classification: %w", err)
+	}
+
 	// Step 8: Persist via ScopedWrite (AC-24)
 	// Note: embedding vector is stored but not exposed in read responses (AC-28)
 	query := `
@@ -231,12 +256,12 @@ func (s *createFragmentService) Create(ctx context.Context, profileID string, re
 			source_type: $sourceType,
 			authority: $authority,
 			labels: $labels,
-			metadata: $metadata,
+			metadata_json: $metadataJSON,
 			embedding: $embedding,
 			embedding_model: $embeddingModel,
 			embedding_dimensions: $embeddingDimensions,
 			source_quality: $sourceQuality,
-			classification: $classification,
+			classification_json: $classificationJSON,
 			created_at: $createdAt,
 			updated_at: $updatedAt
 		})
@@ -251,18 +276,25 @@ func (s *createFragmentService) Create(ctx context.Context, profileID string, re
 		"sourceType":          string(fragment.SourceType),
 		"authority":           string(fragment.Authority),
 		"labels":              fragment.Labels,
-		"metadata":            fragment.Metadata,
+		"metadataJSON":        metadataJSON,
 		"embedding":           vec,
 		"embeddingModel":      fragment.EmbeddingModel,
 		"embeddingDimensions": fragment.EmbeddingDimensions,
 		"sourceQuality":       fragment.SourceQuality,
-		"classification":      fragment.Classification,
+		"classificationJSON":  classificationJSON,
 		"createdAt":           fragment.CreatedAt,
 		"updatedAt":           fragment.UpdatedAt,
 	}
 
 	_, err = s.writer.ScopedWrite(ctx, profileID, query, params)
 	if err != nil {
+		if s.logger != nil {
+			s.logger.Error("fragment create: persist failed",
+				slog.String("profile_id", profileID),
+				slog.String("fragment_id", fragment.FragmentID),
+				slog.String("error", err.Error()),
+			)
+		}
 		s.metrics.IncFragmentCreate("error")
 		return nil, fmt.Errorf("failed to persist fragment: %w", err)
 	}

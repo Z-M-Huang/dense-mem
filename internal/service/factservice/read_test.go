@@ -125,6 +125,25 @@ func TestGetFact(t *testing.T) {
 			"missing fact must return ErrFactNotFound, got: %v", err)
 	})
 
+	t.Run("decodes JSON encoded classification", func(t *testing.T) {
+		row := makeFactRow(factID, "Alice", "knows", "active", now)
+		row["classification"] = nil
+		row["classification_json"] = `{"domain":"test","confidentiality":"internal"}`
+		reader := &stubFactReader{
+			rowsByProfile: map[string][]map[string]any{
+				profileID: {row},
+			},
+		}
+		svc := NewGetFactService(reader)
+
+		got, err := svc.Get(ctx, profileID, factID)
+
+		require.NoError(t, err)
+		require.NotNil(t, got)
+		require.Equal(t, "test", got.Classification["domain"])
+		require.Equal(t, "internal", got.Classification["confidentiality"])
+	})
+
 	t.Run("propagates reader error", func(t *testing.T) {
 		readerErr := errors.New("neo4j unavailable")
 		reader := &stubFactReader{err: readerErr}

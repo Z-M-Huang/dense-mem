@@ -2,13 +2,13 @@ package handler
 
 import (
 	"errors"
-	"net/http"
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 
 	"github.com/dense-mem/dense-mem/internal/http/dto"
 	"github.com/dense-mem/dense-mem/internal/http/middleware"
+	"github.com/dense-mem/dense-mem/internal/http/response"
 	"github.com/dense-mem/dense-mem/internal/httperr"
 	"github.com/dense-mem/dense-mem/internal/service/communityservice"
 )
@@ -24,7 +24,8 @@ import (
 // Profile isolation invariant: the profileId from the URL is forwarded verbatim
 // to the service, which scopes the GDS graph projection to that profile only.
 type CommunityDetectHandler struct {
-	svc communityservice.DetectCommunityService
+	detectSvc communityservice.DetectCommunityService
+	listSvc   communityservice.ListCommunitiesService
 }
 
 // CommunityDetectHandlerInterface is the companion interface for CommunityDetectHandler.
@@ -36,8 +37,14 @@ type CommunityDetectHandlerInterface interface {
 var _ CommunityDetectHandlerInterface = (*CommunityDetectHandler)(nil)
 
 // NewCommunityDetectHandler constructs a CommunityDetectHandler.
-func NewCommunityDetectHandler(svc communityservice.DetectCommunityService) *CommunityDetectHandler {
-	return &CommunityDetectHandler{svc: svc}
+func NewCommunityDetectHandler(
+	detectSvc communityservice.DetectCommunityService,
+	listSvc communityservice.ListCommunitiesService,
+) *CommunityDetectHandler {
+	return &CommunityDetectHandler{
+		detectSvc: detectSvc,
+		listSvc:   listSvc,
+	}
 }
 
 // Handle triggers community detection for the profile identified by :profileId.
@@ -76,7 +83,7 @@ func (h *CommunityDetectHandler) Handle(c echo.Context) error {
 		return httperr.New(httperr.VALIDATION_ERROR, "malformed JSON body")
 	}
 
-	if err := h.svc.Detect(ctx, profileUUID.String()); err != nil {
+	if err := h.detectSvc.Detect(ctx, profileUUID.String()); err != nil {
 		if errors.Is(err, communityservice.ErrCommunityUnavailable) {
 			return httperr.New(httperr.SERVICE_UNAVAILABLE, "community detection service unavailable")
 		}
@@ -86,5 +93,10 @@ func (h *CommunityDetectHandler) Handle(c echo.Context) error {
 		return httperr.New(httperr.INTERNAL_ERROR, "community detection failed")
 	}
 
-	return c.JSON(http.StatusOK, map[string]bool{"detected": true})
+	communities, err := h.listSvc.List(ctx, profileUUID.String(), 0)
+	if err != nil {
+		return httperr.New(httperr.INTERNAL_ERROR, "community summary retrieval failed")
+	}
+
+	return response.SuccessOK(c, response.ToCommunityDetectResponse(communities))
 }

@@ -6,6 +6,7 @@ import (
 
 	"github.com/dense-mem/dense-mem/internal/domain"
 	"github.com/dense-mem/dense-mem/internal/service/classification"
+	"github.com/dense-mem/dense-mem/internal/service/fragmentcodec"
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 )
 
@@ -53,6 +54,7 @@ RETURN sf.fragment_id  AS fragment_id,
        sf.content       AS content,
        sf.source_quality AS source_quality,
        sf.classification AS classification,
+       sf.classification_json AS classification_json,
        sf.authority AS authority`
 
 // loadSupportingFragments fetches one or more SourceFragment nodes by ID,
@@ -90,8 +92,10 @@ func loadSupportingFragments(
 		fid, _ := row["fragment_id"].(string)
 		content, _ := row["content"].(string)
 		sq, _ := row["source_quality"].(float64)
-		// classification is stored as a nested map by the Neo4j driver.
-		classRaw, _ := row["classification"].(map[string]any)
+		classRaw := fragmentcodec.DecodeOptionalMap(row["classification"])
+		if classRaw == nil {
+			classRaw = fragmentcodec.DecodeOptionalMap(row["classification_json"])
+		}
 		authority, _ := row["authority"].(string)
 
 		found[fid] = struct{}{}

@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
+	"time"
 
 	"github.com/dense-mem/dense-mem/internal/config"
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
@@ -36,6 +38,10 @@ type leidenQuerier interface {
 	// same-profile SourceFragment, Claim, and Fact nodes only.
 	ProjectGraph(ctx context.Context, profileID, graphName string) error
 
+	// ToUndirected mutates the projected graph to add undirected relationships
+	// suitable for algorithms like Leiden that reject directed graphs.
+	ToUndirected(ctx context.Context, graphName string) error
+
 	// RunLeiden runs gds.leiden.write against graphName, writing community
 	// membership to each node's community_id property.
 	RunLeiden(ctx context.Context, graphName string) error
@@ -50,6 +56,7 @@ type leidenQuerier interface {
 type leidenServiceImpl struct {
 	locker  communityLocker
 	querier leidenQuerier
+	store   communitySummaryStore
 	cfg     config.ConfigProvider
 	logger  *slog.Logger
 }
@@ -72,9 +79,17 @@ func NewLeidenService(
 	return &leidenServiceImpl{
 		locker:  &pgCommunityLocker{db: db},
 		querier: &neo4jLeidenQuerier{client: neo4jClient},
+		store:   newNeo4jCommunityStore(neo4jClient),
 		cfg:     cfg,
 		logger:  logger,
 	}
+}
+
+func isEmptyCommunityProjectionError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "returned no nodes")
 }
 
 // Detect runs the Leiden community detection algorithm for profileID's
@@ -83,19 +98,35 @@ func NewLeidenService(
 // Step sequence:
 //  1. Acquire a per-profile Postgres advisory transaction lock.
 //  2. Estimate the GDS projection size against the AI_COMMUNITY_MAX_NODES cap.
-//  3. Reject with ErrCommunityGraphTooLarge when the cap is exceeded.
-//  4. Project only same-profile SourceFragment|Claim|Fact nodes and their
+//  3. Clear persisted summaries and return when the profile graph is empty.
+//  4. Reject with ErrCommunityGraphTooLarge when the cap is exceeded.
+//  5. Project only same-profile SourceFragment|Claim|Fact nodes and their
 //     same-profile relationships into a named GDS in-memory graph.
-//  5. Defer gds.graph.drop so the projection is always released on return.
-//  6. Run gds.leiden.write, writing community_id to each projected node.
+//  6. Defer gds.graph.drop so the projection is always released on return.
+//  7. Mutate the projected graph to an undirected relationship set.
+//  8. Run gds.leiden.write, writing community_id to each projected node.
 func (s *leidenServiceImpl) Detect(ctx context.Context, profileID string) error {
 	graphName := GraphNamePrefix + profileID + "-leiden"
 
 	return s.locker.WithCommunityLock(ctx, profileID, func(ctx context.Context) error {
+		clearCommunities := func() error {
+			if s.store == nil {
+				return nil
+			}
+			if err := s.store.Replace(ctx, profileID, nil); err != nil {
+				return fmt.Errorf("community summary replace (profile=%s): %w", profileID, err)
+			}
+			return nil
+		}
+
 		// --- 1. Estimate ---
 		nodeCount, err := s.querier.EstimateProjection(ctx, profileID, graphName)
 		if err != nil {
 			return fmt.Errorf("leiden estimate projection (profile=%s): %w", profileID, err)
+		}
+
+		if nodeCount == 0 {
+			return clearCommunities()
 		}
 
 		maxNodes := s.cfg.GetAICommunityMaxNodes()
@@ -113,6 +144,9 @@ func (s *leidenServiceImpl) Detect(ctx context.Context, profileID string) error 
 
 		// --- 2. Project ---
 		if err := s.querier.ProjectGraph(ctx, profileID, graphName); err != nil {
+			if isEmptyCommunityProjectionError(err) {
+				return clearCommunities()
+			}
 			return fmt.Errorf("leiden project graph (profile=%s): %w", profileID, err)
 		}
 
@@ -129,9 +163,25 @@ func (s *leidenServiceImpl) Detect(ctx context.Context, profileID string) error 
 			}
 		}()
 
-		// --- 4. Run Leiden write ---
+		// --- 4. Convert the projected graph to an undirected topology for Leiden ---
+		if err := s.querier.ToUndirected(ctx, graphName); err != nil {
+			return fmt.Errorf("leiden make undirected (profile=%s): %w", profileID, err)
+		}
+
+		// --- 5. Run Leiden write ---
 		if err := s.querier.RunLeiden(ctx, graphName); err != nil {
 			return fmt.Errorf("leiden write (profile=%s): %w", profileID, err)
+		}
+
+		if s.store != nil {
+			inputs, err := s.store.LoadSummaryInputs(ctx, profileID)
+			if err != nil {
+				return fmt.Errorf("community summary inputs (profile=%s): %w", profileID, err)
+			}
+			communities := buildCommunitySummaries(profileID, inputs, time.Now().UTC())
+			if err := s.store.Replace(ctx, profileID, communities); err != nil {
+				return fmt.Errorf("community summary replace (profile=%s): %w", profileID, err)
+			}
 		}
 
 		return nil
@@ -185,8 +235,9 @@ const (
 
 	// leidenRelQuery selects only relationships whose source and target both
 	// belong to the same profile, preventing cross-profile edges from leaking
-	// into the projection.
-	leidenRelQuery = "MATCH (s)-[r]->(t) WHERE s.profile_id = $profileId AND t.profile_id = $profileId RETURN id(s) AS source, id(t) AS target, type(r) AS type"
+	// into the projection. Community detection only depends on connectivity,
+	// so the relationship type is normalized for later undirected mutation.
+	leidenRelQuery = "MATCH (s)-[r]->(t) WHERE s.profile_id = $profileId AND t.profile_id = $profileId RETURN id(s) AS source, id(t) AS target, 'RELATED' AS type"
 )
 
 // neo4jLeidenQuerier implements leidenQuerier using a real Neo4j GDS client.
@@ -202,8 +253,7 @@ var _ leidenQuerier = (*neo4jLeidenQuerier)(nil)
 func (q *neo4jLeidenQuerier) EstimateProjection(ctx context.Context, profileID, graphName string) (int64, error) {
 	raw, err := q.client.ExecuteRead(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
 		result, runErr := tx.Run(ctx,
-			`CALL gds.graph.project.estimate(
-				$graphName,
+			`CALL gds.graph.project.cypher.estimate(
 				$nodeQuery,
 				$relQuery,
 				{parameters: {profileId: $profileId}}
@@ -248,7 +298,7 @@ func (q *neo4jLeidenQuerier) EstimateProjection(ctx context.Context, profileID, 
 func (q *neo4jLeidenQuerier) ProjectGraph(ctx context.Context, profileID, graphName string) error {
 	_, err := q.client.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
 		result, runErr := tx.Run(ctx,
-			`CALL gds.graph.project(
+			`CALL gds.graph.project.cypher(
 				$graphName,
 				$nodeQuery,
 				$relQuery,
@@ -271,6 +321,30 @@ func (q *neo4jLeidenQuerier) ProjectGraph(ctx context.Context, profileID, graphN
 	return err
 }
 
+// ToUndirected mutates the synthetic RELATED edges into an undirected
+// relationship set so Leiden can run on the projected graph.
+func (q *neo4jLeidenQuerier) ToUndirected(ctx context.Context, graphName string) error {
+	_, err := q.client.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
+		result, runErr := tx.Run(ctx,
+			`CALL gds.graph.relationships.toUndirected(
+				$graphName,
+				{
+					relationshipType: 'RELATED',
+					mutateRelationshipType: 'RELATED_UNDIRECTED'
+				}
+			)
+			YIELD inputRelationships, relationshipsWritten`,
+			map[string]any{"graphName": graphName},
+		)
+		if runErr != nil {
+			return nil, runErr
+		}
+		_, consumeErr := result.Consume(ctx)
+		return nil, consumeErr
+	})
+	return err
+}
+
 // RunLeiden executes gds.leiden.write against graphName, writing community
 // membership to the community_id property on each projected node.
 func (q *neo4jLeidenQuerier) RunLeiden(ctx context.Context, graphName string) error {
@@ -278,7 +352,10 @@ func (q *neo4jLeidenQuerier) RunLeiden(ctx context.Context, graphName string) er
 		result, runErr := tx.Run(ctx,
 			`CALL gds.leiden.write(
 				$graphName,
-				{writeProperty: 'community_id'}
+				{
+					writeProperty: 'community_id',
+					relationshipTypes: ['RELATED_UNDIRECTED']
+				}
 			)
 			YIELD communityCount, nodeCount`,
 			map[string]any{"graphName": graphName},

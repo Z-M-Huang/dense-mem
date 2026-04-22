@@ -2,6 +2,7 @@ package fragmentservice
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/dense-mem/dense-mem/internal/http/dto"
@@ -56,15 +57,19 @@ func TestCreatePersistsSourceQualityAndClassification(t *testing.T) {
 		t.Errorf("writer params sourceQuality = %v; want 0.85", sq)
 	}
 
-	cls, ok := writer.LastParams["classification"]
+	cls, ok := writer.LastParams["classificationJSON"]
 	if !ok {
-		t.Fatal("writer params missing classification")
+		t.Fatal("writer params missing classificationJSON")
 	}
-	clsMap, ok := cls.(map[string]any)
+	clsJSON, ok := cls.(string)
 	if !ok {
-		t.Fatalf("writer params classification is %T; want map[string]any", cls)
+		t.Fatalf("writer params classificationJSON is %T; want string", cls)
+	}
+	var clsMap map[string]any
+	if err := json.Unmarshal([]byte(clsJSON), &clsMap); err != nil {
+		t.Fatalf("failed to decode classificationJSON: %v", err)
 	}
 	if clsMap["topic"] != "science" {
-		t.Errorf("writer params classification[topic] = %v; want science", clsMap["topic"])
+		t.Errorf("writer params classificationJSON[topic] = %v; want science", clsMap["topic"])
 	}
 }

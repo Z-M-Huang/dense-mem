@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/dense-mem/dense-mem/internal/domain"
+	"github.com/dense-mem/dense-mem/internal/service/fragmentcodec"
 	"github.com/dense-mem/dense-mem/internal/storage/neo4j"
 )
 
@@ -66,12 +67,14 @@ func (l *neo4jDedupeLookup) ByIdempotencyKey(ctx context.Context, profileID, key
 		       sf.source_type AS source_type,
 		       sf.labels AS labels,
 		       sf.metadata AS metadata,
+		       sf.metadata_json AS metadata_json,
 		       sf.content_hash AS content_hash,
 		       sf.idempotency_key AS idempotency_key,
 		       sf.embedding_model AS embedding_model,
 		       sf.embedding_dimensions AS embedding_dimensions,
 		       sf.source_quality AS source_quality,
 		       sf.classification AS classification,
+		       sf.classification_json AS classification_json,
 		       sf.created_at AS created_at,
 		       sf.updated_at AS updated_at
 		LIMIT 1
@@ -108,12 +111,14 @@ func (l *neo4jDedupeLookup) ByContentHash(ctx context.Context, profileID, hash s
 		       sf.source_type AS source_type,
 		       sf.labels AS labels,
 		       sf.metadata AS metadata,
+		       sf.metadata_json AS metadata_json,
 		       sf.content_hash AS content_hash,
 		       sf.idempotency_key AS idempotency_key,
 		       sf.embedding_model AS embedding_model,
 		       sf.embedding_dimensions AS embedding_dimensions,
 		       sf.source_quality AS source_quality,
 		       sf.classification AS classification,
+		       sf.classification_json AS classification_json,
 		       sf.created_at AS created_at,
 		       sf.updated_at AS updated_at
 		LIMIT 1
@@ -162,10 +167,10 @@ func mapToFragment(m map[string]any) *domain.Fragment {
 			fragment.Labels = labels
 		}
 	}
-	if v, ok := m["metadata"]; ok {
-		if meta, ok := v.(map[string]any); ok {
-			fragment.Metadata = meta
-		}
+	if v := fragmentcodec.DecodeOptionalMap(m["metadata"]); v != nil {
+		fragment.Metadata = v
+	} else if v := fragmentcodec.DecodeOptionalMap(m["metadata_json"]); v != nil {
+		fragment.Metadata = v
 	}
 	if v, ok := m["content_hash"]; ok {
 		fragment.ContentHash, _ = v.(string)
@@ -192,10 +197,10 @@ func mapToFragment(m map[string]any) *domain.Fragment {
 			fragment.SourceQuality = float64(sq)
 		}
 	}
-	if v, ok := m["classification"]; ok {
-		if cls, ok := v.(map[string]any); ok {
-			fragment.Classification = cls
-		}
+	if v := fragmentcodec.DecodeOptionalMap(m["classification"]); v != nil {
+		fragment.Classification = v
+	} else if v := fragmentcodec.DecodeOptionalMap(m["classification_json"]); v != nil {
+		fragment.Classification = v
 	}
 	if v, ok := m["created_at"].(time.Time); ok {
 		fragment.CreatedAt = v

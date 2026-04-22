@@ -131,6 +131,7 @@ RETURN
     f.last_confirmed_at              AS last_confirmed_at,
     f.promoted_from_claim_id         AS promoted_from_claim_id,
     f.classification                 AS classification,
+    f.classification_json            AS classification_json,
     f.classification_lattice_version AS classification_lattice_version,
     f.source_quality                 AS source_quality,
     f.labels                         AS labels,

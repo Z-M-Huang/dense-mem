@@ -406,10 +406,10 @@ func retractFragmentTool(deps Dependencies) Tool {
 // --- detect_community -----------------------------------------------------
 
 func detectCommunityTool(deps Dependencies) Tool {
-	available := deps.CommunityDetect != nil
+	available := deps.CommunityDetect != nil && deps.CommunityList != nil
 	return Tool{
 		Name:        "detect_community",
-		Description: "Run graph community detection for the caller's profile using the Neo4j Graph Data Science plugin. Writes community IDs back to graph nodes.",
+		Description: "Run graph community detection for the caller's profile using the Neo4j Graph Data Science plugin, persist deterministic summaries, and return the current community set.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -421,7 +421,7 @@ func detectCommunityTool(deps Dependencies) Tool {
 		},
 		OutputSchema: map[string]any{
 			"type":       "object",
-			"properties": map[string]any{},
+			"properties": communityDetectObjectSchema(),
 		},
 		RequiredScopes: []string{"write"},
 		Available:      available,
@@ -432,7 +432,112 @@ func detectCommunityTool(deps Dependencies) Tool {
 			if err := deps.CommunityDetect.Detect(ctx, profileID); err != nil {
 				return nil, err
 			}
-			return map[string]any{}, nil
+			communities, err := deps.CommunityList.List(ctx, profileID, 0)
+			if err != nil {
+				return nil, err
+			}
+			items := make([]map[string]any, 0, len(communities))
+			nodeCount := 0
+			for _, community := range communities {
+				m, err := structToMap(community)
+				if err != nil {
+					return nil, err
+				}
+				items = append(items, m)
+				nodeCount += community.MemberCount
+			}
+			return map[string]any{
+				"detected":        true,
+				"community_count": len(items),
+				"node_count":      nodeCount,
+				"communities":     items,
+			}, nil
+		},
+	}
+}
+
+// --- get_community_summary ------------------------------------------------
+
+func getCommunitySummaryTool(deps Dependencies) Tool {
+	available := deps.CommunityGet != nil
+	return Tool{
+		Name:        "get_community_summary",
+		Description: "Fetch one persisted community summary by community_id within the caller's profile scope.",
+		InputSchema: map[string]any{
+			"type":     "object",
+			"required": []string{"community_id"},
+			"properties": map[string]any{
+				"community_id": schemaString("Community identifier.", 128),
+			},
+			"additionalProperties": false,
+		},
+		OutputSchema:   communityObjectSchema(),
+		RequiredScopes: []string{"read"},
+		Available:      available,
+		Invoke: func(ctx context.Context, profileID string, input map[string]any) (map[string]any, error) {
+			if !available {
+				return nil, ErrToolUnavailable
+			}
+			communityID, _ := input["community_id"].(string)
+			if communityID == "" {
+				return nil, errors.New("get_community_summary: community_id is required")
+			}
+			community, err := deps.CommunityGet.Get(ctx, profileID, communityID)
+			if err != nil {
+				return nil, err
+			}
+			return structToMap(community)
+		},
+	}
+}
+
+// --- list_communities -----------------------------------------------------
+
+func listCommunitiesTool(deps Dependencies) Tool {
+	available := deps.CommunityList != nil
+	return Tool{
+		Name:        "list_communities",
+		Description: "List persisted community summaries for the caller's profile, ordered by member_count descending.",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"limit": map[string]any{"type": "integer", "minimum": 0, "maximum": 100},
+			},
+			"additionalProperties": false,
+		},
+		OutputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"items": map[string]any{"type": "array", "items": communityObjectSchema()},
+				"total": map[string]any{"type": "integer"},
+			},
+		},
+		RequiredScopes: []string{"read"},
+		Available:      available,
+		Invoke: func(ctx context.Context, profileID string, input map[string]any) (map[string]any, error) {
+			if !available {
+				return nil, ErrToolUnavailable
+			}
+			limit := 20
+			if v, ok := input["limit"].(float64); ok {
+				limit = int(v)
+			}
+			communities, err := deps.CommunityList.List(ctx, profileID, limit)
+			if err != nil {
+				return nil, err
+			}
+			items := make([]map[string]any, 0, len(communities))
+			for _, community := range communities {
+				m, err := structToMap(community)
+				if err != nil {
+					return nil, err
+				}
+				items = append(items, m)
+			}
+			return map[string]any{
+				"items": items,
+				"total": len(items),
+			}, nil
 		},
 	}
 }
@@ -525,5 +630,31 @@ func factObjectSchema() map[string]any {
 			"metadata":                       map[string]any{"type": "object"},
 			"evidence":                       map[string]any{"type": "array", "items": evidenceObjectSchema()},
 		},
+	}
+}
+
+func communityObjectSchema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"community_id":       map[string]any{"type": "string"},
+			"profile_id":         map[string]any{"type": "string"},
+			"level":              map[string]any{"type": "integer"},
+			"summary":            map[string]any{"type": "string"},
+			"summary_version":    map[string]any{"type": "string"},
+			"member_count":       map[string]any{"type": "integer"},
+			"top_entities":       map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+			"top_predicates":     map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+			"last_summarized_at": map[string]any{"type": "string", "format": "date-time"},
+		},
+	}
+}
+
+func communityDetectObjectSchema() map[string]any {
+	return map[string]any{
+		"detected":        map[string]any{"type": "boolean"},
+		"community_count": map[string]any{"type": "integer"},
+		"node_count":      map[string]any{"type": "integer"},
+		"communities":     map[string]any{"type": "array", "items": communityObjectSchema()},
 	}
 }

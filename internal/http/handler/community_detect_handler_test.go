@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/dense-mem/dense-mem/internal/domain"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/require"
@@ -26,6 +27,17 @@ func (m *mockDetectCommunityService) Detect(ctx context.Context, profileID strin
 		return m.detectFunc(ctx, profileID)
 	}
 	return nil
+}
+
+type mockListCommunitiesService struct {
+	listFunc func(ctx context.Context, profileID string, limit int) ([]*domain.Community, error)
+}
+
+func (m *mockListCommunitiesService) List(ctx context.Context, profileID string, limit int) ([]*domain.Community, error) {
+	if m.listFunc != nil {
+		return m.listFunc(ctx, profileID, limit)
+	}
+	return []*domain.Community{{CommunityID: "42", ProfileID: profileID, MemberCount: 3}}, nil
 }
 
 // injectAdminPrincipal returns a middleware that injects an admin principal into
@@ -53,7 +65,7 @@ func TestCommunityDetectHandler(t *testing.T) {
 	t.Run("Returns200OnSuccess", func(t *testing.T) {
 		e := newTestEcho()
 		svc := &mockDetectCommunityService{}
-		h := NewCommunityDetectHandler(svc)
+		h := NewCommunityDetectHandler(svc, &mockListCommunitiesService{})
 
 		e.Use(injectAdminPrincipal())
 		e.POST(routePattern, h.Handle)
@@ -65,14 +77,18 @@ func TestCommunityDetectHandler(t *testing.T) {
 
 		require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
 
-		var body map[string]bool
+		var body struct {
+			Data struct {
+				Detected bool `json:"detected"`
+			} `json:"data"`
+		}
 		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
-		require.True(t, body["detected"], "response must include detected:true")
+		require.True(t, body.Data.Detected, "response must include detected:true")
 	})
 
 	t.Run("Returns401WhenNoPrincipal", func(t *testing.T) {
 		e := newTestEcho()
-		h := NewCommunityDetectHandler(&mockDetectCommunityService{})
+		h := NewCommunityDetectHandler(&mockDetectCommunityService{}, &mockListCommunitiesService{})
 		// No principal middleware — context has no principal.
 		e.POST(routePattern, h.Handle)
 
@@ -90,7 +106,7 @@ func TestCommunityDetectHandler(t *testing.T) {
 
 	t.Run("Returns403ForNonAdmin", func(t *testing.T) {
 		e := newTestEcho()
-		h := NewCommunityDetectHandler(&mockDetectCommunityService{})
+		h := NewCommunityDetectHandler(&mockDetectCommunityService{}, &mockListCommunitiesService{})
 		profileID := uuid.New()
 
 		// Inject a standard (non-admin) principal.
@@ -122,7 +138,7 @@ func TestCommunityDetectHandler(t *testing.T) {
 
 	t.Run("Returns400OnInvalidUUID", func(t *testing.T) {
 		e := newTestEcho()
-		h := NewCommunityDetectHandler(&mockDetectCommunityService{})
+		h := NewCommunityDetectHandler(&mockDetectCommunityService{}, &mockListCommunitiesService{})
 		e.Use(injectAdminPrincipal())
 		e.POST(routePattern, h.Handle)
 
@@ -144,7 +160,7 @@ func TestCommunityDetectHandler(t *testing.T) {
 				return communityservice.ErrCommunityUnavailable
 			},
 		}
-		h := NewCommunityDetectHandler(svc)
+		h := NewCommunityDetectHandler(svc, &mockListCommunitiesService{})
 		e.Use(injectAdminPrincipal())
 		e.POST(routePattern, h.Handle)
 
@@ -167,7 +183,7 @@ func TestCommunityDetectHandler(t *testing.T) {
 				return communityservice.ErrCommunityGraphTooLarge
 			},
 		}
-		h := NewCommunityDetectHandler(svc)
+		h := NewCommunityDetectHandler(svc, &mockListCommunitiesService{})
 		e.Use(injectAdminPrincipal())
 		e.POST(routePattern, h.Handle)
 
@@ -190,7 +206,7 @@ func TestCommunityDetectHandler(t *testing.T) {
 				return context.DeadlineExceeded
 			},
 		}
-		h := NewCommunityDetectHandler(svc)
+		h := NewCommunityDetectHandler(svc, &mockListCommunitiesService{})
 		e.Use(injectAdminPrincipal())
 		e.POST(routePattern, h.Handle)
 
@@ -223,7 +239,7 @@ func TestCommunityDetectHandler_CrossProfileIsolation(t *testing.T) {
 			return nil
 		},
 	}
-	h := NewCommunityDetectHandler(svc)
+	h := NewCommunityDetectHandler(svc, &mockListCommunitiesService{})
 
 	makeRequest := func(profileID uuid.UUID) *httptest.ResponseRecorder {
 		e := newTestEcho()

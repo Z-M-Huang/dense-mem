@@ -331,6 +331,32 @@ func TestPromoteHappyPaths(t *testing.T) {
 		require.Equal(t, "ephemeral", got.Classification["retention"]) // lattice minimum
 		require.Equal(t, "none", got.Classification["pii"])            // lattice minimum
 	})
+
+	t.Run("JSON encoded claim classification is decoded before promotion", func(t *testing.T) {
+		claimRow := makeClaimRow("claim-class-json", "Alice", "likes", "tea", string(domain.StatusValidated))
+		claimRow["classification"] = nil
+		claimRow["classification_json"] = `{"confidentiality":"internal","domain":"prefs"}`
+		db := &stubPromoteDB{
+			responsesByCall: map[int][]map[string]any{
+				0: {claimRow},
+				1: {},
+			},
+		}
+		svc := newTestService(db, &stubClaimLocker{}, &captureAuditEmitter{}, observability.NewInMemoryDiscoverabilityMetrics())
+
+		got, err := svc.Promote(ctx, profileID, "claim-class-json")
+
+		require.NoError(t, err)
+		require.NotNil(t, got)
+		require.Equal(t, "internal", got.Classification["confidentiality"])
+		require.Equal(t, "prefs", got.Classification["domain"])
+	})
+}
+
+func TestPromoteQueriesUseJSONClassificationStorage(t *testing.T) {
+	require.Contains(t, loadClaimForPromoteCypher, "c.classification_json             AS classification_json")
+	require.Contains(t, idempotencyCheckCypher, "f.classification_json            AS classification_json")
+	require.Contains(t, createFactAndEdgeCypher, "classification_json:           $classificationJSON")
 }
 
 // TestPromoteHappyPaths_CrossProfileIsolation verifies that a claim belonging

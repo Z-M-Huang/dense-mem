@@ -42,6 +42,8 @@ type Dependencies struct {
 	FactList        factservice.ListFactsService
 	FragmentRetract fragmentservice.RetractFragmentService
 	CommunityDetect communityservice.DetectCommunityService
+	CommunityGet    communityservice.GetCommunitySummaryService
+	CommunityList   communityservice.ListCommunitiesService
 
 	EmbeddingConfigured bool
 }
@@ -82,6 +84,8 @@ func defaultTools(deps Dependencies) []Tool {
 		listFactsTool(deps),
 		retractFragmentTool(deps),
 		detectCommunityTool(deps),
+		getCommunitySummaryTool(deps),
+		listCommunitiesTool(deps),
 	}
 }
 

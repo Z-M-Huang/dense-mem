@@ -11,7 +11,11 @@
 // false.
 package communityservice
 
-import "context"
+import (
+	"context"
+
+	"github.com/dense-mem/dense-mem/internal/domain"
+)
 
 // DetectCommunityService defines the interface for running graph community
 // detection using the Neo4j Graph Data Science plugin.
@@ -28,4 +32,18 @@ type DetectCommunityService interface {
 	// It writes community membership back to each node as a property and
 	// returns an error when detection cannot complete.
 	Detect(ctx context.Context, profileID string) error
+}
+
+// GetCommunitySummaryService fetches one persisted community summary.
+type GetCommunitySummaryService interface {
+	// Get returns the persisted community summary identified by communityID.
+	// Cross-profile reads must return ErrCommunityNotFound.
+	Get(ctx context.Context, profileID string, communityID string) (*domain.Community, error)
+}
+
+// ListCommunitiesService lists persisted community summaries for a profile.
+type ListCommunitiesService interface {
+	// List returns persisted community summaries ordered by member_count DESC,
+	// community_id ASC. A limit <= 0 returns the full set.
+	List(ctx context.Context, profileID string, limit int) ([]*domain.Community, error)
 }

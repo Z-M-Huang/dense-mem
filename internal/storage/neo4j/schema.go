@@ -3,6 +3,7 @@ package neo4j
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/dense-mem/dense-mem/internal/observability"
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
@@ -20,12 +21,12 @@ const (
 	IndexFragmentProfileCreatedAt   = "fragment_profile_created_at_idx"
 
 	// Composite indexes for Claim nodes — profile_id is leading key (Unit 12, AC-3)
-	IndexClaimProfileClaimID           = "claim_profile_claim_id_idx"
-	IndexClaimProfileStatus            = "claim_profile_status_idx"
-	IndexClaimProfilePredicate         = "claim_profile_predicate_idx"
-	IndexClaimProfileSubjectPredicate  = "claim_profile_subject_predicate_idx"
-	IndexClaimProfileIdempotency       = "claim_profile_idempotency_idx"
-	IndexClaimProfileContentHash       = "claim_profile_content_hash_idx"
+	IndexClaimProfileClaimID          = "claim_profile_claim_id_idx"
+	IndexClaimProfileStatus           = "claim_profile_status_idx"
+	IndexClaimProfilePredicate        = "claim_profile_predicate_idx"
+	IndexClaimProfileSubjectPredicate = "claim_profile_subject_predicate_idx"
+	IndexClaimProfileIdempotency      = "claim_profile_idempotency_idx"
+	IndexClaimProfileContentHash      = "claim_profile_content_hash_idx"
 
 	// Composite indexes for Fact nodes — profile_id is leading key (Unit 12, AC-4)
 	IndexFactProfileStatus                 = "fact_profile_status_idx"
@@ -33,6 +34,8 @@ const (
 
 	// Composite index for SourceFragment nodes — profile_id is leading key (Unit 12, AC-5)
 	IndexSourceFragmentProfileStatus = "sourcefragment_profile_status_idx"
+	// Persisted community summary lookups.
+	IndexCommunityProfileCommunityID = "community_profile_community_id_idx"
 
 	// Relationship profile_id existence constraints (Unit 13, AC-X1)
 	// These names are canonical identifiers stored in Neo4j metadata.
@@ -51,9 +54,9 @@ type SchemaBootstrapperInterface interface {
 // SchemaBootstrapper creates Neo4j schema elements (constraints, indexes).
 // It is idempotent - re-running against an existing database must not error.
 type SchemaBootstrapper struct {
-	client             Neo4jClientInterface
+	client              Neo4jClientInterface
 	embeddingDimensions int
-	logger             observability.LogProvider
+	logger              observability.LogProvider
 }
 
 // Ensure SchemaBootstrapper implements SchemaBootstrapperInterface
@@ -62,10 +65,21 @@ var _ SchemaBootstrapperInterface = (*SchemaBootstrapper)(nil)
 // NewSchemaBootstrapper creates a new schema bootstrapper.
 func NewSchemaBootstrapper(client Neo4jClientInterface, embeddingDimensions int, logger observability.LogProvider) *SchemaBootstrapper {
 	return &SchemaBootstrapper{
-		client:             client,
+		client:              client,
 		embeddingDimensions: embeddingDimensions,
-		logger:             logger,
+		logger:              logger,
 	}
+}
+
+func isUnsupportedRelationshipConstraintError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "property existence constraint requires neo4j enterprise edition") ||
+		strings.Contains(msg, "relationship property existence constraints are not allowed") ||
+		strings.Contains(msg, "unsupported administration command")
 }
 
 // EnsureSchema creates all required constraints and indexes if they don't exist.
@@ -122,6 +136,14 @@ func (s *SchemaBootstrapper) EnsureSchema(ctx context.Context) error {
 			return nil, err
 		})
 		if err != nil {
+			if isUnsupportedRelationshipConstraintError(err) {
+				s.logger.Warn(
+					"skipping relationship profile_id constraint; unsupported by connected Neo4j edition",
+					observability.String("name", rc.name),
+					observability.String("error", err.Error()),
+				)
+				continue
+			}
 			return fmt.Errorf("failed to create relationship constraint %s: %w", rc.name, err)
 		}
 		s.logger.Debug("Created relationship constraint", observability.String("name", rc.name))
@@ -132,6 +154,7 @@ func (s *SchemaBootstrapper) EnsureSchema(ctx context.Context) error {
 		"CREATE INDEX sourcefragment_profile_id_idx IF NOT EXISTS FOR (sf:SourceFragment) ON (sf.profile_id)",
 		"CREATE INDEX claim_profile_id_idx IF NOT EXISTS FOR (c:Claim) ON (c.profile_id)",
 		"CREATE INDEX fact_profile_id_idx IF NOT EXISTS FOR (f:Fact) ON (f.profile_id)",
+		"CREATE INDEX community_profile_id_idx IF NOT EXISTS FOR (c:Community) ON (c.profile_id)",
 	}
 
 	for _, cypher := range indexes {
@@ -288,6 +311,10 @@ func (s *SchemaBootstrapper) EnsureSchema(ctx context.Context) error {
 		{
 			"CREATE INDEX sourcefragment_profile_status_idx IF NOT EXISTS FOR (sf:SourceFragment) ON (sf.profile_id, sf.status)",
 			IndexSourceFragmentProfileStatus,
+		},
+		{
+			"CREATE INDEX community_profile_community_id_idx IF NOT EXISTS FOR (c:Community) ON (c.profile_id, c.community_id)",
+			IndexCommunityProfileCommunityID,
 		},
 	}
 

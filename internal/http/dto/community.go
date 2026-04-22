@@ -1,5 +1,7 @@
 package dto
 
+import "time"
+
 // CommunityDetectRequest is the request body for triggering community detection
 // on a profile's knowledge graph via
 // POST /api/v1/admin/profiles/:profileId/community/detect.
@@ -18,4 +20,36 @@ type CommunityDetectRequest struct {
 	// MaxLevels caps the number of hierarchical community-merge levels.
 	// Defaults to 10 when zero.
 	MaxLevels int `json:"max_levels,omitempty" validate:"omitempty,gte=1"`
+}
+
+// CommunityResponse is the public representation of a persisted community summary.
+type CommunityResponse struct {
+	CommunityID      string    `json:"community_id"`
+	ProfileID        string    `json:"profile_id"`
+	Level            int       `json:"level"`
+	Summary          string    `json:"summary"`
+	SummaryVersion   string    `json:"summary_version"`
+	MemberCount      int       `json:"member_count"`
+	TopEntities      []string  `json:"top_entities,omitempty"`
+	TopPredicates    []string  `json:"top_predicates,omitempty"`
+	LastSummarizedAt time.Time `json:"last_summarized_at"`
+}
+
+// ListCommunitiesRequest represents query parameters for listing communities.
+type ListCommunitiesRequest struct {
+	Limit int `query:"limit" validate:"min=0,max=100"`
+}
+
+// ListCommunitiesResponse is the list envelope for community summaries.
+type ListCommunitiesResponse struct {
+	Items []CommunityResponse `json:"items"`
+	Total int                 `json:"total"`
+}
+
+// CommunityDetectResponse is the success payload returned after detection runs.
+type CommunityDetectResponse struct {
+	Detected       bool                `json:"detected"`
+	CommunityCount int                 `json:"community_count"`
+	NodeCount      int                 `json:"node_count"`
+	Communities    []CommunityResponse `json:"communities,omitempty"`
 }

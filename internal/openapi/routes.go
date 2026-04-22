@@ -73,6 +73,8 @@ func DefaultRoutes() []RouteDescriptor {
 		// --- Facts (AI-safe, knowledge pipeline Phase 4) ---
 		{Method: "GET", Path: "/api/v1/facts/{id}", OperationID: "getFact", ResponseSchema: "FactResponse", AISafe: true, Tags: []string{"knowledge"}, Description: "Fetch a single promoted fact by id."},
 		{Method: "GET", Path: "/api/v1/facts", OperationID: "listFacts", AISafe: true, Tags: []string{"knowledge"}, Description: "List promoted facts (keyset pagination)."},
+		{Method: "GET", Path: "/api/v1/communities", OperationID: "listCommunities", ResponseSchema: "ListCommunitiesResponse", AISafe: true, Tags: []string{"community"}, Description: "List persisted community summaries for the caller's profile."},
+		{Method: "GET", Path: "/api/v1/communities/{id}", OperationID: "getCommunitySummary", ResponseSchema: "CommunityResponse", AISafe: true, Tags: []string{"community"}, Description: "Fetch one persisted community summary by community_id."},
 
 		// --- Fragments (AI-safe) ---
 		{Method: "POST", Path: "/api/v1/fragments", OperationID: "createFragment", ToolName: "save_memory", AISafe: true, Description: "Save a new memory fragment."},
@@ -122,6 +124,6 @@ func DefaultRoutes() []RouteDescriptor {
 		{Method: "POST", Path: "/api/v1/admin/graph/query", OperationID: "adminGraphQuery", AdminOnly: true, Description: "Admin: raw Cypher with profile-scope injection."},
 		{Method: "POST", Path: "/api/v1/admin/invariant-scan", OperationID: "adminInvariantScan", AdminOnly: true, Description: "Admin: scan for invariant violations."},
 		// Phase 7: community detection (AC-49, AC-50, AC-52, AC-53, AC-54)
-		{Method: "POST", Path: "/api/v1/admin/profiles/{profileId}/community/detect", OperationID: "adminDetectCommunity", RequestSchema: "CommunityDetectRequest", AdminOnly: true, Tags: []string{"community"}, Description: "Admin: trigger community detection for a profile's knowledge graph using the Neo4j GDS plugin."},
+		{Method: "POST", Path: "/api/v1/admin/profiles/{profileId}/community/detect", OperationID: "adminDetectCommunity", RequestSchema: "CommunityDetectRequest", ResponseSchema: "CommunityDetectResponse", AdminOnly: true, Tags: []string{"community"}, Description: "Admin: trigger community detection for a profile's knowledge graph using the Neo4j GDS plugin."},
 	}
 }

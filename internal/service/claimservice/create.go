@@ -9,6 +9,7 @@ import (
 	"github.com/dense-mem/dense-mem/internal/domain"
 	"github.com/dense-mem/dense-mem/internal/observability"
 	"github.com/dense-mem/dense-mem/internal/service/claimidentity"
+	"github.com/dense-mem/dense-mem/internal/service/fragmentcodec"
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 )
 
@@ -111,7 +112,7 @@ ON CREATE SET
     c.pipeline_run_id                = $pipelineRunId,
     c.content_hash                   = $contentHash,
     c.idempotency_key                = $idempotencyKey,
-    c.classification                 = $classification,
+    c.classification_json            = $classificationJSON,
     c.classification_lattice_version = $classificationLatticeVersion,
     c.supported_by                   = $supportedBy
 WITH c
@@ -269,6 +270,13 @@ func (s *createClaimServiceImpl) Create(ctx context.Context, profileID string, c
 		SupportedBy: claim.SupportedBy,
 	}
 	newClaim.Evidence = make([]domain.Evidence, 0, len(support.Fragments))
+	classificationJSON, err := fragmentcodec.EncodeOptionalMap(newClaim.Classification)
+	if err != nil {
+		if s.metrics != nil {
+			s.metrics.IncClaimCreate("error", "")
+		}
+		return nil, fmt.Errorf("claim create: encode classification: %w", err)
+	}
 
 	// Step 8: persist to graph.
 	//
@@ -332,7 +340,7 @@ func (s *createClaimServiceImpl) Create(ctx context.Context, profileID string, c
 		"pipelineRunId":                newClaim.PipelineRunID,
 		"contentHash":                  newClaim.ContentHash,
 		"idempotencyKey":               newClaim.IdempotencyKey,
-		"classification":               newClaim.Classification,
+		"classificationJSON":           classificationJSON,
 		"classificationLatticeVersion": newClaim.ClassificationLatticeVersion,
 		"supportedBy":                  newClaim.SupportedBy,
 		// edges drives the UNWIND ... MERGE for SUPPORTED_BY relationships.

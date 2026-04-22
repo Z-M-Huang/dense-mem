@@ -8,6 +8,7 @@ import (
 	"github.com/dense-mem/dense-mem/internal/domain"
 	"github.com/dense-mem/dense-mem/internal/observability"
 	"github.com/dense-mem/dense-mem/internal/service/claimidentity"
+	"github.com/dense-mem/dense-mem/internal/service/fragmentcodec"
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 	"github.com/stretchr/testify/require"
 )
@@ -42,18 +43,20 @@ var _ claimDedupeLookup = (*stubClaimDedupeLookup)(nil)
 // stubClaimWriter captures ScopedWrite invocations for post-call assertions.
 type stubClaimWriter struct {
 	written []map[string]any
+	queries []string
 	err     error
 }
 
 func (s *stubClaimWriter) ScopedWrite(
 	_ context.Context,
 	_ string,
-	_ string,
+	query string,
 	params map[string]any,
 ) (neo4j.ResultSummary, error) {
 	if s.err != nil {
 		return nil, s.err
 	}
+	s.queries = append(s.queries, query)
 	s.written = append(s.written, params)
 	return nil, nil
 }
@@ -210,6 +213,14 @@ func TestCreateClaimDedupeAndDefaults(t *testing.T) {
 
 		// Exactly one write to the graph.
 		require.Len(t, writer.written, 1, "exactly one graph write expected")
+		require.Len(t, writer.queries, 1, "exactly one graph query expected")
+		require.Contains(t, writer.queries[0], "c.classification_json            = $classificationJSON")
+
+		classificationJSON, ok := writer.written[0]["classificationJSON"].(string)
+		require.True(t, ok, "claim writes must encode classification as JSON")
+		require.Equal(t, c.Classification, fragmentcodec.DecodeOptionalMap(classificationJSON))
+		_, hasLegacyClassification := writer.written[0]["classification"]
+		require.False(t, hasLegacyClassification, "legacy raw map classification param must not be used")
 	})
 
 	t.Run("fresh claim with idempotency key derives claim_id from key", func(t *testing.T) {

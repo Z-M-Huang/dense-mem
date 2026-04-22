@@ -211,6 +211,7 @@ func TestUAT10_ToolCatalogAndOpenAPI(t *testing.T) {
 		"verify_claim", "promote_claim",
 		"get_fact", "list_facts",
 		"retract_fragment", "detect_community",
+		"get_community_summary", "list_communities",
 	} {
 		assert.True(t, seen[name], "registry must list %q after BuildDefault", name)
 	}

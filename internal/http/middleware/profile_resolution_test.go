@@ -133,6 +133,55 @@ func TestProfileResolution_Header_Valid(t *testing.T) {
 	assert.Equal(t, profileID, capturedProfileID)
 }
 
+func TestProfileResolution_HeaderScopedCanonicalRoutes(t *testing.T) {
+	routes := []string{
+		"/api/v1/fragments",
+		"/api/v1/claims",
+		"/api/v1/facts",
+		"/api/v1/communities",
+		"/api/v1/recall",
+	}
+
+	for _, route := range routes {
+		t.Run(route, func(t *testing.T) {
+			e := echo.New()
+			e.HTTPErrorHandler = httperr.ErrorHandler
+
+			profileID := uuid.New()
+			profile := &domain.Profile{
+				ID:        profileID,
+				Name:      "test-profile",
+				CreatedAt: time.Now().UTC(),
+				UpdatedAt: time.Now().UTC(),
+			}
+
+			mockSvc := &mockProfileResolutionService{
+				getFunc: func(ctx context.Context, id uuid.UUID) (*domain.Profile, error) {
+					assert.Equal(t, profileID, id)
+					return profile, nil
+				},
+			}
+
+			var capturedProfileID uuid.UUID
+			e.POST(route, func(c echo.Context) error {
+				id, ok := GetResolvedProfileID(c.Request().Context())
+				require.True(t, ok, "profile ID should be in context")
+				capturedProfileID = id
+				return c.String(http.StatusOK, "ok")
+			}, ProfileResolutionMiddleware(mockSvc))
+
+			req := httptest.NewRequest(http.MethodPost, route, nil)
+			req.Header.Set(ProfileIDHeader, profileID.String())
+			rec := httptest.NewRecorder()
+
+			e.ServeHTTP(rec, req)
+
+			assert.Equal(t, http.StatusOK, rec.Code)
+			assert.Equal(t, profileID, capturedProfileID)
+		})
+	}
+}
+
 // TestProfileResolution_Header_Missing tests that a missing X-Profile-ID header
 // on tool routes returns a 400 PROFILE_ID_REQUIRED error.
 func TestProfileResolution_Header_Missing(t *testing.T) {

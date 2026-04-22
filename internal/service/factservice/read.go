@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/dense-mem/dense-mem/internal/domain"
+	"github.com/dense-mem/dense-mem/internal/service/fragmentcodec"
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 )
 
@@ -81,6 +82,7 @@ RETURN
     f.last_confirmed_at              AS last_confirmed_at,
     f.promoted_from_claim_id         AS promoted_from_claim_id,
     f.classification                 AS classification,
+    f.classification_json            AS classification_json,
     f.classification_lattice_version AS classification_lattice_version,
     f.source_quality                 AS source_quality,
     f.labels                         AS labels,
@@ -145,14 +147,13 @@ func rowToFact(profileID string, row map[string]any) *domain.Fact {
 	}
 
 	var classification map[string]any
-	if m, ok := row["classification"].(map[string]any); ok {
-		classification = m
+	if decoded := fragmentcodec.DecodeOptionalMap(row["classification"]); decoded != nil {
+		classification = decoded
+	} else if decoded := fragmentcodec.DecodeOptionalMap(row["classification_json"]); decoded != nil {
+		classification = decoded
 	}
 
-	var metadata map[string]any
-	if m, ok := row["metadata"].(map[string]any); ok {
-		metadata = m
-	}
+	metadata := fragmentcodec.DecodeOptionalMap(row["metadata"])
 
 	var evidence []domain.Evidence
 	if raw, ok := row["evidence"].([]any); ok {

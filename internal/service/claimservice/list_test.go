@@ -195,6 +195,21 @@ func TestListClaims(t *testing.T) {
 		require.InDelta(t, 0.8, c.ResolutionConf, 1e-9)
 		require.InDelta(t, 0.7, c.SourceQuality, 1e-9)
 	})
+
+	t.Run("decodes JSON encoded classification from list rows", func(t *testing.T) {
+		row := makeRow("claim-json", "candidate", "likes", "Bob", now)
+		row["classification_json"] = `{"confidentiality":"internal"}`
+		reader := &stubClaimReader{
+			rowsByProfile: map[string][]map[string]any{profileID: {row}},
+		}
+		svc := NewListClaimsFilteredService(reader)
+
+		result, err := svc.List(ctx, profileID, ListClaimOptions{})
+
+		require.NoError(t, err)
+		require.Len(t, result.Items, 1)
+		require.Equal(t, "internal", result.Items[0].Classification["confidentiality"])
+	})
 }
 
 // TestListClaims_CrossProfileIsolation verifies that claims belonging to profile

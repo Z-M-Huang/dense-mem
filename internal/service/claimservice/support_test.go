@@ -158,6 +158,29 @@ func TestLoadSupportingFragments(t *testing.T) {
 		require.Equal(t, "long_term", got.MergedClassification["retention"])
 	})
 
+	t.Run("decodes JSON encoded fragment classification", func(t *testing.T) {
+		reader := &stubScopedReader{
+			rowsByProfile: map[string][]map[string]any{
+				profileID: {
+					{
+						"fragment_id":          "frag-json",
+						"content":              "json encoded",
+						"source_quality":       0.55,
+						"classification":       nil,
+						"classification_json":  `{"confidentiality":"internal","pii":"none"}`,
+						"authority":            "primary",
+					},
+				},
+			},
+		}
+
+		got, err := loadSupportingFragments(ctx, reader, profileID, []string{"frag-json"})
+		require.NoError(t, err)
+		require.Len(t, got.Fragments, 1)
+		require.Equal(t, "internal", got.MergedClassification["confidentiality"])
+		require.Equal(t, "none", got.Fragments[0].Classification["pii"])
+	})
+
 	t.Run("propagates reader error", func(t *testing.T) {
 		reader := &stubScopedReader{err: errors.New("neo4j unavailable")}
 

@@ -222,6 +222,24 @@ func TestListFacts(t *testing.T) {
 		require.ElementsMatch(t, []string{"tag-a", "tag-b"}, f.Labels)
 	})
 
+	t.Run("decodes JSON encoded classification from list rows", func(t *testing.T) {
+		row := makeFactRow("fact-json", "Bob", "has_skill", "active", now)
+		row["classification"] = nil
+		row["classification_json"] = `{"domain":"test","confidentiality":"internal"}`
+		reader := &stubFactReader{
+			responsesByCall: map[int][]map[string]any{
+				0: {row},
+			},
+		}
+		svc := NewListFactsService(reader)
+
+		facts, _, err := svc.List(ctx, profileID, FactListFilters{}, 10, "")
+
+		require.NoError(t, err)
+		require.Len(t, facts, 1)
+		require.Equal(t, "internal", facts[0].Classification["confidentiality"])
+	})
+
 	t.Run("propagates reader error", func(t *testing.T) {
 		readerErr := errors.New("neo4j unavailable")
 		reader := &stubFactReader{err: readerErr}

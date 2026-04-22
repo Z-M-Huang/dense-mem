@@ -163,6 +163,7 @@ RETURN c.claim_id                        AS claim_id,
        c.content_hash                    AS content_hash,
        c.idempotency_key                 AS idempotency_key,
        c.classification                  AS classification,
+       c.classification_json             AS classification_json,
        c.classification_lattice_version  AS classification_lattice_version,
        [] AS supported_by
 ORDER BY c.recorded_at DESC, c.claim_id DESC

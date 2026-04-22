@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/dense-mem/dense-mem/internal/domain"
+	"github.com/dense-mem/dense-mem/internal/service/fragmentcodec"
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 )
 
@@ -89,6 +90,7 @@ RETURN
     c.content_hash                    AS content_hash,
     c.idempotency_key                 AS idempotency_key,
     c.classification                  AS classification,
+    c.classification_json             AS classification_json,
     c.classification_lattice_version  AS classification_lattice_version,
     collect(sf.fragment_id)           AS supported_by,
     collect(CASE
@@ -184,10 +186,11 @@ func rowToClaim(profileID string, row map[string]any) *domain.Claim {
 		}
 	}
 
-	// classification is stored as a map property on the Claim node.
 	var classification map[string]any
-	if m, ok := row["classification"].(map[string]any); ok {
-		classification = m
+	if decoded := fragmentcodec.DecodeOptionalMap(row["classification"]); decoded != nil {
+		classification = decoded
+	} else if decoded := fragmentcodec.DecodeOptionalMap(row["classification_json"]); decoded != nil {
+		classification = decoded
 	}
 
 	var evidence []domain.Evidence

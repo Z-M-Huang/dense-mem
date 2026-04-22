@@ -26,14 +26,15 @@ import (
 // recordingClient records every Cypher string passed to ExecuteWrite/ExecuteRead.
 // It satisfies Neo4jClientInterface without requiring a live driver.
 type recordingClient struct {
-	queries []string
-	writeErr error // if non-nil, ExecuteWrite returns this error
+	queries   []string
+	writeErr  error // if non-nil, ExecuteWrite returns this error
+	runErrFor func(cypher string) error
 }
 
 func (c *recordingClient) Verify(_ context.Context) error { return nil }
 
 func (c *recordingClient) ExecuteRead(ctx context.Context, fn neo4j.ManagedTransactionWork) (any, error) {
-	tx := &recordingTx{queries: &c.queries}
+	tx := &recordingTx{queries: &c.queries, runErrFor: c.runErrFor}
 	return fn(tx)
 }
 
@@ -41,7 +42,7 @@ func (c *recordingClient) ExecuteWrite(ctx context.Context, fn neo4j.ManagedTran
 	if c.writeErr != nil {
 		return nil, c.writeErr
 	}
-	tx := &recordingTx{queries: &c.queries}
+	tx := &recordingTx{queries: &c.queries, runErrFor: c.runErrFor}
 	return fn(tx)
 }
 
@@ -51,11 +52,17 @@ func (c *recordingClient) Close(_ context.Context) error { return nil }
 // (satisfies the unexported legacy() method) and overriding Run to capture queries.
 type recordingTx struct {
 	neo4j.ManagedTransaction // embedded nil satisfies legacy() at compile time
-	queries *[]string
+	queries                  *[]string
+	runErrFor                func(cypher string) error
 }
 
 func (r *recordingTx) Run(_ context.Context, cypher string, _ map[string]any) (neo4j.ResultWithContext, error) {
 	*r.queries = append(*r.queries, cypher)
+	if r.runErrFor != nil {
+		if err := r.runErrFor(cypher); err != nil {
+			return nil, err
+		}
+	}
 	return &stubResultWithContext{}, nil
 }
 
@@ -746,9 +753,9 @@ func TestRelationshipProfileConstraints(t *testing.T) {
 		require.NoError(t, err)
 
 		wantConstraints := []struct {
-			name        string
-			relType     string
-			constName   string
+			name      string
+			relType   string
+			constName string
 		}{
 			{"SUPPORTED_BY", "SUPPORTED_BY", ConstraintSupportedByProfileIDExists},
 			{"PROMOTES_TO", "PROMOTES_TO", ConstraintPromotesToProfileIDExists},
@@ -779,6 +786,41 @@ func TestRelationshipProfileConstraints(t *testing.T) {
 		}
 	})
 
+}
+
+func TestEnsureSchema_RelationshipConstraintsUnsupportedDoesNotFail(t *testing.T) {
+	ctx := context.Background()
+	client := &recordingClient{
+		runErrFor: func(cypher string) error {
+			if strings.Contains(cypher, "REQUIRE r.profile_id IS NOT NULL") {
+				return fmt.Errorf("Neo4jError: Neo.DatabaseError.Schema.ConstraintCreationFailed (Property existence constraint requires Neo4j Enterprise Edition.)")
+			}
+			return nil
+		},
+	}
+	bs := NewSchemaBootstrapper(client, 1536, unitLogger())
+
+	err := bs.EnsureSchema(ctx)
+	require.NoError(t, err)
+	assert.True(t, hasQuery(client.queries, IndexCommunityProfileCommunityID),
+		"EnsureSchema must continue creating later indexes when relationship constraints are unsupported")
+}
+
+func TestEnsureSchema_RelationshipConstraintUnexpectedFailureReturnsError(t *testing.T) {
+	ctx := context.Background()
+	client := &recordingClient{
+		runErrFor: func(cypher string) error {
+			if strings.Contains(cypher, ConstraintSupportedByProfileIDExists) {
+				return fmt.Errorf("boom")
+			}
+			return nil
+		},
+	}
+	bs := NewSchemaBootstrapper(client, 1536, unitLogger())
+
+	err := bs.EnsureSchema(ctx)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), ConstraintSupportedByProfileIDExists)
 }
 
 // TestRelationshipProfileConstraints_LiveEnforcement verifies that the four
@@ -835,6 +877,36 @@ func TestRelationshipProfileConstraints_LiveEnforcement(t *testing.T) {
 	bootstrapper := NewSchemaBootstrapper(client, 1536, logger)
 	if err := bootstrapper.EnsureSchema(ctx); err != nil {
 		t.Skipf("EnsureSchema failed (relationship existence constraints may be unsupported): %v", err)
+	}
+
+	existingConstraintsRaw, err := client.ExecuteRead(ctx, func(tx neo4j.ManagedTransaction) (interface{}, error) {
+		res, err := tx.Run(ctx,
+			"SHOW CONSTRAINTS YIELD name WHERE name IN $names RETURN name",
+			map[string]any{"names": []string{
+				ConstraintSupportedByProfileIDExists,
+				ConstraintPromotesToProfileIDExists,
+				ConstraintSupersededByProfileIDExists,
+				ConstraintContradictsProfileIDExists,
+			}},
+		)
+		if err != nil {
+			return nil, err
+		}
+		var names []string
+		for res.Next(ctx) {
+			name, _ := res.Record().Get("name")
+			if s, ok := name.(string); ok {
+				names = append(names, s)
+			}
+		}
+		return names, res.Err()
+	})
+	require.NoError(t, err)
+
+	existingConstraints, ok := existingConstraintsRaw.([]string)
+	require.True(t, ok, "existing constraints result must be []string")
+	if len(existingConstraints) < 4 {
+		t.Skip("relationship profile_id constraints are unsupported by the connected Neo4j edition")
 	}
 
 	t.Run("rejects_relationship_without_profile_id", func(t *testing.T) {

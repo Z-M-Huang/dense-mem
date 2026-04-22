@@ -14,9 +14,9 @@ import (
 )
 
 type stubCreate struct {
-	called    int
+	called      int
 	lastProfile string
-	lastReq   *dto.CreateFragmentRequest
+	lastReq     *dto.CreateFragmentRequest
 }
 
 func (s *stubCreate) Create(ctx context.Context, profileID string, req *dto.CreateFragmentRequest) (*fragmentservice.CreateResult, error) {
@@ -252,6 +252,21 @@ func (s *stubCommunityDetect) Detect(ctx context.Context, profileID string) erro
 	return nil
 }
 
+type stubCommunityGet struct{}
+
+func (stubCommunityGet) Get(ctx context.Context, profileID string, communityID string) (*domain.Community, error) {
+	return &domain.Community{CommunityID: communityID, ProfileID: profileID, MemberCount: 2}, nil
+}
+
+type stubCommunityList struct {
+	lastProfile string
+}
+
+func (s *stubCommunityList) List(ctx context.Context, profileID string, limit int) ([]*domain.Community, error) {
+	s.lastProfile = profileID
+	return []*domain.Community{{CommunityID: "community-1", ProfileID: profileID, MemberCount: 2}}, nil
+}
+
 // --- knowledge pipeline tests ---
 
 // TestBuildDefaultIncludesKnowledgeTools verifies all 9 knowledge pipeline
@@ -264,7 +279,7 @@ func TestBuildDefaultIncludesKnowledgeTools(t *testing.T) {
 	required := []string{
 		"post_claim", "get_claim", "list_claims", "verify_claim",
 		"promote_claim", "get_fact", "list_facts",
-		"retract_fragment", "detect_community",
+		"retract_fragment", "detect_community", "get_community_summary", "list_communities",
 	}
 	for _, name := range required {
 		if _, ok := reg.Get(name); !ok {
@@ -281,7 +296,7 @@ func TestBuildDefaultKnowledgeTools_AvailabilityReflectsDeps(t *testing.T) {
 	for _, name := range []string{
 		"post_claim", "get_claim", "list_claims", "verify_claim",
 		"promote_claim", "get_fact", "list_facts",
-		"retract_fragment", "detect_community",
+		"retract_fragment", "detect_community", "get_community_summary", "list_communities",
 	} {
 		tool, _ := reg.Get(name)
 		if tool.Available {
@@ -300,11 +315,13 @@ func TestBuildDefaultKnowledgeTools_AvailabilityReflectsDeps(t *testing.T) {
 		FactList:        stubFactList{},
 		FragmentRetract: &stubFragmentRetract{},
 		CommunityDetect: &stubCommunityDetect{},
+		CommunityGet:    stubCommunityGet{},
+		CommunityList:   &stubCommunityList{},
 	})
 	for _, name := range []string{
 		"post_claim", "get_claim", "list_claims", "verify_claim",
 		"promote_claim", "get_fact", "list_facts",
-		"retract_fragment", "detect_community",
+		"retract_fragment", "detect_community", "get_community_summary", "list_communities",
 	} {
 		tool, _ := reg2.Get(name)
 		if !tool.Available {
@@ -318,9 +335,11 @@ func TestBuildDefaultKnowledgeTools_AvailabilityReflectsDeps(t *testing.T) {
 // service — no cross-profile data leakage is possible at the tool layer.
 func TestBuildDefaultKnowledgeTools_CrossProfileIsolation(t *testing.T) {
 	retract := &stubFragmentRetract{}
+	communities := &stubCommunityList{}
 	reg, _ := BuildDefault(Dependencies{
 		ClaimGet:        stubClaimGet{},
 		FragmentRetract: retract,
+		CommunityList:   communities,
 	})
 
 	// retract_fragment — verify profileID routing.
@@ -359,5 +378,13 @@ func TestBuildDefaultKnowledgeTools_CrossProfileIsolation(t *testing.T) {
 	// The cross-profile isolation invariant: B's result must not contain A's data.
 	if bProfile == "profileA" {
 		t.Error("cross-profile isolation failure: profileB received profileA-scoped data")
+	}
+
+	communityTool, _ := reg.Get("list_communities")
+	if _, err := communityTool.Invoke(context.Background(), "profileA", map[string]any{}); err != nil {
+		t.Fatalf("list_communities profileA: %v", err)
+	}
+	if communities.lastProfile != "profileA" {
+		t.Errorf("list_communities routed to %q; want profileA", communities.lastProfile)
 	}
 }
