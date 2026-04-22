@@ -9,6 +9,7 @@ import (
 	"github.com/dense-mem/dense-mem/internal/http/dto"
 	"github.com/dense-mem/dense-mem/internal/http/middleware"
 	"github.com/dense-mem/dense-mem/internal/http/response"
+	"github.com/dense-mem/dense-mem/internal/http/validation"
 	"github.com/dense-mem/dense-mem/internal/httperr"
 	"github.com/dense-mem/dense-mem/internal/service/communityservice"
 )
@@ -75,15 +76,21 @@ func (h *CommunityDetectHandler) Handle(c echo.Context) error {
 		return httperr.New(httperr.INVALID_UUID, "profile_id must be a valid UUID")
 	}
 
-	// Bind the optional tuning parameters for validation. The current service
-	// interface accepts only profileID; gamma/tolerance/max_levels are
-	// declared in the DTO for future service evolution and OpenAPI docs.
+	// Bind and validate the optional tuning parameters.
 	var req dto.CommunityDetectRequest
 	if bindErr := c.Bind(&req); bindErr != nil {
 		return httperr.New(httperr.VALIDATION_ERROR, "malformed JSON body")
 	}
+	if err := validation.ValidateStruct(&req); err != nil {
+		return httperr.New(httperr.VALIDATION_ERROR, err.Error())
+	}
 
-	if err := h.detectSvc.Detect(ctx, profileUUID.String()); err != nil {
+	opts := communityservice.DetectOptions{
+		Gamma:     req.Gamma,
+		Tolerance: req.Tolerance,
+		MaxLevels: req.MaxLevels,
+	}
+	if err := h.detectSvc.Detect(ctx, profileUUID.String(), opts); err != nil {
 		if errors.Is(err, communityservice.ErrCommunityUnavailable) {
 			return httperr.New(httperr.SERVICE_UNAVAILABLE, "community detection service unavailable")
 		}

@@ -108,7 +108,7 @@ func (unavailableVerifyClaimService) Verify(context.Context, string, string) (*d
 
 type unavailableCommunityDetectService struct{}
 
-func (unavailableCommunityDetectService) Detect(context.Context, string) error {
+func (unavailableCommunityDetectService) Detect(context.Context, string, communityservice.DetectOptions) error {
 	return communityservice.ErrCommunityUnavailable
 }
 

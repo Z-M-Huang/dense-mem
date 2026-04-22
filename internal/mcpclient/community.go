@@ -63,7 +63,8 @@ type communityDetectAdapter struct {
 var _ communityservice.DetectCommunityService = (*communityDetectAdapter)(nil)
 
 // NewCommunityDetect returns a DetectCommunityService backed by the dense-mem HTTP API.
-// Calls POST /api/v1/admin/profiles/:profileId/community/detect (no request body).
+// Calls POST /api/v1/admin/profiles/:profileId/community/detect with optional
+// Leiden tuning parameters in the JSON body.
 // Returns communityservice.ErrCommunityUnavailable on 503 and
 // communityservice.ErrCommunityGraphTooLarge on 422.
 //
@@ -74,9 +75,17 @@ func NewCommunityDetect(c *Client) communityservice.DetectCommunityService {
 	return &communityDetectAdapter{c: c}
 }
 
-func (a *communityDetectAdapter) Detect(ctx context.Context, profileID string) error {
+func (a *communityDetectAdapter) Detect(ctx context.Context, profileID string, opts communityservice.DetectOptions) error {
 	path := "/api/v1/admin/profiles/" + url.PathEscape(profileID) + "/community/detect"
-	httpReq, err := a.c.newRequest(ctx, http.MethodPost, path, profileID, nil)
+	var body any
+	if opts != (communityservice.DetectOptions{}) {
+		body = dto.CommunityDetectRequest{
+			Gamma:     opts.Gamma,
+			Tolerance: opts.Tolerance,
+			MaxLevels: opts.MaxLevels,
+		}
+	}
+	httpReq, err := a.c.newRequest(ctx, http.MethodPost, path, profileID, body)
 	if err != nil {
 		return err
 	}

@@ -44,12 +44,17 @@ type leidenQuerier interface {
 
 	// RunLeiden runs gds.leiden.write against graphName, writing community
 	// membership to each node's community_id property.
-	RunLeiden(ctx context.Context, graphName string) error
+	RunLeiden(ctx context.Context, graphName string, opts DetectOptions) error
 
 	// DropGraph drops the named GDS projected graph (failIfMissing=false).
 	// Concurrent or repeated drops are safe.
 	DropGraph(ctx context.Context, graphName string) error
 }
+
+const (
+	defaultDetectGamma     = 1.0
+	defaultDetectMaxLevels = 10
+)
 
 // leidenServiceImpl is the production implementation of DetectCommunityService
 // backed by Postgres advisory locks and Neo4j GDS.
@@ -105,8 +110,20 @@ func isEmptyCommunityProjectionError(err error) bool {
 //  6. Defer gds.graph.drop so the projection is always released on return.
 //  7. Mutate the projected graph to an undirected relationship set.
 //  8. Run gds.leiden.write, writing community_id to each projected node.
-func (s *leidenServiceImpl) Detect(ctx context.Context, profileID string) error {
+func normalizeDetectOptions(opts DetectOptions) DetectOptions {
+	normalized := opts
+	if normalized.Gamma == 0 {
+		normalized.Gamma = defaultDetectGamma
+	}
+	if normalized.MaxLevels == 0 {
+		normalized.MaxLevels = defaultDetectMaxLevels
+	}
+	return normalized
+}
+
+func (s *leidenServiceImpl) Detect(ctx context.Context, profileID string, opts DetectOptions) error {
 	graphName := GraphNamePrefix + profileID + "-leiden"
+	normalized := normalizeDetectOptions(opts)
 
 	return s.locker.WithCommunityLock(ctx, profileID, func(ctx context.Context) error {
 		clearCommunities := func() error {
@@ -169,7 +186,7 @@ func (s *leidenServiceImpl) Detect(ctx context.Context, profileID string) error 
 		}
 
 		// --- 5. Run Leiden write ---
-		if err := s.querier.RunLeiden(ctx, graphName); err != nil {
+		if err := s.querier.RunLeiden(ctx, graphName, normalized); err != nil {
 			return fmt.Errorf("leiden write (profile=%s): %w", profileID, err)
 		}
 
@@ -347,18 +364,28 @@ func (q *neo4jLeidenQuerier) ToUndirected(ctx context.Context, graphName string)
 
 // RunLeiden executes gds.leiden.write against graphName, writing community
 // membership to the community_id property on each projected node.
-func (q *neo4jLeidenQuerier) RunLeiden(ctx context.Context, graphName string) error {
+func (q *neo4jLeidenQuerier) RunLeiden(ctx context.Context, graphName string, opts DetectOptions) error {
+	config := map[string]any{
+		"writeProperty":     "community_id",
+		"relationshipTypes": []string{"RELATED_UNDIRECTED"},
+		"gamma":             opts.Gamma,
+		"maxLevels":         opts.MaxLevels,
+	}
+	if opts.Tolerance > 0 {
+		config["tolerance"] = opts.Tolerance
+	}
+
 	_, err := q.client.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
 		result, runErr := tx.Run(ctx,
 			`CALL gds.leiden.write(
 				$graphName,
-				{
-					writeProperty: 'community_id',
-					relationshipTypes: ['RELATED_UNDIRECTED']
-				}
+				$config
 			)
 			YIELD communityCount, nodeCount`,
-			map[string]any{"graphName": graphName},
+			map[string]any{
+				"graphName": graphName,
+				"config":    config,
+			},
 		)
 		if runErr != nil {
 			return nil, runErr

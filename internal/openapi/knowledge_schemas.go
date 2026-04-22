@@ -379,7 +379,7 @@ func knowledgeSchemas() map[string]any {
 					"type":        "number",
 					"format":      "float",
 					"minimum":     0,
-					"description": "Resolution parameter for Louvain community detection. Higher values produce more, smaller communities.",
+					"description": "Resolution parameter for Leiden community detection. Higher values produce more, smaller communities.",
 				},
 				"tolerance": map[string]any{
 					"type":        "number",

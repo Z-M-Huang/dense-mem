@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/dense-mem/dense-mem/internal/domain"
@@ -19,12 +20,16 @@ import (
 
 // mockDetectCommunityService implements communityservice.DetectCommunityService for testing.
 type mockDetectCommunityService struct {
-	detectFunc func(ctx context.Context, profileID string) error
+	lastProfile string
+	lastOptions communityservice.DetectOptions
+	detectFunc  func(ctx context.Context, profileID string, opts communityservice.DetectOptions) error
 }
 
-func (m *mockDetectCommunityService) Detect(ctx context.Context, profileID string) error {
+func (m *mockDetectCommunityService) Detect(ctx context.Context, profileID string, opts communityservice.DetectOptions) error {
+	m.lastProfile = profileID
+	m.lastOptions = opts
 	if m.detectFunc != nil {
-		return m.detectFunc(ctx, profileID)
+		return m.detectFunc(ctx, profileID, opts)
 	}
 	return nil
 }
@@ -84,6 +89,35 @@ func TestCommunityDetectHandler(t *testing.T) {
 		}
 		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
 		require.True(t, body.Data.Detected, "response must include detected:true")
+		require.Equal(t, profileID.String(), svc.lastProfile)
+		require.Equal(t, communityservice.DetectOptions{}, svc.lastOptions)
+	})
+
+	t.Run("PassesTuningOptionsToService", func(t *testing.T) {
+		e := newTestEcho()
+		svc := &mockDetectCommunityService{}
+		h := NewCommunityDetectHandler(svc, &mockListCommunitiesService{})
+
+		e.Use(injectAdminPrincipal())
+		e.POST(routePattern, h.Handle)
+
+		profileID := uuid.New()
+		req := httptest.NewRequest(
+			http.MethodPost,
+			"/api/v1/admin/profiles/"+profileID.String()+"/community/detect",
+			strings.NewReader(`{"gamma":1.6,"tolerance":0.0002,"max_levels":7}`),
+		)
+		req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+
+		require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+		require.Equal(t, profileID.String(), svc.lastProfile)
+		require.Equal(t, communityservice.DetectOptions{
+			Gamma:     1.6,
+			Tolerance: 0.0002,
+			MaxLevels: 7,
+		}, svc.lastOptions)
 	})
 
 	t.Run("Returns401WhenNoPrincipal", func(t *testing.T) {
@@ -156,7 +190,7 @@ func TestCommunityDetectHandler(t *testing.T) {
 	t.Run("Returns503WhenGDSUnavailable", func(t *testing.T) {
 		e := newTestEcho()
 		svc := &mockDetectCommunityService{
-			detectFunc: func(ctx context.Context, pid string) error {
+			detectFunc: func(ctx context.Context, pid string, opts communityservice.DetectOptions) error {
 				return communityservice.ErrCommunityUnavailable
 			},
 		}
@@ -179,7 +213,7 @@ func TestCommunityDetectHandler(t *testing.T) {
 	t.Run("Returns422WhenGraphTooLarge", func(t *testing.T) {
 		e := newTestEcho()
 		svc := &mockDetectCommunityService{
-			detectFunc: func(ctx context.Context, pid string) error {
+			detectFunc: func(ctx context.Context, pid string, opts communityservice.DetectOptions) error {
 				return communityservice.ErrCommunityGraphTooLarge
 			},
 		}
@@ -202,7 +236,7 @@ func TestCommunityDetectHandler(t *testing.T) {
 	t.Run("Returns500OnUnexpectedError", func(t *testing.T) {
 		e := newTestEcho()
 		svc := &mockDetectCommunityService{
-			detectFunc: func(ctx context.Context, pid string) error {
+			detectFunc: func(ctx context.Context, pid string, opts communityservice.DetectOptions) error {
 				return context.DeadlineExceeded
 			},
 		}
@@ -216,6 +250,25 @@ func TestCommunityDetectHandler(t *testing.T) {
 		e.ServeHTTP(rec, req)
 
 		require.Equal(t, http.StatusInternalServerError, rec.Code, "body=%s", rec.Body.String())
+	})
+
+	t.Run("Returns400OnInvalidTuningParameters", func(t *testing.T) {
+		e := newTestEcho()
+		h := NewCommunityDetectHandler(&mockDetectCommunityService{}, &mockListCommunitiesService{})
+		e.Use(injectAdminPrincipal())
+		e.POST(routePattern, h.Handle)
+
+		profileID := uuid.New()
+		req := httptest.NewRequest(
+			http.MethodPost,
+			"/api/v1/admin/profiles/"+profileID.String()+"/community/detect",
+			strings.NewReader(`{"gamma":-1}`),
+		)
+		req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+
+		require.Equal(t, http.StatusUnprocessableEntity, rec.Code, "body=%s", rec.Body.String())
 	})
 }
 
@@ -234,7 +287,7 @@ func TestCommunityDetectHandler_CrossProfileIsolation(t *testing.T) {
 	// capturedIDs records every profileID the service receives.
 	var capturedIDs []string
 	svc := &mockDetectCommunityService{
-		detectFunc: func(ctx context.Context, pid string) error {
+		detectFunc: func(ctx context.Context, pid string, opts communityservice.DetectOptions) error {
 			capturedIDs = append(capturedIDs, pid)
 			return nil
 		},

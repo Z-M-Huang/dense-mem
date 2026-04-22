@@ -441,6 +441,12 @@ func TestKnowledgeToolAdapters(t *testing.T) {
 			require.Equal(t, "Bearer "+testAuthToken, r.Header.Get("Authorization"))
 			require.Equal(t, profileA, r.Header.Get("X-Profile-ID"))
 			require.Equal(t, http.MethodPost, r.Method)
+			require.Equal(t, "application/json", r.Header.Get("Content-Type"))
+			var body map[string]any
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+			require.Equal(t, 1.6, body["gamma"])
+			require.Equal(t, 0.0002, body["tolerance"])
+			require.Equal(t, 7.0, body["max_levels"])
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
 			if _, err := w.Write([]byte(`{"detected":true}`)); err != nil {
@@ -451,7 +457,11 @@ func TestKnowledgeToolAdapters(t *testing.T) {
 
 		c := NewClient(srv.URL, testAuthToken, profileA)
 		svc := NewCommunityDetect(c)
-		err := svc.Detect(ctx, profileA)
+		err := svc.Detect(ctx, profileA, communityservice.DetectOptions{
+			Gamma:     1.6,
+			Tolerance: 0.0002,
+			MaxLevels: 7,
+		})
 		require.NoError(t, err)
 	})
 
@@ -463,7 +473,7 @@ func TestKnowledgeToolAdapters(t *testing.T) {
 
 		c := NewClient(srv.URL, testAuthToken, profileA)
 		svc := NewCommunityDetect(c)
-		err := svc.Detect(ctx, profileA)
+		err := svc.Detect(ctx, profileA, communityservice.DetectOptions{})
 		require.True(t, errors.Is(err, communityservice.ErrCommunityUnavailable),
 			"503 from server must surface as ErrCommunityUnavailable")
 	})
@@ -476,7 +486,7 @@ func TestKnowledgeToolAdapters(t *testing.T) {
 
 		c := NewClient(srv.URL, testAuthToken, profileA)
 		svc := NewCommunityDetect(c)
-		err := svc.Detect(ctx, profileA)
+		err := svc.Detect(ctx, profileA, communityservice.DetectOptions{})
 		require.True(t, errors.Is(err, communityservice.ErrCommunityGraphTooLarge),
 			"422 from server must surface as ErrCommunityGraphTooLarge")
 	})

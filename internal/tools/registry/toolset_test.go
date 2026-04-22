@@ -8,6 +8,7 @@ import (
 	"github.com/dense-mem/dense-mem/internal/domain"
 	"github.com/dense-mem/dense-mem/internal/http/dto"
 	"github.com/dense-mem/dense-mem/internal/service/claimservice"
+	"github.com/dense-mem/dense-mem/internal/service/communityservice"
 	"github.com/dense-mem/dense-mem/internal/service/factservice"
 	"github.com/dense-mem/dense-mem/internal/service/fragmentservice"
 	"github.com/dense-mem/dense-mem/internal/service/recallservice"
@@ -245,10 +246,12 @@ func (s *stubFragmentRetract) Retract(ctx context.Context, profileID, fragmentID
 
 type stubCommunityDetect struct {
 	lastProfile string
+	lastOptions communityservice.DetectOptions
 }
 
-func (s *stubCommunityDetect) Detect(ctx context.Context, profileID string) error {
+func (s *stubCommunityDetect) Detect(ctx context.Context, profileID string, opts communityservice.DetectOptions) error {
 	s.lastProfile = profileID
+	s.lastOptions = opts
 	return nil
 }
 
@@ -335,10 +338,12 @@ func TestBuildDefaultKnowledgeTools_AvailabilityReflectsDeps(t *testing.T) {
 // service — no cross-profile data leakage is possible at the tool layer.
 func TestBuildDefaultKnowledgeTools_CrossProfileIsolation(t *testing.T) {
 	retract := &stubFragmentRetract{}
+	detect := &stubCommunityDetect{}
 	communities := &stubCommunityList{}
 	reg, _ := BuildDefault(Dependencies{
 		ClaimGet:        stubClaimGet{},
 		FragmentRetract: retract,
+		CommunityDetect: detect,
 		CommunityList:   communities,
 	})
 
@@ -386,5 +391,27 @@ func TestBuildDefaultKnowledgeTools_CrossProfileIsolation(t *testing.T) {
 	}
 	if communities.lastProfile != "profileA" {
 		t.Errorf("list_communities routed to %q; want profileA", communities.lastProfile)
+	}
+
+	detectTool, _ := reg.Get("detect_community")
+	if _, err := detectTool.Invoke(context.Background(), "profileB", map[string]any{
+		"gamma":      1.4,
+		"tolerance":  0.0003,
+		"max_levels": 4,
+	}); err != nil {
+		t.Fatalf("detect_community profileB: %v", err)
+	}
+	if detect.lastProfile != "profileB" {
+		t.Errorf("detect_community routed to %q; want profileB", detect.lastProfile)
+	}
+	if detect.lastOptions != (communityservice.DetectOptions{
+		Gamma:     1.4,
+		Tolerance: 0.0003,
+		MaxLevels: 4,
+	}) {
+		t.Errorf("detect_community options = %+v; want gamma/tolerance/max_levels passthrough", detect.lastOptions)
+	}
+	if _, err := detectTool.Invoke(context.Background(), "profileB", map[string]any{"gamma": -1.0}); err == nil {
+		t.Fatal("detect_community with invalid gamma: want validation error")
 	}
 }

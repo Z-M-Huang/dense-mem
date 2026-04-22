@@ -17,13 +17,20 @@ import (
 	"github.com/dense-mem/dense-mem/internal/domain"
 )
 
+// DetectOptions exposes the public tuning controls for community detection.
+// Zero values use the service defaults for the underlying Leiden run.
+type DetectOptions struct {
+	Gamma     float64 `json:"gamma,omitempty"`
+	Tolerance float64 `json:"tolerance,omitempty"`
+	MaxLevels int     `json:"max_levels,omitempty"`
+}
+
 // DetectCommunityService defines the interface for running graph community
 // detection using the Neo4j Graph Data Science plugin.
 //
 // Implementations project the profile's knowledge graph into GDS memory, run
-// a community detection algorithm (e.g. Louvain or Weakly Connected
-// Components), and write the resulting community identifiers back to the graph
-// as node properties.
+// a community detection algorithm, and write the resulting community
+// identifiers back to the graph as node properties.
 //
 // Returns ErrCommunityUnavailable when GDS is not installed.
 // Returns ErrCommunityGraphTooLarge when the projection exceeds memory limits.
@@ -31,7 +38,7 @@ type DetectCommunityService interface {
 	// Detect runs community detection for the given profile's knowledge graph.
 	// It writes community membership back to each node as a property and
 	// returns an error when detection cannot complete.
-	Detect(ctx context.Context, profileID string) error
+	Detect(ctx context.Context, profileID string, opts DetectOptions) error
 }
 
 // GetCommunitySummaryService fetches one persisted community summary.

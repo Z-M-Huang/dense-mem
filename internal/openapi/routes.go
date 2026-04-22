@@ -66,7 +66,7 @@ func DefaultRoutes() []RouteDescriptor {
 		}},
 		// Phase 4: fact promotion (AC-41, AC-42)
 		{Method: "POST", Path: "/api/v1/claims/{id}/promote", OperationID: "promoteClaim", ResponseSchema: "FactResponse", SuccessStatus: 201, AISafe: true, Tags: []string{"knowledge"}, Description: "Promote a validated claim to an authoritative fact.", ExtraResponses: map[string]string{
-			"409": "Claim not validated, gate rejected, comparable fact disputed, or claim weaker than existing fact.",
+			"409": "Claim not validated, gate rejected, claim marked disputed due to a comparable existing fact, or claim weaker than existing fact.",
 			"422": "Predicate not policed or unsupported promotion policy.",
 		}},
 

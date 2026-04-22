@@ -49,6 +49,8 @@ var _ communityLocker = (*stubCommunityLocker)(nil)
 //   - projectedProfiles: profileID passed to ProjectGraph in order
 //   - projectedGraphs:   graphName passed to ProjectGraph in order
 //   - undirectedGraphs:  graphName passed to ToUndirected in order
+//   - runGraphs:         graphName passed to RunLeiden in order
+//   - runOptions:        DetectOptions passed to RunLeiden in order
 //   - droppedGraphs:     graphName passed to DropGraph in order
 type stubLeidenQuerier struct {
 	estimateNodeCount int64
@@ -62,6 +64,8 @@ type stubLeidenQuerier struct {
 	projectedProfiles []string
 	projectedGraphs   []string
 	undirectedGraphs  []string
+	runGraphs         []string
+	runOptions        []DetectOptions
 	droppedGraphs     []string
 }
 
@@ -84,7 +88,9 @@ func (s *stubLeidenQuerier) ToUndirected(_ context.Context, graphName string) er
 	return s.toUndirectedErr
 }
 
-func (s *stubLeidenQuerier) RunLeiden(_ context.Context, _ string) error {
+func (s *stubLeidenQuerier) RunLeiden(_ context.Context, graphName string, opts DetectOptions) error {
+	s.runGraphs = append(s.runGraphs, graphName)
+	s.runOptions = append(s.runOptions, opts)
 	return s.leidenErr
 }
 
@@ -197,7 +203,7 @@ func TestLeidenDetect(t *testing.T) {
 		}
 		svc := newTestLeidenService(locker, querier, maxNodes)
 
-		err := svc.Detect(ctx, profileID)
+		err := svc.Detect(ctx, profileID, DetectOptions{})
 
 		require.NoError(t, err, "Detect must succeed when node count is within the cap")
 
@@ -219,6 +225,11 @@ func TestLeidenDetect(t *testing.T) {
 			"Detect must always drop the projected graph on return")
 		require.Contains(t, querier.undirectedGraphs, wantGraph,
 			"Detect must convert the projected graph to undirected edges before Leiden")
+		require.Equal(t, []DetectOptions{{
+			Gamma:     defaultDetectGamma,
+			MaxLevels: defaultDetectMaxLevels,
+		}}, querier.runOptions,
+			"Detect must normalize zero-value options to the documented defaults")
 	})
 
 	t.Run("rejects when estimated node count exceeds cap", func(t *testing.T) {
@@ -228,7 +239,7 @@ func TestLeidenDetect(t *testing.T) {
 		}
 		svc := newTestLeidenService(locker, querier, maxNodes)
 
-		err := svc.Detect(ctx, profileID)
+		err := svc.Detect(ctx, profileID, DetectOptions{})
 
 		require.Error(t, err, "Detect must return an error when node count exceeds the cap")
 		require.ErrorIs(t, err, ErrCommunityGraphTooLarge,
@@ -254,7 +265,7 @@ func TestLeidenDetect(t *testing.T) {
 			cfg:     &stubConfigProvider{maxNodes: maxNodes},
 		}
 
-		err := svc.Detect(ctx, profileID)
+		err := svc.Detect(ctx, profileID, DetectOptions{})
 
 		require.NoError(t, err)
 		require.Equal(t, []string{profileID}, locker.locked,
@@ -277,7 +288,7 @@ func TestLeidenDetect(t *testing.T) {
 		}
 		svc := newTestLeidenService(locker, querier, maxNodes)
 
-		err := svc.Detect(ctx, profileID)
+		err := svc.Detect(ctx, profileID, DetectOptions{})
 
 		require.NoError(t, err, "Detect must succeed when node count equals the cap exactly")
 	})
@@ -291,7 +302,7 @@ func TestLeidenDetect(t *testing.T) {
 		}
 		svc := newTestLeidenService(locker, querier, maxNodes)
 
-		err := svc.Detect(ctx, profileID)
+		err := svc.Detect(ctx, profileID, DetectOptions{})
 
 		require.Error(t, err, "Detect must propagate the leiden write error")
 
@@ -310,7 +321,7 @@ func TestLeidenDetect(t *testing.T) {
 		}
 		svc := newTestLeidenService(locker, querier, maxNodes)
 
-		err := svc.Detect(ctx, profileID)
+		err := svc.Detect(ctx, profileID, DetectOptions{})
 
 		require.Error(t, err)
 		require.ErrorContains(t, err, "leiden make undirected")
@@ -333,7 +344,7 @@ func TestLeidenDetect(t *testing.T) {
 			cfg:     &stubConfigProvider{maxNodes: maxNodes},
 		}
 
-		err := svc.Detect(ctx, profileID)
+		err := svc.Detect(ctx, profileID, DetectOptions{})
 
 		require.NoError(t, err)
 		require.Equal(t, []string{profileID}, store.replacedProfiles,
@@ -350,7 +361,7 @@ func TestLeidenDetect(t *testing.T) {
 		querier := &stubLeidenQuerier{estimateErr: estimateErr}
 		svc := newTestLeidenService(locker, querier, maxNodes)
 
-		err := svc.Detect(ctx, profileID)
+		err := svc.Detect(ctx, profileID, DetectOptions{})
 
 		require.Error(t, err)
 		require.ErrorContains(t, err, "leiden estimate projection")
@@ -365,10 +376,29 @@ func TestLeidenDetect(t *testing.T) {
 		}
 		svc := newTestLeidenService(locker, querier, maxNodes)
 
-		err := svc.Detect(ctx, profileID)
+		err := svc.Detect(ctx, profileID, DetectOptions{})
 
 		require.Error(t, err)
 		require.ErrorContains(t, err, "leiden project graph")
+	})
+
+	t.Run("passes explicit tuning options through to leiden write", func(t *testing.T) {
+		locker := &stubCommunityLocker{}
+		querier := &stubLeidenQuerier{
+			estimateNodeCount: 42,
+		}
+		svc := newTestLeidenService(locker, querier, maxNodes)
+		opts := DetectOptions{
+			Gamma:     1.7,
+			Tolerance: 0.00025,
+			MaxLevels: 6,
+		}
+
+		err := svc.Detect(ctx, profileID, opts)
+
+		require.NoError(t, err)
+		require.Equal(t, []DetectOptions{opts}, querier.runOptions,
+			"Detect must pass explicit tuning parameters through to the Leiden run")
 	})
 }
 
@@ -396,8 +426,8 @@ func TestLeidenDetect_CrossProfileIsolation(t *testing.T) {
 	svcA := newTestLeidenService(locker, querier, maxNodes)
 	svcB := newTestLeidenService(locker, querier, maxNodes)
 
-	require.NoError(t, svcA.Detect(ctx, profileA))
-	require.NoError(t, svcB.Detect(ctx, profileB))
+	require.NoError(t, svcA.Detect(ctx, profileA, DetectOptions{}))
+	require.NoError(t, svcB.Detect(ctx, profileB, DetectOptions{}))
 
 	graphA := GraphNamePrefix + profileA + "-leiden"
 	graphB := GraphNamePrefix + profileB + "-leiden"

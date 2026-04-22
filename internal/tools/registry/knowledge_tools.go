@@ -7,7 +7,10 @@ import (
 	"time"
 
 	"github.com/dense-mem/dense-mem/internal/domain"
+	"github.com/dense-mem/dense-mem/internal/http/dto"
+	"github.com/dense-mem/dense-mem/internal/http/validation"
 	"github.com/dense-mem/dense-mem/internal/service/claimservice"
+	"github.com/dense-mem/dense-mem/internal/service/communityservice"
 	"github.com/dense-mem/dense-mem/internal/service/factservice"
 )
 
@@ -413,7 +416,7 @@ func detectCommunityTool(deps Dependencies) Tool {
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"gamma":      map[string]any{"type": "number", "minimum": 0, "description": "Louvain resolution parameter. Defaults to 1.0."},
+				"gamma":      map[string]any{"type": "number", "minimum": 0, "description": "Leiden resolution parameter. Defaults to 1.0."},
 				"tolerance":  map[string]any{"type": "number", "minimum": 0, "description": "Convergence threshold for iterative algorithms."},
 				"max_levels": map[string]any{"type": "integer", "minimum": 1, "description": "Maximum hierarchical merge levels."},
 			},
@@ -429,7 +432,19 @@ func detectCommunityTool(deps Dependencies) Tool {
 			if !available {
 				return nil, ErrToolUnavailable
 			}
-			if err := deps.CommunityDetect.Detect(ctx, profileID); err != nil {
+			var req dto.CommunityDetectRequest
+			if err := remapInput(input, &req); err != nil {
+				return nil, fmt.Errorf("detect_community: invalid input: %w", err)
+			}
+			if err := validation.ValidateStruct(&req); err != nil {
+				return nil, fmt.Errorf("detect_community: validation: %w", err)
+			}
+			opts := communityservice.DetectOptions{
+				Gamma:     req.Gamma,
+				Tolerance: req.Tolerance,
+				MaxLevels: req.MaxLevels,
+			}
+			if err := deps.CommunityDetect.Detect(ctx, profileID, opts); err != nil {
 				return nil, err
 			}
 			communities, err := deps.CommunityList.List(ctx, profileID, 0)
