@@ -9,7 +9,6 @@ type ToolCatalogEntry struct {
 	InputSchema    map[string]any `json:"input_schema"`
 	OutputSchema   map[string]any `json:"output_schema"`
 	RequiredScopes []string       `json:"required_scopes"`
-	Available      bool           `json:"available"`
 }
 
 // ToolCatalogResponse is the envelope for the catalog listing.

@@ -20,10 +20,6 @@ func TestBuildRemoteRegistry_MirrorsRemoteMetadata(t *testing.T) {
 			InputSchema:    map[string]any{"type": "object", "title": name},
 			OutputSchema:   map[string]any{"type": "object"},
 			RequiredScopes: []string{"read"},
-			Available:      true,
-		}
-		if name == "save_memory" {
-			entry.Available = false
 		}
 		catalog.Tools = append(catalog.Tools, entry)
 	}
@@ -48,9 +44,6 @@ func TestBuildRemoteRegistry_MirrorsRemoteMetadata(t *testing.T) {
 	if !ok {
 		t.Fatalf("save_memory not registered")
 	}
-	if saveTool.Available {
-		t.Fatalf("save_memory availability should mirror remote catalog")
-	}
 	if saveTool.Description != "remote save_memory" {
 		t.Fatalf("save_memory description = %q", saveTool.Description)
 	}
@@ -67,7 +60,6 @@ func TestBuildRemoteRegistry_FailsWhenRequiredToolMissing(t *testing.T) {
 				Description:  "remote get_memory",
 				InputSchema:  map[string]any{"type": "object"},
 				OutputSchema: map[string]any{"type": "object"},
-				Available:    true,
 			},
 		},
 	}

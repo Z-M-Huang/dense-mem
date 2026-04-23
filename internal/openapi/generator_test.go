@@ -17,8 +17,9 @@ func testRegistry(t *testing.T) registry.Registry {
 	return reg
 }
 
-// TestGenerator_AISafeExcludesAdmin — backpressure case (AC-34).
-func TestGenerator_AISafeExcludesAdmin(t *testing.T) {
+// TestGenerator_AISafeExcludesRuntimeOnlyRoutes verifies the public AI-safe
+// spec does not include the wider runtime-only surface.
+func TestGenerator_AISafeExcludesRuntimeOnlyRoutes(t *testing.T) {
 	g := New(testRegistry(t), DefaultRoutes())
 	spec, err := g.Generate(SpecVariantAISafe)
 	if err != nil {
@@ -28,23 +29,23 @@ func TestGenerator_AISafeExcludesAdmin(t *testing.T) {
 	if !ok {
 		t.Fatalf("paths missing or wrong type")
 	}
-	if _, present := paths["/api/v1/admin/graph/query"]; present {
-		t.Errorf("admin path must NOT appear in ai-safe spec")
+	if _, present := paths["/api/v1/profiles/{profileId}/query/stream"]; present {
+		t.Errorf("runtime-only query stream path must NOT appear in ai-safe spec")
 	}
 	if _, present := paths["/api/v1/fragments"]; !present {
 		t.Errorf("ai-safe spec must include /api/v1/fragments")
 	}
 }
 
-func TestGenerator_FullIncludesAdmin(t *testing.T) {
+func TestGenerator_FullIncludesRuntimeOnlyRoutes(t *testing.T) {
 	g := New(testRegistry(t), DefaultRoutes())
 	spec, err := g.Generate(SpecVariantFull)
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
 	paths := spec["paths"].(map[string]any)
-	if _, present := paths["/api/v1/admin/graph/query"]; !present {
-		t.Errorf("full spec must include /api/v1/admin/graph/query")
+	if _, present := paths["/api/v1/profiles/{profileId}/query/stream"]; !present {
+		t.Errorf("full spec must include /api/v1/profiles/{profileId}/query/stream")
 	}
 	if _, present := paths["/api/v1/fragments"]; !present {
 		t.Errorf("full spec must include /api/v1/fragments")
@@ -644,14 +645,11 @@ func TestGenerateIncludesPromoteRoute(t *testing.T) {
 	}
 }
 
-// TestGenerateIncludesCommunityRoute verifies that the Phase 7 community
-// detection endpoint surfaces in the full spec (AdminOnly=true, so excluded
-// from the AI-safe variant) with the correct operationId and a reference to
-// the CommunityDetectRequest schema. This is the red-test gate for Unit 53.
-func TestGenerateIncludesCommunityRoute(t *testing.T) {
+// TestGenerateOmitsLegacyAdminRoutes verifies the generated specs no longer
+// surface the removed admin HTTP paths.
+func TestGenerateOmitsLegacyAdminRoutes(t *testing.T) {
 	g := New(testRegistry(t), DefaultRoutes())
 
-	// Community detect is admin-only; it must NOT appear in the AI-safe spec.
 	aiSafe, err := g.Generate(SpecVariantAISafe)
 	if err != nil {
 		t.Fatalf("Generate(AISafe): %v", err)
@@ -660,12 +658,11 @@ func TestGenerateIncludesCommunityRoute(t *testing.T) {
 	if !ok {
 		t.Fatalf("paths missing or wrong type in ai-safe spec")
 	}
-	const communityPath = "/api/v1/admin/profiles/{profileId}/community/detect"
-	if _, present := aiSafePaths[communityPath]; present {
-		t.Errorf("admin community route must NOT appear in ai-safe spec")
+	const legacyAdminPath = "/api/v1/admin/graph/query"
+	if _, present := aiSafePaths[legacyAdminPath]; present {
+		t.Errorf("legacy admin path must NOT appear in ai-safe spec")
 	}
 
-	// Full spec must include the route.
 	full, err := g.Generate(SpecVariantFull)
 	if err != nil {
 		t.Fatalf("Generate(Full): %v", err)
@@ -674,58 +671,8 @@ func TestGenerateIncludesCommunityRoute(t *testing.T) {
 	if !ok {
 		t.Fatalf("paths missing or wrong type in full spec")
 	}
-
-	pathItem, present := fullPaths[communityPath]
-	if !present {
-		t.Fatalf("community detect route %q missing from full spec; have: %v", communityPath, keysOf(fullPaths))
-	}
-
-	pathMap, ok := pathItem.(map[string]any)
-	if !ok {
-		t.Fatalf("%s path item is wrong type: %T", communityPath, pathItem)
-	}
-
-	// Must be a POST operation.
-	postOp, ok := pathMap["post"].(map[string]any)
-	if !ok {
-		t.Fatalf("POST %s missing from full spec", communityPath)
-	}
-	if postOp["operationId"] != "adminDetectCommunity" {
-		t.Errorf("operationId = %v; want adminDetectCommunity", postOp["operationId"])
-	}
-
-	// Request body must reference CommunityDetectRequest schema.
-	reqBody, ok := postOp["requestBody"].(map[string]any)
-	if !ok {
-		t.Fatalf("requestBody missing or wrong type for POST %s", communityPath)
-	}
-	content, ok := reqBody["content"].(map[string]any)
-	if !ok {
-		t.Fatalf("requestBody.content missing")
-	}
-	appJSON, ok := content["application/json"].(map[string]any)
-	if !ok {
-		t.Fatalf("requestBody.content[application/json] missing")
-	}
-	schema, ok := appJSON["schema"].(map[string]any)
-	if !ok {
-		t.Fatalf("requestBody schema missing")
-	}
-	if got := schema["$ref"]; got != "#/components/schemas/CommunityDetectRequest" {
-		t.Errorf("requestBody $ref = %v; want #/components/schemas/CommunityDetectRequest", got)
-	}
-
-	// CommunityDetectRequest schema must be present in components.
-	components, ok := full["components"].(map[string]any)
-	if !ok {
-		t.Fatalf("components missing")
-	}
-	schemas, ok := components["schemas"].(map[string]any)
-	if !ok {
-		t.Fatalf("schemas missing")
-	}
-	if _, has := schemas["CommunityDetectRequest"]; !has {
-		t.Errorf("CommunityDetectRequest schema missing from components; have: %v", keysOf(schemas))
+	if _, present := fullPaths[legacyAdminPath]; present {
+		t.Errorf("legacy admin path must NOT appear in full spec")
 	}
 }
 

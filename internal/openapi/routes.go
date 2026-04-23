@@ -90,7 +90,7 @@ func DefaultRoutes() []RouteDescriptor {
 
 		// --- Recall (AI-safe) ---
 		{Method: "GET", Path: "/api/v1/recall", OperationID: "recallKnowledge", ResponseSchema: "RecallResponse", AISafe: true, Tags: []string{"knowledge"}, Description: "Hybrid semantic + keyword recall spanning all knowledge-pipeline tiers (facts, claims, fragments).", ExtraResponses: map[string]string{
-			"422": "Missing or invalid q parameter.",
+			"400": "Missing or invalid query parameter.",
 			"503": "Embedding provider unavailable.",
 		}},
 		{Method: "POST", Path: "/api/v1/tools/recall-memory", OperationID: "recallMemory", ToolName: "recall_memory", AISafe: true, Description: "Hybrid semantic + keyword recall over fragments."},
@@ -100,30 +100,14 @@ func DefaultRoutes() []RouteDescriptor {
 		{Method: "POST", Path: "/api/v1/tools/keyword-search", OperationID: "keywordSearchTool", ToolName: "keyword-search", Description: "Advanced: BM25 keyword search."},
 		{Method: "POST", Path: "/api/v1/tools/semantic-search", OperationID: "semanticSearchTool", ToolName: "semantic-search", Description: "Advanced: kNN vector search."},
 
-		// --- Profile CRUD (full variant) ---
-		{Method: "POST", Path: "/api/v1/profiles", OperationID: "createProfile", AdminOnly: true, Description: "Create a profile (admin)."},
-		{Method: "GET", Path: "/api/v1/profiles", OperationID: "listProfiles", AdminOnly: true, Description: "List profiles (admin)."},
+		// --- Profile routes (full runtime variant) ---
 		{Method: "GET", Path: "/api/v1/profiles/{profileId}", OperationID: "getProfile", Description: "Get a profile."},
 		{Method: "PATCH", Path: "/api/v1/profiles/{profileId}", OperationID: "patchProfile", Description: "Update profile metadata."},
-		{Method: "DELETE", Path: "/api/v1/profiles/{profileId}", OperationID: "deleteProfile", AdminOnly: true, Description: "Delete a profile (admin)."},
 
 		// --- Audit log (full variant) ---
 		{Method: "GET", Path: "/api/v1/profiles/{profileId}/audit-log", OperationID: "getAuditLog", Description: "Fetch the profile's audit log."},
 
-		// --- API keys (admin/full variant) ---
-		{Method: "POST", Path: "/api/v1/profiles/{profileId}/api-keys", OperationID: "createAPIKey", AdminOnly: true, Description: "Create a new API key (admin)."},
-		{Method: "GET", Path: "/api/v1/profiles/{profileId}/api-keys", OperationID: "listAPIKeys", AdminOnly: true, Description: "List API keys (admin)."},
-		{Method: "DELETE", Path: "/api/v1/profiles/{profileId}/api-keys/{keyId}", OperationID: "deleteAPIKey", AdminOnly: true, Description: "Revoke an API key (admin)."},
-
 		// --- SSE query stream (full variant) ---
 		{Method: "POST", Path: "/api/v1/profiles/{profileId}/query/stream", OperationID: "queryStream", Description: "Server-sent event stream for long-running queries."},
-
-		// --- Admin routes (full variant only) ---
-		{Method: "GET", Path: "/api/v1/admin/stats", OperationID: "adminStats", AdminOnly: true, Description: "Admin operational stats."},
-		{Method: "GET", Path: "/api/v1/admin/keys", OperationID: "adminListKeys", AdminOnly: true, Description: "List all API keys across profiles (admin)."},
-		{Method: "POST", Path: "/api/v1/admin/graph/query", OperationID: "adminGraphQuery", AdminOnly: true, Description: "Admin: raw Cypher with profile-scope injection."},
-		{Method: "POST", Path: "/api/v1/admin/invariant-scan", OperationID: "adminInvariantScan", AdminOnly: true, Description: "Admin: scan for invariant violations."},
-		// Phase 7: community detection (AC-49, AC-50, AC-52, AC-53, AC-54)
-		{Method: "POST", Path: "/api/v1/admin/profiles/{profileId}/community/detect", OperationID: "adminDetectCommunity", RequestSchema: "CommunityDetectRequest", ResponseSchema: "CommunityDetectResponse", AdminOnly: true, Tags: []string{"community"}, Description: "Admin: trigger community detection for a profile's knowledge graph using the Neo4j GDS plugin."},
 	}
 }

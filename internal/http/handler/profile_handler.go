@@ -64,7 +64,7 @@ type Pagination struct {
 	Total  int64 `json:"total"`
 }
 
-// Create handles POST /api/v1/profiles (admin-only).
+// Create handles POST /api/v1/profiles.
 // Returns 201 with the created profile.
 func (h *ProfileHandler) Create(c echo.Context) error {
 	ctx := c.Request().Context()
@@ -103,7 +103,7 @@ func (h *ProfileHandler) Create(c echo.Context) error {
 	return response.SuccessCreated(c, toProfileResponse(profile))
 }
 
-// List handles GET /api/v1/profiles (admin-only).
+// List handles GET /api/v1/profiles.
 // Returns 200 with paginated list of profiles.
 func (h *ProfileHandler) List(c echo.Context) error {
 	ctx := c.Request().Context()
@@ -140,7 +140,7 @@ func (h *ProfileHandler) List(c echo.Context) error {
 	})
 }
 
-// Get handles GET /api/v1/profiles/:profileId (admin or same-profile).
+// Get handles GET /api/v1/profiles/:profileId.
 // Returns 200 with the profile data.
 func (h *ProfileHandler) Get(c echo.Context) error {
 	ctx := c.Request().Context()
@@ -172,7 +172,7 @@ func (h *ProfileHandler) Get(c echo.Context) error {
 	return response.SuccessOK(c, toProfileResponse(profile))
 }
 
-// Patch handles PATCH /api/v1/profiles/:profileId (admin or same-profile with write scope).
+// Patch handles PATCH /api/v1/profiles/:profileId.
 // Returns 200 with the updated profile data.
 func (h *ProfileHandler) Patch(c echo.Context) error {
 	ctx := c.Request().Context()
@@ -230,7 +230,7 @@ func (h *ProfileHandler) Patch(c echo.Context) error {
 	return response.SuccessOK(c, toProfileResponse(profile))
 }
 
-// Delete handles DELETE /api/v1/profiles/:profileId (admin-only).
+// Delete handles DELETE /api/v1/profiles/:profileId.
 // Returns 200 with { "status": "deleted" }.
 func (h *ProfileHandler) Delete(c echo.Context) error {
 	ctx := c.Request().Context()

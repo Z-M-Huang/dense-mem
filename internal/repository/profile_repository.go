@@ -30,7 +30,7 @@ type ProfileRepository interface {
 
 // ProfileRepositoryImpl implements the ProfileRepository interface.
 // Every query runs inside an RLS-aware transaction so Postgres FORCE RLS
-// policies (app.current_profile_id / app.role) enforce tenant isolation
+// policies (app.current_profile_id / app.tx_mode) enforce tenant isolation
 // even if a caller ever reaches the repository without the service layer.
 type ProfileRepositoryImpl struct {
 	db  *gorm.DB
@@ -72,7 +72,7 @@ func (r *ProfileRepositoryImpl) Create(ctx context.Context, profile *domain.Prof
 
 	// INSERT must satisfy profiles_self_access (id = app.current_profile_id);
 	// seed the session with the new profile's id so the RLS policy passes.
-	err := r.rls.WithProfileTx(ctx, r.db, profile.ID.String(), "standard", func(tx *gorm.DB) error {
+	err := r.rls.WithProfileTx(ctx, r.db, profile.ID.String(), func(tx *gorm.DB) error {
 		return tx.Exec(`
 			INSERT INTO profiles (id, name, description, metadata, config, status, created_at, updated_at, deleted_at)
 			VALUES ($1, $2, $3, $4, $5, 'active', $6, $7, NULL)
@@ -87,13 +87,13 @@ func (r *ProfileRepositoryImpl) Create(ctx context.Context, profile *domain.Prof
 }
 
 // GetByID retrieves a profile by ID, excluding soft-deleted profiles.
-// Uses admin RLS context because callers include middleware paths that
+// Uses internal/system RLS context because callers include middleware paths that
 // resolve profiles without yet knowing whether the requester is authorized.
 // Authorization is enforced at the HTTP middleware layer, not here.
 func (r *ProfileRepositoryImpl) GetByID(ctx context.Context, id uuid.UUID) (*domain.Profile, error) {
 	var profile domain.Profile
 
-	err := r.rls.WithAdminTx(ctx, r.db, func(tx *gorm.DB) error {
+	err := r.rls.WithSystemTx(ctx, r.db, func(tx *gorm.DB) error {
 		return tx.Raw(`
 			SELECT id, name, description, metadata, config, created_at, updated_at, deleted_at
 			FROM profiles
@@ -129,9 +129,9 @@ func (r *ProfileRepositoryImpl) List(ctx context.Context, limit, offset int) ([]
 
 	var profiles []*domain.Profile
 
-	// List is an admin/cross-profile read; admin RLS context lets the
-	// profiles_admin_access policy return every non-deleted row.
-	err := r.rls.WithAdminTx(ctx, r.db, func(tx *gorm.DB) error {
+	// List is a cross-profile read; system RLS context lets the
+	// profiles_system_read_access policy return every non-deleted row.
+	err := r.rls.WithSystemTx(ctx, r.db, func(tx *gorm.DB) error {
 		return tx.Raw(`
 			SELECT id, name, description, metadata, config, created_at, updated_at, deleted_at
 			FROM profiles
@@ -152,7 +152,7 @@ func (r *ProfileRepositoryImpl) List(ctx context.Context, limit, offset int) ([]
 func (r *ProfileRepositoryImpl) Count(ctx context.Context) (int64, error) {
 	var count int64
 
-	err := r.rls.WithAdminTx(ctx, r.db, func(tx *gorm.DB) error {
+	err := r.rls.WithSystemTx(ctx, r.db, func(tx *gorm.DB) error {
 		return tx.Raw(`
 			SELECT COUNT(*)
 			FROM profiles
@@ -182,7 +182,7 @@ func (r *ProfileRepositoryImpl) Update(ctx context.Context, profile *domain.Prof
 	}
 
 	// UPDATE must satisfy profiles_self_access (id = app.current_profile_id).
-	err := r.rls.WithProfileTx(ctx, r.db, profile.ID.String(), "standard", func(tx *gorm.DB) error {
+	err := r.rls.WithProfileTx(ctx, r.db, profile.ID.String(), func(tx *gorm.DB) error {
 		return tx.Exec(`
 			UPDATE profiles
 			SET name = $1, description = $2, metadata = $3, config = $4, updated_at = $5
@@ -203,7 +203,7 @@ func (r *ProfileRepositoryImpl) SoftDelete(ctx context.Context, id uuid.UUID) er
 	now := time.Now().UTC()
 
 	// Soft-delete is an UPDATE; must satisfy profiles_self_access (id = app.current_profile_id).
-	err := r.rls.WithProfileTx(ctx, r.db, id.String(), "standard", func(tx *gorm.DB) error {
+	err := r.rls.WithProfileTx(ctx, r.db, id.String(), func(tx *gorm.DB) error {
 		return tx.Exec(`
 			UPDATE profiles
 			SET status = 'deleted', deleted_at = $1
@@ -223,7 +223,7 @@ func (r *ProfileRepositoryImpl) CountActiveKeys(ctx context.Context, profileID u
 	var count int64
 
 	// SELECT is scoped to one profile; api_keys_self_access matches on profile_id.
-	err := r.rls.WithProfileTx(ctx, r.db, profileID.String(), "standard", func(tx *gorm.DB) error {
+	err := r.rls.WithProfileTx(ctx, r.db, profileID.String(), func(tx *gorm.DB) error {
 		return tx.Raw(`
 			SELECT COUNT(*)
 			FROM api_keys
@@ -245,8 +245,8 @@ func (r *ProfileRepositoryImpl) NameExists(ctx context.Context, name string) (bo
 	var count int64
 
 	// NameExists must see all profiles (collision detection is cross-tenant);
-	// admin RLS context enables the profiles_admin_access SELECT policy.
-	err := r.rls.WithAdminTx(ctx, r.db, func(tx *gorm.DB) error {
+	// system RLS context enables the profiles_system_read_access SELECT policy.
+	err := r.rls.WithSystemTx(ctx, r.db, func(tx *gorm.DB) error {
 		return tx.Raw(`
 			SELECT COUNT(*)
 			FROM profiles

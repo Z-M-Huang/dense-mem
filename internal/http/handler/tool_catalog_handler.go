@@ -13,8 +13,8 @@ import (
 // ToolCatalogHandler serves GET /api/v1/tools.
 //
 // The handler maps each registered Tool into a public ToolCatalogEntry DTO.
-// Only name, description, schemas, required scopes, and availability travel
-// over the wire — the bound invoker function and any internal Go types stay
+// Only name, description, schemas, and required scopes travel over the wire —
+// the bound invoker function and any internal Go types stay
 // on the server side (AC-32: no internal type leakage).
 type ToolCatalogHandler struct {
 	reg registry.Registry
@@ -42,9 +42,6 @@ func (h *ToolCatalogHandler) Handle(c echo.Context) error {
 			if !principalCanSeeTool(principal, t) {
 				continue
 			}
-			if toolRequiresAdmin(t.Name) && principal.Role != "admin" {
-				continue
-			}
 		}
 		entries = append(entries, dto.ToolCatalogEntry{
 			Name:           t.Name,
@@ -52,7 +49,6 @@ func (h *ToolCatalogHandler) Handle(c echo.Context) error {
 			InputSchema:    t.InputSchema,
 			OutputSchema:   t.OutputSchema,
 			RequiredScopes: t.RequiredScopes,
-			Available:      t.Available,
 		})
 	}
 	return c.JSON(http.StatusOK, dto.ToolCatalogResponse{Tools: entries})

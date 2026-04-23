@@ -22,16 +22,6 @@ type mockProfileAuthorizationService struct {
 		clientIP        string
 		correlationID   string
 	}
-	adminBypassCalled bool
-	adminBypassParams struct {
-		operation     string
-		reason        string
-		metadata      map[string]interface{}
-		actorKeyID    *string
-		actorRole     string
-		clientIP      string
-		correlationID string
-	}
 }
 
 func (m *mockProfileAuthorizationService) CrossProfileDenied(ctx context.Context, actorProfileID, targetProfileID string, operation string, metadata map[string]interface{}, clientIP, correlationID string) error {
@@ -43,61 +33,6 @@ func (m *mockProfileAuthorizationService) CrossProfileDenied(ctx context.Context
 	m.crossProfileDeniedParams.clientIP = clientIP
 	m.crossProfileDeniedParams.correlationID = correlationID
 	return nil
-}
-
-func (m *mockProfileAuthorizationService) AdminBypass(ctx context.Context, operation string, reason string, metadata map[string]interface{}, actorKeyID *string, actorRole, clientIP, correlationID string) error {
-	m.adminBypassCalled = true
-	m.adminBypassParams.operation = operation
-	m.adminBypassParams.reason = reason
-	m.adminBypassParams.metadata = metadata
-	m.adminBypassParams.actorKeyID = actorKeyID
-	m.adminBypassParams.actorRole = actorRole
-	m.adminBypassParams.clientIP = clientIP
-	m.adminBypassParams.correlationID = correlationID
-	return nil
-}
-
-// TestProfileAuthorization_AdminPassThrough tests that admin principals bypass profile authorization.
-func TestProfileAuthorization_AdminPassThrough(t *testing.T) {
-	e := newTestEcho()
-	mockAuthzSvc := &mockProfileAuthorizationService{}
-	targetProfileID := uuid.New()
-
-	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(c echo.Context) error {
-			// Set admin principal
-			ctx := c.Request().Context()
-			ctx = context.WithValue(ctx, principalContextKey{}, &Principal{
-				KeyID:     uuid.New(),
-				ProfileID: nil, // Admin has no profile
-				Role:      "admin",
-				Scopes:    []string{"admin"},
-			})
-			// Set target profile in context
-			ctx = context.WithValue(ctx, ResolvedProfileKey{}, targetProfileID)
-			c.SetRequest(c.Request().WithContext(ctx))
-			return next(c)
-		}
-	})
-	e.Use(AuthorizeProfile(mockAuthzSvc))
-
-	handlerCalled := false
-	e.GET("/test", func(c echo.Context) error {
-		handlerCalled = true
-		return c.String(http.StatusOK, "ok")
-	})
-
-	req := httptest.NewRequest(http.MethodGet, "/test", nil)
-	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
-
-	assert.True(t, handlerCalled, "handler should be called for admin")
-	assert.Equal(t, http.StatusOK, rec.Code)
-	assert.False(t, mockAuthzSvc.crossProfileDeniedCalled, "CrossProfileDenied should not be called for admin")
-	assert.True(t, mockAuthzSvc.adminBypassCalled, "AdminBypass should be audited when an admin takes a cross-profile path")
-	assert.Equal(t, "profile_access", mockAuthzSvc.adminBypassParams.operation)
-	assert.Equal(t, "admin", mockAuthzSvc.adminBypassParams.actorRole)
-	assert.Equal(t, targetProfileID.String(), mockAuthzSvc.adminBypassParams.metadata["target_profile_id"])
 }
 
 // TestProfileAuthorization_SameProfile_Allowed tests that standard principals can access their own profile.
@@ -253,18 +188,20 @@ func TestProfileAuthorization_NilPrincipal_Forbidden(t *testing.T) {
 	assert.Contains(t, rec.Body.String(), "FORBIDDEN")
 }
 
-// TestRequireScopes_AdminBypasses tests that admin principals bypass scope checks.
-func TestRequireScopes_AdminBypasses(t *testing.T) {
+// TestRequireScopes_MatchingScopes_AllowsFullSet tests that callers with all
+// required scopes are allowed through.
+func TestRequireScopes_MatchingScopes_AllowsFullSet(t *testing.T) {
 	e := newTestEcho()
+	profileID := uuid.New()
 
 	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
 			ctx := c.Request().Context()
 			ctx = context.WithValue(ctx, principalContextKey{}, &Principal{
 				KeyID:     uuid.New(),
-				ProfileID: nil,
-				Role:      "admin",
-				Scopes:    []string{"admin"},
+				ProfileID: &profileID,
+				Role:      "standard",
+				Scopes:    []string{"read", "write", "delete"},
 			})
 			c.SetRequest(c.Request().WithContext(ctx))
 			return next(c)
@@ -282,7 +219,7 @@ func TestRequireScopes_AdminBypasses(t *testing.T) {
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 
-	assert.True(t, handlerCalled, "handler should be called for admin")
+	assert.True(t, handlerCalled, "handler should be called when all scopes are present")
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
 
@@ -351,74 +288,6 @@ func TestRequireScopes_MissingScope_Forbidden(t *testing.T) {
 	e.ServeHTTP(rec, req)
 
 	assert.False(t, handlerCalled, "handler should not be called when scopes missing")
-	assert.Equal(t, http.StatusForbidden, rec.Code)
-	assert.Contains(t, rec.Body.String(), "FORBIDDEN")
-}
-
-// TestAdminOnly_AdminAllowed tests that admin principals are allowed.
-func TestAdminOnly_AdminAllowed(t *testing.T) {
-	e := newTestEcho()
-
-	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(c echo.Context) error {
-			ctx := c.Request().Context()
-			ctx = context.WithValue(ctx, principalContextKey{}, &Principal{
-				KeyID:     uuid.New(),
-				ProfileID: nil,
-				Role:      "admin",
-				Scopes:    []string{"admin"},
-			})
-			c.SetRequest(c.Request().WithContext(ctx))
-			return next(c)
-		}
-	})
-	e.Use(AdminOnly())
-
-	handlerCalled := false
-	e.GET("/test", func(c echo.Context) error {
-		handlerCalled = true
-		return c.String(http.StatusOK, "ok")
-	})
-
-	req := httptest.NewRequest(http.MethodGet, "/test", nil)
-	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
-
-	assert.True(t, handlerCalled, "handler should be called for admin")
-	assert.Equal(t, http.StatusOK, rec.Code)
-}
-
-// TestAdminOnly_StandardKey_Forbidden tests that standard keys are blocked.
-func TestAdminOnly_StandardKey_Forbidden(t *testing.T) {
-	e := newTestEcho()
-	profileID := uuid.New()
-
-	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(c echo.Context) error {
-			ctx := c.Request().Context()
-			ctx = context.WithValue(ctx, principalContextKey{}, &Principal{
-				KeyID:     uuid.New(),
-				ProfileID: &profileID,
-				Role:      "standard",
-				Scopes:    []string{"read", "write"},
-			})
-			c.SetRequest(c.Request().WithContext(ctx))
-			return next(c)
-		}
-	})
-	e.Use(AdminOnly())
-
-	handlerCalled := false
-	e.GET("/test", func(c echo.Context) error {
-		handlerCalled = true
-		return c.String(http.StatusOK, "ok")
-	})
-
-	req := httptest.NewRequest(http.MethodGet, "/test", nil)
-	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
-
-	assert.False(t, handlerCalled, "handler should not be called for standard key")
 	assert.Equal(t, http.StatusForbidden, rec.Code)
 	assert.Contains(t, rec.Body.String(), "FORBIDDEN")
 }

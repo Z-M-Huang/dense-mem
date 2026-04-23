@@ -32,15 +32,7 @@ func (m *mockAPIKeyRepository) CreateStandardKey(ctx context.Context, key *domai
 	return nil
 }
 
-func (m *mockAPIKeyRepository) CreateAdminKey(ctx context.Context, key *domain.APIKey) error {
-	return nil
-}
-
 func (m *mockAPIKeyRepository) ListByProfile(ctx context.Context, profileID uuid.UUID, limit, offset int) ([]*domain.APIKey, error) {
-	return nil, nil
-}
-
-func (m *mockAPIKeyRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain.APIKey, error) {
 	return nil, nil
 }
 
@@ -49,10 +41,6 @@ func (m *mockAPIKeyRepository) GetActiveByPrefix(ctx context.Context, prefix str
 		return m.getActiveByPrefixFunc(ctx, prefix)
 	}
 	return nil, nil
-}
-
-func (m *mockAPIKeyRepository) Revoke(ctx context.Context, id uuid.UUID) error {
-	return nil
 }
 
 func (m *mockAPIKeyRepository) RevokeForProfile(ctx context.Context, profileID, id uuid.UUID) (int64, error) {
@@ -76,10 +64,6 @@ func (m *mockAPIKeyRepository) TouchLastUsed(ctx context.Context, id uuid.UUID) 
 		return m.touchLastUsedFunc(ctx, id)
 	}
 	return nil
-}
-
-func (m *mockAPIKeyRepository) AdminKeyExists(ctx context.Context) (bool, error) {
-	return false, nil
 }
 
 // mockAuditService is a mock implementation of service.AuditService
@@ -413,7 +397,7 @@ func TestAuthMiddleware_ValidKey_StoresPrincipal(t *testing.T) {
 	assert.Equal(t, rawKey[:12], capturedPrincipal.KeyPrefix)
 }
 
-func TestAuthMiddleware_ValidKey_AdminKey(t *testing.T) {
+func TestAuthMiddleware_ProfilelessKeyRejected(t *testing.T) {
 	e := newTestEcho()
 	keyID := uuid.New()
 	rawKey := "adminprefix12345678901234567890"
@@ -424,7 +408,7 @@ func TestAuthMiddleware_ValidKey_AdminKey(t *testing.T) {
 		getActiveByPrefixFunc: func(ctx context.Context, prefix string) (*domain.APIKey, error) {
 			return &domain.APIKey{
 				ID:        keyID,
-				ProfileID: uuid.Nil, // Admin key has no profile
+				ProfileID: uuid.Nil,
 				KeyHash:   keyHash,
 				Scopes:    []string{"admin"},
 				RevokedAt: nil,
@@ -440,20 +424,14 @@ func TestAuthMiddleware_ValidKey_AdminKey(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer "+rawKey)
 	rec := httptest.NewRecorder()
 
-	var capturedPrincipal *Principal
 	e.GET("/test", func(c echo.Context) error {
-		capturedPrincipal = GetPrincipal(c.Request().Context())
 		return c.String(http.StatusOK, "ok")
 	})
 
 	e.ServeHTTP(rec, req)
 
-	assert.Equal(t, http.StatusOK, rec.Code)
-	require.NotNil(t, capturedPrincipal, "principal should be stored in context")
-	assert.Equal(t, keyID, capturedPrincipal.KeyID)
-	assert.Nil(t, capturedPrincipal.ProfileID, "admin key should have nil ProfileID")
-	assert.Equal(t, "admin", capturedPrincipal.Role)
-	assert.Equal(t, []string{"admin"}, capturedPrincipal.Scopes)
+	assert.Equal(t, http.StatusUnauthorized, rec.Code)
+	assert.Contains(t, rec.Body.String(), "AUTH_INVALID")
 }
 
 func TestAuthMiddleware_TouchLastUsed_Background(t *testing.T) {

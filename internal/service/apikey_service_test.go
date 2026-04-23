@@ -25,11 +25,6 @@ func (m *MockAPIKeyRepository) CreateStandardKey(ctx context.Context, key *domai
 	return args.Error(0)
 }
 
-func (m *MockAPIKeyRepository) CreateAdminKey(ctx context.Context, key *domain.APIKey) error {
-	args := m.Called(ctx, key)
-	return args.Error(0)
-}
-
 func (m *MockAPIKeyRepository) ListByProfile(ctx context.Context, profileID uuid.UUID, limit, offset int) ([]*domain.APIKey, error) {
 	args := m.Called(ctx, profileID, limit, offset)
 	if args.Get(0) == nil {
@@ -38,25 +33,12 @@ func (m *MockAPIKeyRepository) ListByProfile(ctx context.Context, profileID uuid
 	return args.Get(0).([]*domain.APIKey), args.Error(1)
 }
 
-func (m *MockAPIKeyRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain.APIKey, error) {
-	args := m.Called(ctx, id)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).(*domain.APIKey), args.Error(1)
-}
-
 func (m *MockAPIKeyRepository) GetActiveByPrefix(ctx context.Context, prefix string) (*domain.APIKey, error) {
 	args := m.Called(ctx, prefix)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
 	return args.Get(0).(*domain.APIKey), args.Error(1)
-}
-
-func (m *MockAPIKeyRepository) Revoke(ctx context.Context, id uuid.UUID) error {
-	args := m.Called(ctx, id)
-	return args.Error(0)
 }
 
 func (m *MockAPIKeyRepository) RevokeForProfile(ctx context.Context, profileID, id uuid.UUID) (int64, error) {
@@ -80,11 +62,6 @@ func (m *MockAPIKeyRepository) CountByProfile(ctx context.Context, profileID uui
 func (m *MockAPIKeyRepository) TouchLastUsed(ctx context.Context, id uuid.UUID) error {
 	args := m.Called(ctx, id)
 	return args.Error(0)
-}
-
-func (m *MockAPIKeyRepository) AdminKeyExists(ctx context.Context) (bool, error) {
-	args := m.Called(ctx)
-	return args.Bool(0), args.Error(1)
 }
 
 // MockProfileService is a mock implementation of ProfileService
@@ -356,7 +333,7 @@ func TestAPIKeyServiceCreate(t *testing.T) {
 	mockAuditService.AssertExpectations(t)
 }
 
-// TestAPIKeyServiceListNeverReturnsHash verifies that list/get never returns key_hash
+// TestAPIKeyServiceListNeverReturnsHash verifies that list never returns key_hash.
 func TestAPIKeyServiceListNeverReturnsHash(t *testing.T) {
 	ctx := context.Background()
 	profileID := uuid.New()
@@ -389,107 +366,7 @@ func TestAPIKeyServiceListNeverReturnsHash(t *testing.T) {
 	require.Len(t, result, 1)
 	assert.Empty(t, result[0].KeyHash, "List should not return key_hash")
 
-	// Setup expectations for get
-	mockRepo.On("GetByID", ctx, keyID).Return(keys[0], nil)
-
-	// Test get
-	key, err := service.GetByID(ctx, keyID)
-	require.NoError(t, err)
-	assert.Empty(t, key.KeyHash, "Get should not return key_hash")
-
 	mockRepo.AssertExpectations(t)
-}
-
-// TestAPIKeyServiceRevoke verifies that revoked key is marked and sessions invalidated
-func TestAPIKeyServiceRevoke(t *testing.T) {
-	ctx := context.Background()
-	keyID := uuid.New()
-	profileID := uuid.New()
-
-	mockRepo := new(MockAPIKeyRepository)
-	mockProfileService := new(MockProfileService)
-	mockAuditService := new(MockAuditService)
-	mockSessionInvalidator := new(MockKeySessionInvalidator)
-	mockStatePurger := new(MockProfileStatePurger)
-
-	service := NewAPIKeyService(mockRepo, mockProfileService, mockAuditService, mockSessionInvalidator, mockStatePurger)
-
-	// Setup expectations
-	now := time.Now()
-	key := &domain.APIKey{
-		ID:        keyID,
-		ProfileID: profileID,
-		Label:     "test-key",
-		Scopes:    []string{"read"},
-		CreatedAt: now,
-		RevokedAt: nil, // Not revoked yet
-	}
-	mockRepo.On("GetByID", ctx, keyID).Return(key, nil)
-	mockRepo.On("Revoke", ctx, keyID).Return(nil)
-	mockSessionInvalidator.On("InvalidateKeySessions", ctx, profileID.String(), keyID.String()).Return(nil)
-	mockAuditService.On("APIKeyRevoked", ctx, mock.AnythingOfType("*string"), keyID.String(), mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
-
-	err := service.Revoke(ctx, keyID, nil, "admin", "127.0.0.1", "test-correlation")
-
-	require.NoError(t, err)
-	mockRepo.AssertExpectations(t)
-	mockSessionInvalidator.AssertExpectations(t)
-	mockAuditService.AssertExpectations(t)
-}
-
-// TestAPIKeyServiceBootstrap verifies that admin key is created once (idempotent)
-func TestAPIKeyServiceBootstrap(t *testing.T) {
-	ctx := context.Background()
-
-	mockRepo := new(MockAPIKeyRepository)
-	mockProfileService := new(MockProfileService)
-	mockAuditService := new(MockAuditService)
-	mockSessionInvalidator := new(MockKeySessionInvalidator)
-	mockStatePurger := new(MockProfileStatePurger)
-
-	service := NewAPIKeyService(mockRepo, mockProfileService, mockAuditService, mockSessionInvalidator, mockStatePurger)
-
-	// First call: no admin key exists, should create one
-	mockRepo.On("AdminKeyExists", ctx).Return(false, nil).Once()
-
-	rawEnvKey := "dm_live_testbootstrapkey123456789"
-	mockRepo.On("CreateAdminKey", ctx, mock.MatchedBy(func(key *domain.APIKey) bool {
-		if key == nil {
-			return false
-		}
-		return key.Label == "bootstrap-admin" &&
-			key.KeyPrefix == crypto.GetKeyPrefix(rawEnvKey) &&
-			assert.ObjectsAreEqual([]string{"admin", "read", "write"}, key.Scopes)
-	})).Return(nil).Once()
-
-	err := service.BootstrapAdminKey(ctx, rawEnvKey)
-	require.NoError(t, err)
-
-	mockRepo.AssertExpectations(t)
-}
-
-// TestAPIKeyServiceBootstrapIdempotent verifies that bootstrap is idempotent
-func TestAPIKeyServiceBootstrapIdempotent(t *testing.T) {
-	ctx := context.Background()
-
-	mockRepo := new(MockAPIKeyRepository)
-	mockProfileService := new(MockProfileService)
-	mockAuditService := new(MockAuditService)
-	mockSessionInvalidator := new(MockKeySessionInvalidator)
-	mockStatePurger := new(MockProfileStatePurger)
-
-	service := NewAPIKeyService(mockRepo, mockProfileService, mockAuditService, mockSessionInvalidator, mockStatePurger)
-
-	// Admin key already exists, should skip creation
-	mockRepo.On("AdminKeyExists", ctx).Return(true, nil).Once()
-
-	rawEnvKey := "dm_live_testbootstrapkey123456789"
-	err := service.BootstrapAdminKey(ctx, rawEnvKey)
-	require.NoError(t, err)
-
-	mockRepo.AssertExpectations(t)
-	// CreateAdminKey should NOT be called
-	mockRepo.AssertNotCalled(t, "CreateAdminKey")
 }
 
 // TestAPIKeyServiceRevokeForProfile_CallsSessionInvalidator proves that RevokeForProfile
@@ -568,24 +445,4 @@ func TestAPIKeyServiceRevokeForProfile_NilInvalidatorIsSafe(t *testing.T) {
 	require.NoError(t, err)
 	mockRepo.AssertExpectations(t)
 	mockAuditService.AssertExpectations(t)
-}
-
-// TestAPIKeyServiceBootstrapEmptyEnvKey verifies that bootstrap skips when env key is empty
-func TestAPIKeyServiceBootstrapEmptyEnvKey(t *testing.T) {
-	ctx := context.Background()
-
-	mockRepo := new(MockAPIKeyRepository)
-	mockProfileService := new(MockProfileService)
-	mockAuditService := new(MockAuditService)
-	mockSessionInvalidator := new(MockKeySessionInvalidator)
-	mockStatePurger := new(MockProfileStatePurger)
-
-	service := NewAPIKeyService(mockRepo, mockProfileService, mockAuditService, mockSessionInvalidator, mockStatePurger)
-
-	// Empty env key should skip without any DB calls
-	err := service.BootstrapAdminKey(ctx, "")
-	require.NoError(t, err)
-
-	// No expectations were set, so any call would fail
-	mockRepo.AssertExpectations(t)
 }

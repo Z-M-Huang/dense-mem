@@ -5,7 +5,9 @@ import (
 
 	"github.com/labstack/echo/v4"
 
+	"github.com/dense-mem/dense-mem/internal/http/dto"
 	"github.com/dense-mem/dense-mem/internal/http/middleware"
+	"github.com/dense-mem/dense-mem/internal/http/validation"
 	"github.com/dense-mem/dense-mem/internal/httperr"
 	"github.com/dense-mem/dense-mem/internal/tools/semanticsearch"
 )
@@ -39,14 +41,24 @@ func (h *SemanticSearchHandler) Handle(c echo.Context) error {
 		return httperr.New(httperr.PROFILE_ID_REQUIRED, "profile ID is required")
 	}
 
-	// Bind request body
-	var req semanticsearch.SemanticSearchRequest
+	// Bind request body to the shared DTO so the public HTTP contract and
+	// validation rules remain aligned with the catalog/OpenAPI schema.
+	var req dto.SemanticSearchRequest
 	if err := c.Bind(&req); err != nil {
 		return httperr.New(httperr.VALIDATION_ERROR, "malformed JSON body")
 	}
 
+	if err := validation.ValidateStruct(&req); err != nil {
+		return httperr.New(httperr.VALIDATION_ERROR, err.Error())
+	}
+
 	// Execute search
-	result, err := h.svc.Search(ctx, profileID.String(), &req)
+	result, err := h.svc.Search(ctx, profileID.String(), &semanticsearch.SemanticSearchRequest{
+		Embedding: req.Embedding,
+		Query:     req.Query,
+		Limit:     req.Limit,
+		Threshold: req.Threshold,
+	})
 	if err != nil {
 		return handleSemanticSearchError(err)
 	}

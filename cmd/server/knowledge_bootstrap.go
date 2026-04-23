@@ -64,30 +64,6 @@ func (a *factAuditAdapter) Append(ctx context.Context, entry factservice.AuditLo
 	})
 }
 
-type recallActiveFactsLister struct {
-	svc factservice.ListFactsService
-}
-
-func (l recallActiveFactsLister) ListActive(ctx context.Context, profileID string, limit int) ([]*domain.Fact, error) {
-	facts, _, err := l.svc.List(ctx, profileID, factservice.FactListFilters{Status: domain.FactStatusActive}, limit, "")
-	return facts, err
-}
-
-type recallValidatedClaimsLister struct {
-	svc claimservice.ListClaimsFilteredService
-}
-
-func (l recallValidatedClaimsLister) ListValidated(ctx context.Context, profileID string, limit int) ([]*domain.Claim, error) {
-	page, err := l.svc.List(ctx, profileID, claimservice.ListClaimOptions{
-		Limit:  limit,
-		Status: string(domain.StatusValidated),
-	})
-	if err != nil {
-		return nil, err
-	}
-	return page.Items, nil
-}
-
 type unavailableFragmentCreateService struct{}
 
 func (unavailableFragmentCreateService) Create(context.Context, string, *dto.CreateFragmentRequest) (*fragmentservice.CreateResult, error) {

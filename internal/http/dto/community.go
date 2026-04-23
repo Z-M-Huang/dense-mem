@@ -2,9 +2,8 @@ package dto
 
 import "time"
 
-// CommunityDetectRequest is the request body for triggering community detection
-// on a profile's knowledge graph via
-// POST /api/v1/admin/profiles/:profileId/community/detect.
+// CommunityDetectRequest is the request body for triggering community
+// detection on a profile's knowledge graph.
 //
 // All fields are optional tuning parameters. When omitted the service uses its
 // built-in defaults.

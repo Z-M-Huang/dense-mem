@@ -22,7 +22,6 @@ func TestToolCatalogHandler_ReturnsRegisteredTools(t *testing.T) {
 		InputSchema:    map[string]any{"type": "object"},
 		OutputSchema:   map[string]any{"type": "object"},
 		RequiredScopes: []string{"write"},
-		Available:      true,
 	}); err != nil {
 		t.Fatalf("register: %v", err)
 	}
@@ -47,9 +46,6 @@ func TestToolCatalogHandler_ReturnsRegisteredTools(t *testing.T) {
 	}
 	if resp.Tools[0].Name != "save_memory" {
 		t.Errorf("Tools[0].Name = %q; want save_memory", resp.Tools[0].Name)
-	}
-	if !resp.Tools[0].Available {
-		t.Error("Tools[0].Available = false; want true")
 	}
 	if len(resp.Tools[0].RequiredScopes) == 0 {
 		t.Error("Tools[0].RequiredScopes empty")

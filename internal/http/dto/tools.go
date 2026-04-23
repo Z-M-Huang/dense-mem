@@ -21,11 +21,11 @@ type GraphQueryRequest struct {
 //   - Keywords: max 512 characters, not blank
 //   - Limit: optional result limit (default: 10, max: 100)
 type KeywordSearchRequest struct {
-	Keywords        string     `json:"keywords" validate:"required,max=512,notblank"`
-	Limit           int        `json:"limit" validate:"min=1,max=100"`
-	ValidAt         *time.Time `json:"valid_at,omitempty"`
-	KnownAt         *time.Time `json:"known_at,omitempty"`
-	IncludeEvidence bool       `json:"include_evidence,omitempty"`
+	Keywords string     `json:"keywords" validate:"required,max=512,notblank"`
+	Limit    int        `json:"limit" validate:"min=1,max=100"`
+	Labels   []string   `json:"labels,omitempty" validate:"max=20,dive,max=64,notblank"`
+	ValidAt  *time.Time `json:"valid_at,omitempty"`
+	KnownAt  *time.Time `json:"known_at,omitempty"`
 }
 
 // SemanticSearchRequest represents a request for semantic search using embeddings.
@@ -35,11 +35,10 @@ type KeywordSearchRequest struct {
 //     validation.SetEmbeddingDimensions at startup to activate)
 //   - Limit: optional result limit (default: 10, max: 100)
 type SemanticSearchRequest struct {
-	Embedding       []float32  `json:"embedding" validate:"required,embedding_dim"`
-	Limit           int        `json:"limit" validate:"min=1,max=100"`
-	ValidAt         *time.Time `json:"valid_at,omitempty"`
-	KnownAt         *time.Time `json:"known_at,omitempty"`
-	IncludeEvidence bool       `json:"include_evidence,omitempty"`
+	Embedding []float32 `json:"embedding" validate:"required,embedding_dim"`
+	Query     string    `json:"query,omitempty" validate:"max=512"`
+	Limit     int       `json:"limit" validate:"min=1,max=100"`
+	Threshold float64   `json:"threshold,omitempty" validate:"gte=0,lte=1"`
 }
 
 // QueryStreamRequest represents a request to stream query results via SSE.

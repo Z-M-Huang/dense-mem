@@ -88,7 +88,8 @@ func TestCoreSchemaProfilesTable(t *testing.T) {
 	assert.True(t, constraintExists, "profiles_status_check constraint should exist")
 }
 
-// TestCoreSchemaAPIKeysTable verifies the api_keys table, check constraints for admin/standard role split.
+// TestCoreSchemaAPIKeysTable verifies the api_keys table for the
+// profile-bound bearer-token model.
 func TestCoreSchemaAPIKeysTable(t *testing.T) {
 	ctx := context.Background()
 
@@ -130,8 +131,8 @@ func TestCoreSchemaAPIKeysTable(t *testing.T) {
 	// Verify all columns exist
 	expectedColumns := []string{
 		"id", "profile_id", "key_hash", "key_prefix", "label",
-		"role", "scopes", "expires_at", "revoked_at", "last_used_at",
-		"created_at", "updated_at",
+		"scopes", "rate_limit", "expires_at", "revoked_at",
+		"last_used_at", "created_at", "updated_at",
 	}
 	for _, col := range expectedColumns {
 		var colExists bool
@@ -145,27 +146,26 @@ func TestCoreSchemaAPIKeysTable(t *testing.T) {
 		assert.True(t, colExists, "api_keys.%s column should exist", col)
 	}
 
-	// Verify role check constraint
-	var roleConstraintExists bool
+	// Verify the legacy role column is gone.
+	var roleColumnExists bool
 	err = sqlDB.QueryRowContext(ctx, `
 		SELECT EXISTS (
-			SELECT 1 FROM information_schema.check_constraints 
-			WHERE constraint_name = 'api_keys_role_check'
+			SELECT 1 FROM information_schema.columns
+			WHERE table_schema = 'public' AND table_name = 'api_keys' AND column_name = 'role'
 		)
-	`).Scan(&roleConstraintExists)
-	require.NoError(t, err, "should check role constraint existence")
-	assert.True(t, roleConstraintExists, "api_keys_role_check constraint should exist")
+	`).Scan(&roleColumnExists)
+	require.NoError(t, err, "should check legacy role column absence")
+	assert.False(t, roleColumnExists, "api_keys.role should not exist in the fresh schema")
 
-	// Verify the admin/standard profile_id check constraint
-	var profileCheckExists bool
+	// Verify profile_id is required.
+	var profileIDNullable string
 	err = sqlDB.QueryRowContext(ctx, `
-		SELECT EXISTS (
-			SELECT 1 FROM information_schema.check_constraints 
-			WHERE constraint_name = 'chk_api_keys_role_profile'
-		)
-	`).Scan(&profileCheckExists)
-	require.NoError(t, err, "should check profile constraint existence")
-	assert.True(t, profileCheckExists, "chk_api_keys_role_profile constraint should exist")
+		SELECT is_nullable
+		FROM information_schema.columns
+		WHERE table_schema = 'public' AND table_name = 'api_keys' AND column_name = 'profile_id'
+	`).Scan(&profileIDNullable)
+	require.NoError(t, err, "should check profile_id nullability")
+	assert.Equal(t, "NO", profileIDNullable, "api_keys.profile_id should be NOT NULL")
 
 	// Verify foreign key constraint on profile_id
 	var fkExists bool
@@ -179,15 +179,7 @@ func TestCoreSchemaAPIKeysTable(t *testing.T) {
 	require.NoError(t, err, "should check FK existence")
 	assert.True(t, fkExists, "api_keys should have a foreign key constraint")
 
-	// Test the check constraint: admin keys must have profile_id IS NULL
-	_, err = sqlDB.ExecContext(ctx, `
-		INSERT INTO api_keys (id, key_hash, key_prefix, role, scopes)
-		VALUES (gen_random_uuid(), 'hash123', 'prefix', 'admin', ARRAY['read'])
-	`)
-	assert.NoError(t, err, "admin key with NULL profile_id should be allowed")
-
-	// Test the check constraint: standard keys must have profile_id IS NOT NULL
-	// First create a profile
+	// Create a profile so a key can be attached to it.
 	var profileID string
 	err = sqlDB.QueryRowContext(ctx, `
 		INSERT INTO profiles (id, name, status)
@@ -196,25 +188,26 @@ func TestCoreSchemaAPIKeysTable(t *testing.T) {
 	`).Scan(&profileID)
 	require.NoError(t, err, "should create test profile")
 
+	// Profile-bound key with profile_id should be allowed.
 	_, err = sqlDB.ExecContext(ctx, `
-		INSERT INTO api_keys (id, profile_id, key_hash, key_prefix, role, scopes)
-		VALUES (gen_random_uuid(), $1, 'hash456', 'prefix2', 'standard', ARRAY['read'])
+		INSERT INTO api_keys (id, profile_id, key_hash, key_prefix, scopes)
+		VALUES (gen_random_uuid(), $1, 'hash456', 'prefix2', ARRAY['read'])
 	`, profileID)
-	assert.NoError(t, err, "standard key with profile_id should be allowed")
+	assert.NoError(t, err, "profile-bound key with profile_id should be allowed")
 
-	// Test: standard key without profile_id should fail
+	// Key without profile_id should fail.
 	_, err = sqlDB.ExecContext(ctx, `
-		INSERT INTO api_keys (id, key_hash, key_prefix, role, scopes)
-		VALUES (gen_random_uuid(), 'hash789', 'prefix3', 'standard', ARRAY['read'])
+		INSERT INTO api_keys (id, key_hash, key_prefix, scopes)
+		VALUES (gen_random_uuid(), 'hash789', 'prefix3', ARRAY['read'])
 	`)
-	assert.Error(t, err, "standard key without profile_id should fail")
+	assert.Error(t, err, "key without profile_id should fail")
 
-	// Test: admin key with profile_id should fail
+	// Duplicate key prefixes should fail because auth lookup expects one row.
 	_, err = sqlDB.ExecContext(ctx, `
-		INSERT INTO api_keys (id, profile_id, key_hash, key_prefix, role, scopes)
-		VALUES (gen_random_uuid(), $1, 'hashabc', 'prefix4', 'admin', ARRAY['read'])
+		INSERT INTO api_keys (id, profile_id, key_hash, key_prefix, scopes)
+		VALUES (gen_random_uuid(), $1, 'hashabc', 'prefix2', ARRAY['read'])
 	`, profileID)
-	assert.Error(t, err, "admin key with profile_id should fail")
+	assert.Error(t, err, "duplicate key_prefix should fail")
 }
 
 // TestCoreSchemaAuditLogTable verifies append semantics via FK cascade rules.
@@ -307,14 +300,21 @@ func TestCoreSchemaAuditLogTable(t *testing.T) {
 	require.NoError(t, err, "should get audit log entry after profile deletion")
 	assert.Nil(t, nullProfileID, "profile_id should be NULL after profile deletion (SET NULL)")
 
-	// Verify ON DELETE SET NULL for actor_key_id FK
-	// Create an admin key
+	// Verify ON DELETE SET NULL for actor_key_id FK.
+	var keyProfileID string
+	err = sqlDB.QueryRowContext(ctx, `
+		INSERT INTO profiles (id, name, status)
+		VALUES (gen_random_uuid(), 'audit-key-profile', 'active')
+		RETURNING id
+	`).Scan(&keyProfileID)
+	require.NoError(t, err, "should create test profile for api key")
+
 	var keyID string
 	err = sqlDB.QueryRowContext(ctx, `
-		INSERT INTO api_keys (id, key_hash, key_prefix, role, scopes)
-		VALUES (gen_random_uuid(), 'testhash', 'test', 'admin', ARRAY['read'])
+		INSERT INTO api_keys (id, profile_id, key_hash, key_prefix, scopes)
+		VALUES (gen_random_uuid(), $1, 'testhash', 'test-prefix', ARRAY['read'])
 		RETURNING id
-	`).Scan(&keyID)
+	`, keyProfileID).Scan(&keyID)
 	require.NoError(t, err, "should create test api key")
 
 	// Create another audit log entry with actor_key_id
@@ -337,7 +337,7 @@ func TestCoreSchemaAuditLogTable(t *testing.T) {
 	assert.Nil(t, nullKeyID, "actor_key_id should be NULL after key deletion (SET NULL)")
 }
 
-// TestCoreSchemaIndexes verifies all four indexes exist.
+// TestCoreSchemaIndexes verifies the expected indexes exist.
 func TestCoreSchemaIndexes(t *testing.T) {
 	ctx := context.Background()
 
@@ -369,7 +369,7 @@ func TestCoreSchemaIndexes(t *testing.T) {
 	expectedIndexes := []string{
 		"idx_profiles_name_unique_active",
 		"idx_api_keys_profile_id",
-		"idx_api_keys_key_prefix",
+		"idx_api_keys_key_prefix_unique",
 		"idx_audit_log_profile_timestamp",
 		"idx_audit_log_timestamp",
 	}

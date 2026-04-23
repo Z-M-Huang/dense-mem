@@ -24,13 +24,13 @@ import (
 
 // mockProfileService is a mock implementation of ProfileServiceInterface
 type mockProfileService struct {
-	createFunc   func(ctx context.Context, req service.CreateProfileRequest, actorKeyID *string, actorRole, clientIP, correlationID string) (*domain.Profile, error)
-	getFunc      func(ctx context.Context, id uuid.UUID) (*domain.Profile, error)
-	getByIDFunc  func(ctx context.Context, id uuid.UUID) (*domain.Profile, error)
-	listFunc     func(ctx context.Context, limit, offset int) ([]*domain.Profile, error)
-	countFunc    func(ctx context.Context) (int64, error)
-	updateFunc   func(ctx context.Context, id uuid.UUID, req service.UpdateProfileRequest, actorKeyID *string, actorRole, clientIP, correlationID string) (*domain.Profile, error)
-	deleteFunc   func(ctx context.Context, id uuid.UUID, actorKeyID *string, actorRole, clientIP, correlationID string) error
+	createFunc  func(ctx context.Context, req service.CreateProfileRequest, actorKeyID *string, actorRole, clientIP, correlationID string) (*domain.Profile, error)
+	getFunc     func(ctx context.Context, id uuid.UUID) (*domain.Profile, error)
+	getByIDFunc func(ctx context.Context, id uuid.UUID) (*domain.Profile, error)
+	listFunc    func(ctx context.Context, limit, offset int) ([]*domain.Profile, error)
+	countFunc   func(ctx context.Context) (int64, error)
+	updateFunc  func(ctx context.Context, id uuid.UUID, req service.UpdateProfileRequest, actorKeyID *string, actorRole, clientIP, correlationID string) (*domain.Profile, error)
+	deleteFunc  func(ctx context.Context, id uuid.UUID, actorKeyID *string, actorRole, clientIP, correlationID string) error
 }
 
 func (m *mockProfileService) Create(ctx context.Context, req service.CreateProfileRequest, actorKeyID *string, actorRole, clientIP, correlationID string) (*domain.Profile, error) {
@@ -121,8 +121,9 @@ func setPrincipal(ctx context.Context, principal *middleware.Principal) context.
 	return context.WithValue(ctx, principalContextKey{}, principal)
 }
 
-// TestProfileHandler_Create_AdminOnly tests that standard keys cannot create profiles.
-func TestProfileHandler_Create_AdminOnly(t *testing.T) {
+// TestProfileHandler_Create_RouteAuthorizationElsewhere verifies the handler
+// itself does not perform route-level authorization.
+func TestProfileHandler_Create_RouteAuthorizationElsewhere(t *testing.T) {
 	e := newTestEcho()
 	h := NewProfileHandler(&mockProfileService{})
 
@@ -142,8 +143,7 @@ func TestProfileHandler_Create_AdminOnly(t *testing.T) {
 		}
 	})
 
-	// Create route without AdminOnly middleware - handler should still work
-	// The admin-only check should be done at route registration level
+	// Route-level authorization is enforced by router wiring, not the handler.
 	e.POST("/api/v1/profiles", h.Create, middleware.BindAndValidate[dto.CreateProfileRequest](middleware.CreateProfileBodyKey))
 
 	body := `{"name": "Test Profile", "description": "Test"}`
@@ -153,12 +153,11 @@ func TestProfileHandler_Create_AdminOnly(t *testing.T) {
 
 	e.ServeHTTP(rec, req)
 
-	// The handler works - admin-only is enforced at route level
-	// This test verifies that the handler itself works
+	// The handler itself still works when invoked directly.
 	assert.Equal(t, http.StatusCreated, rec.Code)
 }
 
-// TestProfileHandler_Create_201 tests successful profile creation with admin key.
+// TestProfileHandler_Create_201 tests successful profile creation.
 func TestProfileHandler_Create_201(t *testing.T) {
 	e := newTestEcho()
 	mockSvc := &mockProfileService{
@@ -178,15 +177,16 @@ func TestProfileHandler_Create_201(t *testing.T) {
 	}
 	h := NewProfileHandler(mockSvc)
 
-	// Set admin principal
+	// Set an authenticated principal. Route-level authorization is tested elsewhere.
+	profileID := uuid.New()
 	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
 			ctx := c.Request().Context()
 			ctx = setPrincipal(ctx, &middleware.Principal{
 				KeyID:     uuid.New(),
-				ProfileID: nil,
-				Role:      "admin",
-				Scopes:    []string{"admin"},
+				ProfileID: &profileID,
+				Role:      "standard",
+				Scopes:    []string{"write"},
 			})
 			c.SetRequest(c.Request().WithContext(ctx))
 			return next(c)
@@ -210,8 +210,9 @@ func TestProfileHandler_Create_201(t *testing.T) {
 	assert.NotNil(t, resp.Data)
 }
 
-// TestProfileHandler_List_AdminOnly tests that standard keys cannot list profiles.
-func TestProfileHandler_List_AdminOnly(t *testing.T) {
+// TestProfileHandler_List_RouteAuthorizationElsewhere verifies the handler
+// itself does not perform route-level authorization.
+func TestProfileHandler_List_RouteAuthorizationElsewhere(t *testing.T) {
 	e := newTestEcho()
 	h := NewProfileHandler(&mockProfileService{})
 
@@ -231,7 +232,7 @@ func TestProfileHandler_List_AdminOnly(t *testing.T) {
 		}
 	})
 
-	// The admin-only check is at route level, not handler level
+	// Route-level authorization is enforced by router wiring, not the handler.
 	e.GET("/api/v1/profiles", h.List)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/profiles", nil)
@@ -239,7 +240,7 @@ func TestProfileHandler_List_AdminOnly(t *testing.T) {
 
 	e.ServeHTTP(rec, req)
 
-	// Handler works - admin-only is enforced at route registration level
+	// The handler itself still works when invoked directly.
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
 
@@ -284,8 +285,8 @@ func TestProfileHandler_List_Pagination(t *testing.T) {
 	assert.Equal(t, int64(42), resp.Pagination.Total)
 }
 
-// TestProfileHandler_Get_AdminOrSameProfile tests get with admin or same-profile access.
-func TestProfileHandler_Get_AdminOrSameProfile(t *testing.T) {
+// TestProfileHandler_Get_SameProfile tests get with same-profile access.
+func TestProfileHandler_Get_SameProfile(t *testing.T) {
 	e := newTestEcho()
 	profileID := uuid.New()
 	now := time.Now().UTC()
@@ -367,8 +368,8 @@ func TestProfileHandler_Get_DeletedProfile_404(t *testing.T) {
 	assert.Equal(t, httperr.NOT_FOUND, resp.Code)
 }
 
-// TestProfileHandler_Patch_AdminOrSameProfile tests patch with admin or same-profile access.
-func TestProfileHandler_Patch_AdminOrSameProfile(t *testing.T) {
+// TestProfileHandler_Patch_SameProfile tests patch with same-profile access.
+func TestProfileHandler_Patch_SameProfile(t *testing.T) {
 	e := newTestEcho()
 	profileID := uuid.New()
 	now := time.Now().UTC()
@@ -406,8 +407,9 @@ func TestProfileHandler_Patch_AdminOrSameProfile(t *testing.T) {
 	assert.NotNil(t, resp.Data)
 }
 
-// TestProfileHandler_Delete_AdminOnly tests that delete is admin-only.
-func TestProfileHandler_Delete_AdminOnly(t *testing.T) {
+// TestProfileHandler_Delete_RouteAuthorizationElsewhere verifies the handler
+// itself does not perform route-level authorization.
+func TestProfileHandler_Delete_RouteAuthorizationElsewhere(t *testing.T) {
 	e := newTestEcho()
 	h := NewProfileHandler(&mockProfileService{})
 
@@ -435,7 +437,7 @@ func TestProfileHandler_Delete_AdminOnly(t *testing.T) {
 
 	e.ServeHTTP(rec, req)
 
-	// Handler works - admin-only enforced at route level
+	// The handler itself still works when invoked directly.
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
 

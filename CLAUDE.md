@@ -95,7 +95,7 @@ See `docs/knowledge-pipeline-contracts.md` for the full reference.
 | Claim verification | `POST /api/v1/claims/{id}/verify` | AC-28 |
 | Fact promotion | `POST /api/v1/claims/{id}/promote` | AC-41 |
 | Fragment retraction | `POST /api/v1/fragments/{id}/retract` | AC-48 |
-| Community detection | `POST /api/v1/admin/profiles/{id}/community/detect` | AC-49 |
+| Community detection | `POST /api/v1/tools/detect_community` | AC-49 |
 | Hybrid recall | `GET /api/v1/recall` | AC-55, AC-62 |
 
 **Recall tier contract** (MUST NOT be changed without an ADR):

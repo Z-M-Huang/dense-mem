@@ -29,7 +29,6 @@ import (
 	"github.com/dense-mem/dense-mem/internal/sse"
 	"github.com/dense-mem/dense-mem/internal/storage/neo4j"
 	"github.com/dense-mem/dense-mem/internal/storage/postgres"
-	"github.com/dense-mem/dense-mem/internal/tools/admingraph"
 	"github.com/dense-mem/dense-mem/internal/tools/graphquery"
 	"github.com/dense-mem/dense-mem/internal/tools/keywordsearch"
 	"github.com/dense-mem/dense-mem/internal/tools/registry"
@@ -79,6 +78,9 @@ func main() {
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatalf("failed to load config: %v", err)
+	}
+	if err := cfg.ValidateServerStartup(); err != nil {
+		log.Fatalf("invalid startup config: %v", err)
 	}
 
 	// Create logger
@@ -151,7 +153,7 @@ func main() {
 	// Repository layer
 	// ========================================
 	// RLSHelper is shared across repos so every query runs with Postgres
-	// FORCE RLS session variables (app.current_profile_id / app.role) set.
+	// FORCE RLS session variables (app.current_profile_id / app.tx_mode) set.
 	rlsHelper := postgres.NewRLS()
 	profileRepo := repository.NewProfileRepository(pgDB.GetDB(), rlsHelper)
 	apiKeyRepo := repository.NewAPIKeyRepository(pgDB.GetDB(), rlsHelper)
@@ -164,12 +166,6 @@ func main() {
 	profileService := service.NewProfileService(profileRepo, auditService, backend.cleanupRepo)
 	apiKeyService := service.NewAPIKeyService(apiKeyRepo, profileService, auditService, backend.cleanupRepo, backend.cleanupRepo)
 	rateLimitService := backend.rateLimitService
-
-	// Bootstrap admin key from environment if configured
-	if err := apiKeyService.BootstrapAdminKey(startupCtx, cfg.GetBootstrapAdminKey()); err != nil {
-		logger.Error("failed to bootstrap admin key", err)
-		// Don't fail startup - this is optional bootstrap
-	}
 
 	// ========================================
 	// Neo4j profile scope enforcer and graph writer
@@ -193,13 +189,6 @@ func main() {
 	embeddingSearcher := semanticsearch.NewEmbeddingSearcher(profileScopeEnforcer)
 	semanticSearchService := semanticsearch.NewSemanticSearchService(embeddingSearcher, cfg.GetEmbeddingDimensions())
 
-	// Admin graph service
-	adminGraphValidator := admingraph.NewAdminGraphValidator()
-	adminGraphService := admingraph.NewAdminGraphService(profileScopeEnforcer, adminGraphValidator, auditService, time.Duration(cfg.GetAdminQueryTimeoutSeconds())*time.Second)
-
-	// Invariant scan service
-	invariantScanService := service.NewInvariantScanService(neo4jClient, auditService)
-
 	// ========================================
 	// Discoverability: embedding, fragments, recall, registry, openapi
 	// ========================================
@@ -215,12 +204,12 @@ func main() {
 	dedupeLookup := fragmentdedupe.NewNeo4jDedupeLookup(readerAdapter)
 	claimDedupeLookup := claimdedupe.NewNeo4jDedupeLookup(readerAdapter)
 
-	// Embedding provider — constructed only when AI_* config is fully populated.
-	// When unconfigured, save_memory / recall_memory surface as Available=false
-	// entries in the tool registry and return ErrToolUnavailable if invoked.
+	// Embedding provider — startup enforces AI_* config before reaching this
+	// point. The unavailable stub is kept as a defensive fallback for this
+	// wiring layer.
 	var (
 		retryEmbedder             *embedding.RetryEmbeddingProvider
-		fragmentCreateRegistrySvc fragmentservice.CreateFragmentService
+		fragmentCreateRegistrySvc fragmentservice.CreateFragmentService = unavailableFragmentCreateService{}
 		fragmentCreateHTTPSvc     fragmentservice.CreateFragmentService = unavailableFragmentCreateService{}
 	)
 	if cfg.IsEmbeddingConfigured() {
@@ -255,7 +244,6 @@ func main() {
 		discoverabilityMetrics,
 	)
 	claimGetSvc := claimservice.NewGetClaimService(profileScopeEnforcer, slog.Default())
-	claimListFilteredSvc := claimservice.NewListClaimsFilteredService(profileScopeEnforcer)
 	claimListSvc := claimservice.NewListClaimsService(profileScopeEnforcer)
 	claimDeleteSvc := claimservice.NewDeleteClaimService(profileScopeEnforcer, claimAuditor, slog.Default())
 
@@ -273,9 +261,11 @@ func main() {
 	factListSvc := factservice.NewListFactsService(profileScopeEnforcer)
 	communityGetSvc := communityservice.NewGetCommunitySummaryService(neo4jClient)
 	communityListSvc := communityservice.NewListCommunitiesService(neo4jClient)
+	recallFactSearcher := recallservice.NewFactSearcher(profileScopeEnforcer)
+	recallClaimSearcher := recallservice.NewClaimSearcher(profileScopeEnforcer)
 
 	var (
-		claimVerifyRegistrySvc claimservice.VerifyClaimService
+		claimVerifyRegistrySvc claimservice.VerifyClaimService = unavailableVerifyClaimService{}
 		claimVerifyHTTPSvc     claimservice.VerifyClaimService = unavailableVerifyClaimService{}
 	)
 	if verifierConfigured(&cfg) {
@@ -298,7 +288,7 @@ func main() {
 
 	// Recall requires embedding (query vectors).
 	var (
-		recallRegistrySvc recallservice.RecallService
+		recallRegistrySvc recallservice.RecallService = unavailableRecallService{}
 		recallHTTPSvc     recallservice.RecallService = unavailableRecallService{}
 	)
 	if cfg.IsEmbeddingConfigured() {
@@ -315,8 +305,10 @@ func main() {
 			embeddingSearcher,
 			fragmentSearcher,
 			fragmentGetSvc,
-			recallActiveFactsLister{svc: factListSvc},
-			recallValidatedClaimsLister{svc: claimListFilteredSvc},
+			recallFactSearcher,
+			factGetSvc,
+			recallClaimSearcher,
+			claimGetSvc,
 			cfg.GetRecallValidatedClaimWeight(),
 			logger,
 			discoverabilityMetrics,
@@ -324,8 +316,7 @@ func main() {
 	}
 
 	var (
-		communityDetectRegistrySvc communityservice.DetectCommunityService
-		communityDetectHTTPSvc     communityservice.DetectCommunityService = unavailableCommunityDetectService{}
+		communityDetectRegistrySvc communityservice.DetectCommunityService = unavailableCommunityDetectService{}
 	)
 	communityAvailabilitySvc := communityservice.NewAvailabilityService(neo4jClient, slog.Default())
 	communityProbeCtx, communityProbeCancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -333,30 +324,28 @@ func main() {
 	communityProbeCancel()
 	if communityAvailable {
 		communityDetectRegistrySvc = communityservice.NewLeidenService(pgDB.GetDB(), neo4jClient, &cfg, slog.Default())
-		communityDetectHTTPSvc = communityDetectRegistrySvc
 	}
 
 	// Tool registry is the single source of truth for MCP / HTTP catalog / OpenAPI.
 	toolRegistry, err := registry.BuildDefault(registry.Dependencies{
-		FragmentCreate:      fragmentCreateRegistrySvc,
-		FragmentGet:         fragmentGetSvc,
-		FragmentList:        fragmentListSvc,
-		Recall:              recallRegistrySvc,
-		KeywordSearch:       keywordSearchService,
-		SemanticSearch:      semanticSearchService,
-		GraphQuery:          graphQueryService,
-		ClaimCreate:         claimCreateSvc,
-		ClaimGet:            claimGetSvc,
-		ClaimList:           claimListSvc,
-		ClaimVerify:         claimVerifyRegistrySvc,
-		FactPromote:         factPromoteSvc,
-		FactGet:             factGetSvc,
-		FactList:            factListSvc,
-		FragmentRetract:     fragmentRetractSvc,
-		CommunityDetect:     communityDetectRegistrySvc,
-		CommunityGet:        communityGetSvc,
-		CommunityList:       communityListSvc,
-		EmbeddingConfigured: cfg.IsEmbeddingConfigured(),
+		FragmentCreate:  fragmentCreateRegistrySvc,
+		FragmentGet:     fragmentGetSvc,
+		FragmentList:    fragmentListSvc,
+		Recall:          recallRegistrySvc,
+		KeywordSearch:   keywordSearchService,
+		SemanticSearch:  semanticSearchService,
+		GraphQuery:      graphQueryService,
+		ClaimCreate:     claimCreateSvc,
+		ClaimGet:        claimGetSvc,
+		ClaimList:       claimListSvc,
+		ClaimVerify:     claimVerifyRegistrySvc,
+		FactPromote:     factPromoteSvc,
+		FactGet:         factGetSvc,
+		FactList:        factListSvc,
+		FragmentRetract: fragmentRetractSvc,
+		CommunityDetect: communityDetectRegistrySvc,
+		CommunityGet:    communityGetSvc,
+		CommunityList:   communityListSvc,
 	})
 	if err != nil {
 		log.Fatalf("failed to build tool registry: %v", err)
@@ -375,8 +364,6 @@ func main() {
 	graphQueryHandler := handler.NewGraphQueryHandler(graphQueryService)
 	keywordSearchHandler := handler.NewKeywordSearchHandler(keywordSearchService)
 	semanticSearchHandler := handler.NewSemanticSearchHandler(semanticSearchService)
-	adminGraphHandler := handler.NewAdminGraphHandler(adminGraphService)
-	invariantScanHandler := handler.NewInvariantScanHandler(invariantScanService)
 
 	// Query stream orchestrator and handler
 	queryStreamOrchestrator := handler.NewQueryStreamOrchestrator(graphQueryService, keywordSearchService, semanticSearchService)
@@ -398,7 +385,6 @@ func main() {
 	factListHandler := handler.NewFactListHandler(factListSvc)
 	communityReadHandler := handler.NewCommunityReadHandler(communityGetSvc)
 	communityListHandler := handler.NewCommunityListHandler(communityListSvc)
-	communityDetectHandler := handler.NewCommunityDetectHandler(communityDetectHTTPSvc, communityListSvc)
 	toolCatalogHandler := handler.NewToolCatalogHandler(toolRegistry)
 	toolReadHandler := handler.NewToolReadHandler(toolRegistry)
 	toolExecuteHandler := handler.NewToolExecuteHandler(toolRegistry)
@@ -458,8 +444,6 @@ func main() {
 		KeywordSearch:   keywordSearchHandler.Handle,
 		SemanticSearch:  semanticSearchHandler.Handle,
 		QueryStream:     queryStreamHandler.Handle,
-		AdminGraphQuery: adminGraphHandler.Handle,
-		InvariantScan:   invariantScanHandler.Handle,
 		FragmentRead:    fragmentReadHandler.Handle,
 		FragmentList:    fragmentListHandler.Handle,
 		FragmentDelete:  fragmentDeleteHandler.Handle,
@@ -474,7 +458,6 @@ func main() {
 		FactList:        factListHandler.Handle,
 		CommunityRead:   communityReadHandler.Handle,
 		CommunityList:   communityListHandler.Handle,
-		CommunityDetect: communityDetectHandler.Handle,
 		ToolCatalog:     toolCatalogHandler.Handle,
 		GetTool:         toolReadHandler.Handle,
 		ExecuteTool:     toolExecuteHandler.Handle,

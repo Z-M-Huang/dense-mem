@@ -17,7 +17,6 @@ import (
 // --- post_claim -----------------------------------------------------------
 
 func postClaimTool(deps Dependencies) Tool {
-	available := deps.ClaimCreate != nil
 	return Tool{
 		Name:        "post_claim",
 		Description: "Extract and persist a new Claim from supporting SourceFragments within the caller's profile. Returns the created claim with its initial candidate status.",
@@ -47,14 +46,13 @@ func postClaimTool(deps Dependencies) Tool {
 		},
 		OutputSchema:   claimObjectSchema(),
 		RequiredScopes: []string{"write"},
-		Available:      available,
-		Invoke:         postClaimInvoker(deps.ClaimCreate, available),
+		Invoke:         postClaimInvoker(deps.ClaimCreate),
 	}
 }
 
-func postClaimInvoker(svc claimservice.CreateClaimService, available bool) ToolInvoker {
+func postClaimInvoker(svc claimservice.CreateClaimService) ToolInvoker {
 	return func(ctx context.Context, profileID string, input map[string]any) (map[string]any, error) {
-		if !available || svc == nil {
+		if svc == nil {
 			return nil, ErrToolUnavailable
 		}
 		var claim domain.Claim
@@ -80,7 +78,6 @@ func postClaimInvoker(svc claimservice.CreateClaimService, available bool) ToolI
 // --- get_claim -----------------------------------------------------------
 
 func getClaimTool(deps Dependencies) Tool {
-	available := deps.ClaimGet != nil
 	return Tool{
 		Name:        "get_claim",
 		Description: "Fetch a single Claim by ID within the caller's profile scope.",
@@ -92,9 +89,8 @@ func getClaimTool(deps Dependencies) Tool {
 		},
 		OutputSchema:   claimObjectSchema(),
 		RequiredScopes: []string{"read"},
-		Available:      available,
 		Invoke: func(ctx context.Context, profileID string, input map[string]any) (map[string]any, error) {
-			if !available {
+			if deps.ClaimGet == nil {
 				return nil, ErrToolUnavailable
 			}
 			id, _ := input["id"].(string)
@@ -113,7 +109,6 @@ func getClaimTool(deps Dependencies) Tool {
 // --- list_claims ----------------------------------------------------------
 
 func listClaimsTool(deps Dependencies) Tool {
-	available := deps.ClaimList != nil
 	return Tool{
 		Name:        "list_claims",
 		Description: "List claims for the caller's profile with optional status/modality filters and offset pagination.",
@@ -135,9 +130,8 @@ func listClaimsTool(deps Dependencies) Tool {
 			},
 		},
 		RequiredScopes: []string{"read"},
-		Available:      available,
 		Invoke: func(ctx context.Context, profileID string, input map[string]any) (map[string]any, error) {
-			if !available {
+			if deps.ClaimList == nil {
 				return nil, ErrToolUnavailable
 			}
 			limit := 20
@@ -169,7 +163,6 @@ func listClaimsTool(deps Dependencies) Tool {
 // --- verify_claim ---------------------------------------------------------
 
 func verifyClaimTool(deps Dependencies) Tool {
-	available := deps.ClaimVerify != nil
 	return Tool{
 		Name:        "verify_claim",
 		Description: "Run entailment verification for a Claim within the caller's profile. Transitions status from candidate to validated or rejected.",
@@ -181,9 +174,8 @@ func verifyClaimTool(deps Dependencies) Tool {
 		},
 		OutputSchema:   claimObjectSchema(),
 		RequiredScopes: []string{"write"},
-		Available:      available,
 		Invoke: func(ctx context.Context, profileID string, input map[string]any) (map[string]any, error) {
-			if !available {
+			if deps.ClaimVerify == nil {
 				return nil, ErrToolUnavailable
 			}
 			id, _ := input["id"].(string)
@@ -202,7 +194,6 @@ func verifyClaimTool(deps Dependencies) Tool {
 // --- promote_claim --------------------------------------------------------
 
 func promoteClaimTool(deps Dependencies) Tool {
-	available := deps.FactPromote != nil
 	return Tool{
 		Name:        "promote_claim",
 		Description: "Promote a validated Claim to a Fact within the caller's profile. The Claim must have status=validated and verdict=entailed.",
@@ -214,9 +205,8 @@ func promoteClaimTool(deps Dependencies) Tool {
 		},
 		OutputSchema:   factObjectSchema(),
 		RequiredScopes: []string{"write"},
-		Available:      available,
 		Invoke: func(ctx context.Context, profileID string, input map[string]any) (map[string]any, error) {
-			if !available {
+			if deps.FactPromote == nil {
 				return nil, ErrToolUnavailable
 			}
 			claimID, _ := input["claim_id"].(string)
@@ -235,7 +225,6 @@ func promoteClaimTool(deps Dependencies) Tool {
 // --- get_fact -------------------------------------------------------------
 
 func getFactTool(deps Dependencies) Tool {
-	available := deps.FactGet != nil
 	return Tool{
 		Name:        "get_fact",
 		Description: "Fetch a single Fact by ID within the caller's profile scope.",
@@ -252,9 +241,8 @@ func getFactTool(deps Dependencies) Tool {
 		},
 		OutputSchema:   factObjectSchema(),
 		RequiredScopes: []string{"read"},
-		Available:      available,
 		Invoke: func(ctx context.Context, profileID string, input map[string]any) (map[string]any, error) {
-			if !available {
+			if deps.FactGet == nil {
 				return nil, ErrToolUnavailable
 			}
 			var req struct {
@@ -289,7 +277,6 @@ func getFactTool(deps Dependencies) Tool {
 // --- list_facts -----------------------------------------------------------
 
 func listFactsTool(deps Dependencies) Tool {
-	available := deps.FactList != nil
 	return Tool{
 		Name:        "list_facts",
 		Description: "List facts for the caller's profile with optional filters and keyset pagination.",
@@ -316,9 +303,8 @@ func listFactsTool(deps Dependencies) Tool {
 			},
 		},
 		RequiredScopes: []string{"read"},
-		Available:      available,
 		Invoke: func(ctx context.Context, profileID string, input map[string]any) (map[string]any, error) {
-			if !available {
+			if deps.FactList == nil {
 				return nil, ErrToolUnavailable
 			}
 			var req struct {
@@ -374,7 +360,6 @@ func listFactsTool(deps Dependencies) Tool {
 // --- retract_fragment -----------------------------------------------------
 
 func retractFragmentTool(deps Dependencies) Tool {
-	available := deps.FragmentRetract != nil
 	return Tool{
 		Name:        "retract_fragment",
 		Description: "Tombstone a SourceFragment and recompute affected facts within the caller's profile. The fragment is soft-deleted; graph lineage is preserved.",
@@ -389,9 +374,8 @@ func retractFragmentTool(deps Dependencies) Tool {
 			"properties": map[string]any{},
 		},
 		RequiredScopes: []string{"write"},
-		Available:      available,
 		Invoke: func(ctx context.Context, profileID string, input map[string]any) (map[string]any, error) {
-			if !available {
+			if deps.FragmentRetract == nil {
 				return nil, ErrToolUnavailable
 			}
 			id, _ := input["id"].(string)
@@ -409,7 +393,6 @@ func retractFragmentTool(deps Dependencies) Tool {
 // --- detect_community -----------------------------------------------------
 
 func detectCommunityTool(deps Dependencies) Tool {
-	available := deps.CommunityDetect != nil && deps.CommunityList != nil
 	return Tool{
 		Name:        "detect_community",
 		Description: "Run graph community detection for the caller's profile using the Neo4j Graph Data Science plugin, persist deterministic summaries, and return the current community set.",
@@ -427,9 +410,8 @@ func detectCommunityTool(deps Dependencies) Tool {
 			"properties": communityDetectObjectSchema(),
 		},
 		RequiredScopes: []string{"write"},
-		Available:      available,
 		Invoke: func(ctx context.Context, profileID string, input map[string]any) (map[string]any, error) {
-			if !available {
+			if deps.CommunityDetect == nil || deps.CommunityList == nil {
 				return nil, ErrToolUnavailable
 			}
 			var req dto.CommunityDetectRequest
@@ -474,7 +456,6 @@ func detectCommunityTool(deps Dependencies) Tool {
 // --- get_community_summary ------------------------------------------------
 
 func getCommunitySummaryTool(deps Dependencies) Tool {
-	available := deps.CommunityGet != nil
 	return Tool{
 		Name:        "get_community_summary",
 		Description: "Fetch one persisted community summary by community_id within the caller's profile scope.",
@@ -488,9 +469,8 @@ func getCommunitySummaryTool(deps Dependencies) Tool {
 		},
 		OutputSchema:   communityObjectSchema(),
 		RequiredScopes: []string{"read"},
-		Available:      available,
 		Invoke: func(ctx context.Context, profileID string, input map[string]any) (map[string]any, error) {
-			if !available {
+			if deps.CommunityGet == nil {
 				return nil, ErrToolUnavailable
 			}
 			communityID, _ := input["community_id"].(string)
@@ -509,7 +489,6 @@ func getCommunitySummaryTool(deps Dependencies) Tool {
 // --- list_communities -----------------------------------------------------
 
 func listCommunitiesTool(deps Dependencies) Tool {
-	available := deps.CommunityList != nil
 	return Tool{
 		Name:        "list_communities",
 		Description: "List persisted community summaries for the caller's profile, ordered by member_count descending.",
@@ -528,9 +507,8 @@ func listCommunitiesTool(deps Dependencies) Tool {
 			},
 		},
 		RequiredScopes: []string{"read"},
-		Available:      available,
 		Invoke: func(ctx context.Context, profileID string, input map[string]any) (map[string]any, error) {
-			if !available {
+			if deps.CommunityList == nil {
 				return nil, ErrToolUnavailable
 			}
 			limit := 20

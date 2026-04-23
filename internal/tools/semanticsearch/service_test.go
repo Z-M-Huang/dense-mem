@@ -93,6 +93,22 @@ func TestQueryVectorIndex_CrossProfileIsolation(t *testing.T) {
 	require.NotEqual(t, profileA, capturedProfileID, "profile B query must not pass profile A's ID to ScopedRead")
 }
 
+func TestQueryVectorIndex_UsesNeo4jParameterOrder(t *testing.T) {
+	ctx := context.Background()
+	profileID := "profile-a-id"
+
+	mockReader := &mockScopedReader{
+		scopedReadFunc: func(ctx context.Context, pid string, query string, params map[string]any) (neo4j.ResultSummary, []map[string]any, error) {
+			assert.Contains(t, query, "queryNodes('fragment_embedding_idx', $limit, $embedding)")
+			return nil, nil, nil
+		},
+	}
+
+	searcher := NewEmbeddingSearcher(mockReader)
+	_, err := searcher.QueryVectorIndex(ctx, profileID, []float32{0.1, 0.2, 0.3}, 10)
+	require.NoError(t, err)
+}
+
 // mockEmbeddingSearcher implements EmbeddingSearcherInterface for testing.
 type mockEmbeddingSearcher struct {
 	queryVectorIndexFunc func(ctx context.Context, profileID string, embedding []float32, limit int) ([]SearchHit, error)
@@ -120,14 +136,14 @@ func TestSemanticSearchProfileFiltering(t *testing.T) {
 	}
 
 	tests := []struct {
-		name                string
-		requestingProfile   string
-		vectorResults       []SearchHit
-		expectedProfileIDs  []string // All should match requesting profile
+		name               string
+		requestingProfile  string
+		vectorResults      []SearchHit
+		expectedProfileIDs []string // All should match requesting profile
 	}{
 		{
-			name:               "profile B sees only profile B fragments even when profile A has nearest vector",
-			requestingProfile:  profileB,
+			name:              "profile B sees only profile B fragments even when profile A has nearest vector",
+			requestingProfile: profileB,
 			vectorResults: []SearchHit{
 				{ID: "frag-1", Type: "fragment", Content: "nearest globally from profile A", Score: 0.99, ProfileID: profileA},
 				{ID: "frag-2", Type: "fragment", Content: "content from profile B", Score: 0.80, ProfileID: profileB},
@@ -136,8 +152,8 @@ func TestSemanticSearchProfileFiltering(t *testing.T) {
 			expectedProfileIDs: []string{profileB}, // Only profile B results, even though profile A has higher scores
 		},
 		{
-			name:               "profile A sees only profile A fragments even when profile B has nearest vector",
-			requestingProfile:  profileA,
+			name:              "profile A sees only profile A fragments even when profile B has nearest vector",
+			requestingProfile: profileA,
 			vectorResults: []SearchHit{
 				{ID: "frag-1", Type: "fragment", Content: "nearest globally from profile B", Score: 0.99, ProfileID: profileB},
 				{ID: "frag-2", Type: "fragment", Content: "content from profile A", Score: 0.80, ProfileID: profileA},
@@ -146,8 +162,8 @@ func TestSemanticSearchProfileFiltering(t *testing.T) {
 			expectedProfileIDs: []string{profileA, profileA}, // Only profile A results
 		},
 		{
-			name:               "all results from other profile - empty result",
-			requestingProfile:  profileB,
+			name:              "all results from other profile - empty result",
+			requestingProfile: profileB,
 			vectorResults: []SearchHit{
 				{ID: "frag-1", Type: "fragment", Content: "nearest from profile A", Score: 0.99, ProfileID: profileA},
 				{ID: "frag-2", Type: "fragment", Content: "second from profile A", Score: 0.95, ProfileID: profileA},
@@ -198,9 +214,9 @@ func TestSemanticSearchBadDimensions(t *testing.T) {
 	svc := NewSemanticSearchService(mockSearcher, embeddingDimensions)
 
 	tests := []struct {
-		name           string
-		embeddingLen   int
-		expectError    bool
+		name         string
+		embeddingLen int
+		expectError  bool
 	}{
 		{
 			name:         "correct dimensions",
@@ -294,10 +310,10 @@ func TestSemanticSearchLimitValidation(t *testing.T) {
 	}
 
 	tests := []struct {
-		name              string
-		requestLimit      int
-		expectedLimitCap  int
-		expectError       bool
+		name             string
+		requestLimit     int
+		expectedLimitCap int
+		expectError      bool
 	}{
 		{
 			name:         "limit 0 returns 422 validation error",
@@ -321,7 +337,7 @@ func TestSemanticSearchLimitValidation(t *testing.T) {
 		},
 		{
 			name:             "default limit when not specified",
-			requestLimit:     -1, // Negative means use default
+			requestLimit:     -1,           // Negative means use default
 			expectedLimitCap: DefaultLimit, // 10
 		},
 	}
@@ -339,7 +355,7 @@ func TestSemanticSearchLimitValidation(t *testing.T) {
 							ID:        "frag-" + string(rune(i)),
 							Type:      "fragment",
 							Content:   "content",
-							Score:     float64(200 - i) / 200.0, // Descending scores
+							Score:     float64(200-i) / 200.0, // Descending scores
 							ProfileID: pid,
 						}
 					}
@@ -429,4 +445,29 @@ func TestSemanticSearchEmptyResult(t *testing.T) {
 			assert.Equal(t, 20, result.Meta.LimitApplied, "limit_applied should be set")
 		})
 	}
+}
+
+func TestSemanticSearchThresholdFiltersHits(t *testing.T) {
+	profileID := "test-profile-id"
+	embeddingDimensions := 3
+
+	mockSearcher := &mockEmbeddingSearcher{
+		queryVectorIndexFunc: func(ctx context.Context, pid string, embedding []float32, limit int) ([]SearchHit, error) {
+			return []SearchHit{
+				{ID: "frag-1", Type: "fragment", Content: "kept", Score: 0.91, ProfileID: pid},
+				{ID: "frag-2", Type: "fragment", Content: "dropped", Score: 0.74, ProfileID: pid},
+			}, nil
+		},
+	}
+
+	svc := NewSemanticSearchService(mockSearcher, embeddingDimensions)
+
+	result, err := svc.Search(context.Background(), profileID, &SemanticSearchRequest{
+		Embedding: []float32{0.1, 0.2, 0.3},
+		Limit:     10,
+		Threshold: 0.8,
+	})
+	require.NoError(t, err)
+	require.Len(t, result.Data, 1)
+	assert.Equal(t, "frag-1", result.Data[0].ID)
 }

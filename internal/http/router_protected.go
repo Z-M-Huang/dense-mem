@@ -15,7 +15,7 @@ import (
 
 // ProtectedDeps holds all dependencies needed for protected route registration.
 // This struct collects all the middleware and service dependencies required
-// for the protected route groups (profile, tool, admin routes).
+// for the protected route groups (profile and tool/data routes).
 type ProtectedDeps struct {
 	// APIKeyRepo is the API key repository for authentication.
 	APIKeyRepo repository.APIKeyRepository
@@ -86,9 +86,6 @@ func (d *ProtectedDeps) GetLogger() observability.LogProvider {
 // Tool routes (/api/v1/tools/*):
 //   - auth -> profile resolution(header) -> profile authorization -> rate limit -> bind+validate -> handler
 //
-// Admin routes (/api/v1/admin/*):
-//   - auth -> admin only -> rate limit -> bind+validate -> handler
-//
 // Public routes (/health, /ready) remain outside these groups with no middleware.
 func RegisterProtectedRoutes(e *echo.Echo, deps ProtectedDeps) {
 	// Create profile authorization service from audit service
@@ -134,23 +131,6 @@ func RegisterProtectedRoutes(e *echo.Echo, deps ProtectedDeps) {
 		return response.SuccessOK(c, map[string]string{"status": "tool_test"})
 	})
 
-	// ====================================
-	// Admin routes
-	// ====================================
-	// Middleware order: auth -> admin only -> rate limit -> bind+validate -> handler
-	adminGroup := e.Group("/api/v1/admin")
-	adminGroup.Use(middleware.AuthMiddleware(deps.APIKeyRepo, deps.AuditService))
-	adminGroup.Use(middleware.AdminOnly())
-	adminGroup.Use(middleware.RateLimitMiddleware(deps.RateLimitService, deps.Config, deps.AuditService))
-
-	// Admin routes (handlers will be added in later units)
-	// adminGroup.GET("/stats", getStatsHandler, middleware.BindAndValidate[...]())
-	// adminGroup.GET("/keys", listAllKeysHandler, middleware.BindAndValidate[...]())
-
-	// Placeholder handler for testing middleware chain
-	adminGroup.GET("/test", func(c echo.Context) error {
-		return response.SuccessOK(c, map[string]string{"status": "admin_test"})
-	})
 }
 
 // RegisterProtectedRoutesWithHandlers registers protected routes with actual handlers.
@@ -163,23 +143,10 @@ func RegisterProtectedRoutesWithHandlers(e *echo.Echo, deps ProtectedDeps, handl
 	profileHandler := handler.NewProfileHandler(deps.ProfileSvc)
 
 	// ====================================
-	// Admin-only profile routes (no :profileId in path)
-	// ====================================
-	// POST /api/v1/profiles → admin-only create
-	// GET /api/v1/profiles → admin-only list
-	adminProfileGroup := e.Group("/api/v1/profiles")
-	adminProfileGroup.Use(middleware.AuthMiddleware(deps.APIKeyRepo, deps.AuditService))
-	adminProfileGroup.Use(middleware.AdminOnly())
-	adminProfileGroup.Use(middleware.RateLimitMiddleware(deps.RateLimitService, deps.Config, deps.AuditService))
-
-	adminProfileGroup.POST("", profileHandler.Create, middleware.BindAndValidate[dto.CreateProfileRequest](middleware.CreateProfileBodyKey))
-	adminProfileGroup.GET("", profileHandler.List)
-
-	// ====================================
 	// Profile-specific routes (with :profileId in path)
 	// ====================================
-	// GET /api/v1/profiles/:profileId → admin or same-profile
-	// PATCH /api/v1/profiles/:profileId → admin or same-profile + write
+	// GET /api/v1/profiles/:profileId → same-profile
+	// PATCH /api/v1/profiles/:profileId → same-profile + write
 	profileGroup := e.Group("/api/v1/profiles/:profileId")
 	profileGroup.Use(middleware.AuthMiddleware(deps.APIKeyRepo, deps.AuditService))
 	profileGroup.Use(middleware.ProfileResolutionMiddleware(deps.ProfileService))
@@ -192,21 +159,10 @@ func RegisterProtectedRoutesWithHandlers(e *echo.Echo, deps ProtectedDeps, handl
 	// ====================================
 	// Audit log route (append-only, read endpoint only)
 	// ====================================
-	// GET /api/v1/profiles/:profileId/audit-log → admin or same-profile + read
+	// GET /api/v1/profiles/:profileId/audit-log → same-profile + read
 	// Audit handler does its own permission check for defense-in-depth
 	auditHandler := handler.NewAuditHandler(deps.AuditService)
 	profileGroup.GET("/audit-log", auditHandler.Get, middleware.RequireScopes("read"))
-
-	// ====================================
-	// API key routes under profile
-	// ====================================
-	// POST /api/v1/profiles/:profileId/api-keys → admin or same-profile + write
-	// GET /api/v1/profiles/:profileId/api-keys → admin or same-profile + read
-	// DELETE /api/v1/profiles/:profileId/api-keys/:keyId → admin or same-profile + write
-	apiKeyHandler := handler.NewAPIKeyHandler(handlers.APIKeySvc)
-	profileGroup.POST("/api-keys", apiKeyHandler.Create, middleware.RequireScopes("write"), middleware.BindAndValidate[dto.CreateAPIKeyRequest](middleware.CreateAPIKeyBodyKey))
-	profileGroup.GET("/api-keys", apiKeyHandler.List, middleware.RequireScopes("read"))
-	profileGroup.DELETE("/api-keys/:keyId", apiKeyHandler.Delete, middleware.RequireScopes("write"))
 
 	// ====================================
 	// Query stream SSE route
@@ -216,17 +172,6 @@ func RegisterProtectedRoutesWithHandlers(e *echo.Echo, deps ProtectedDeps, handl
 	if handlers.QueryStream != nil {
 		profileGroup.POST("/query/stream", handlers.QueryStream, middleware.RequireScopes("read"))
 	}
-
-	// ====================================
-	// Admin-only profile delete route
-	// ====================================
-	// DELETE /api/v1/profiles/:profileId → admin-only
-	adminDeleteGroup := e.Group("/api/v1/profiles/:profileId")
-	adminDeleteGroup.Use(middleware.AuthMiddleware(deps.APIKeyRepo, deps.AuditService))
-	adminDeleteGroup.Use(middleware.AdminOnly())
-	adminDeleteGroup.Use(middleware.RateLimitMiddleware(deps.RateLimitService, deps.Config, deps.AuditService))
-
-	adminDeleteGroup.DELETE("", profileHandler.Delete)
 
 	// Fragment routes — canonical /api/v1/fragments (AC-50)
 	// Middleware: auth -> profile resolution(header) -> profile authorization -> rate limit
@@ -335,41 +280,12 @@ func RegisterProtectedRoutesWithHandlers(e *echo.Echo, deps ProtectedDeps, handl
 		toolGroup.POST("/:name", handlers.ExecuteTool)
 	}
 
-	// Admin routes
-	adminGroup := e.Group("/api/v1/admin")
-	adminGroup.Use(middleware.AuthMiddleware(deps.APIKeyRepo, deps.AuditService))
-	adminGroup.Use(middleware.AdminOnly())
-	adminGroup.Use(middleware.RateLimitMiddleware(deps.RateLimitService, deps.Config, deps.AuditService))
-
-	// Admin test route (for UAT testing)
-	adminGroup.GET("/test", func(c echo.Context) error {
-		return response.SuccessOK(c, map[string]string{"status": "admin_test"})
-	})
-
-	// OpenAPI — AI-safe variant is served under the protected prefix (any
-	// authenticated caller can discover the public surface). The full admin
-	// variant lives under the admin group.
-	if handlers.OpenAPIAISafe != nil {
-		e.GET("/api/v1/openapi.json", handlers.OpenAPIAISafe, middleware.AuthMiddleware(deps.APIKeyRepo, deps.AuditService))
-	}
+	// OpenAPI — expose the full runtime contract when available. The AI-safe
+	// variant remains as a fallback for reduced runtimes and tests.
 	if handlers.OpenAPIFull != nil {
-		adminGroup.GET("/openapi.json", handlers.OpenAPIFull)
-	}
-
-	if handlers.GetStats != nil {
-		adminGroup.GET("/stats", handlers.GetStats)
-	}
-	if handlers.ListAllKeys != nil {
-		adminGroup.GET("/keys", handlers.ListAllKeys)
-	}
-	if handlers.AdminGraphQuery != nil {
-		adminGroup.POST("/graph/query", handlers.AdminGraphQuery)
-	}
-	if handlers.InvariantScan != nil {
-		adminGroup.POST("/invariant-scan", handlers.InvariantScan)
-	}
-	if handlers.CommunityDetect != nil {
-		adminGroup.POST("/profiles/:profileId/community/detect", handlers.CommunityDetect)
+		e.GET("/api/v1/openapi.json", handlers.OpenAPIFull, middleware.AuthMiddleware(deps.APIKeyRepo, deps.AuditService))
+	} else if handlers.OpenAPIAISafe != nil {
+		e.GET("/api/v1/openapi.json", handlers.OpenAPIAISafe, middleware.AuthMiddleware(deps.APIKeyRepo, deps.AuditService))
 	}
 
 	// Recall route — canonical GET /api/v1/recall (AC-55, AC-62)
@@ -388,29 +304,25 @@ func RegisterProtectedRoutesWithHandlers(e *echo.Echo, deps ProtectedDeps, handl
 // ProtectedHandlers holds handler functions for protected routes.
 // This is provided for later units that implement real handlers.
 type ProtectedHandlers struct {
-	ListProfiles    echo.HandlerFunc
-	CreateProfile   echo.HandlerFunc
-	GetProfile      echo.HandlerFunc
-	UpdateProfile   echo.HandlerFunc
-	DeleteProfile   echo.HandlerFunc
-	GetTool         echo.HandlerFunc
-	ExecuteTool     echo.HandlerFunc
-	GetStats        echo.HandlerFunc
-	ListAllKeys     echo.HandlerFunc
-	GraphQuery      echo.HandlerFunc
-	KeywordSearch   echo.HandlerFunc
-	SemanticSearch  echo.HandlerFunc
-	QueryStream     echo.HandlerFunc
-	AdminGraphQuery echo.HandlerFunc
-	InvariantScan   echo.HandlerFunc
-	FragmentCreate  echo.HandlerFunc
-	FragmentRead    echo.HandlerFunc
-	FragmentList    echo.HandlerFunc
-	FragmentDelete  echo.HandlerFunc
-	ToolCatalog     echo.HandlerFunc
-	OpenAPIAISafe   echo.HandlerFunc
-	OpenAPIFull     echo.HandlerFunc
-	APIKeySvc       handler.APIKeyServiceInterface // Service for API key routes
+	ListProfiles   echo.HandlerFunc
+	CreateProfile  echo.HandlerFunc
+	GetProfile     echo.HandlerFunc
+	UpdateProfile  echo.HandlerFunc
+	DeleteProfile  echo.HandlerFunc
+	GetTool        echo.HandlerFunc
+	ExecuteTool    echo.HandlerFunc
+	GraphQuery     echo.HandlerFunc
+	KeywordSearch  echo.HandlerFunc
+	SemanticSearch echo.HandlerFunc
+	QueryStream    echo.HandlerFunc
+	FragmentCreate echo.HandlerFunc
+	FragmentRead   echo.HandlerFunc
+	FragmentList   echo.HandlerFunc
+	FragmentDelete echo.HandlerFunc
+	ToolCatalog    echo.HandlerFunc
+	OpenAPIAISafe  echo.HandlerFunc
+	OpenAPIFull    echo.HandlerFunc
+	APIKeySvc      handler.APIKeyServiceInterface // Service for API key routes
 	// Claim handlers — knowledge pipeline Phase 2 (AC-16)
 	ClaimCreate echo.HandlerFunc
 	ClaimRead   echo.HandlerFunc
@@ -426,8 +338,6 @@ type ProtectedHandlers struct {
 	FactList echo.HandlerFunc
 	// FragmentRetract handles POST /api/v1/fragments/:id/retract (Phase 6 soft tombstone)
 	FragmentRetract echo.HandlerFunc
-	// CommunityDetect handles POST /api/v1/admin/profiles/:profileId/community/detect (Phase 7)
-	CommunityDetect echo.HandlerFunc
 	// CommunityRead handles GET /api/v1/communities/:id.
 	CommunityRead echo.HandlerFunc
 	// CommunityList handles GET /api/v1/communities.

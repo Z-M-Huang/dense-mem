@@ -41,7 +41,7 @@ type Neo4jClientInterface interface {
 //
 // IMPORTANT: This service executes queries that cross profile boundaries by design.
 // It bypasses the ScopedRead profile filter to detect invariant violations.
-// This is a deliberate exception that requires admin-only access and audit logging.
+// This is a deliberate operator-only exception that requires audit logging.
 type invariantScanService struct {
 	client   Neo4jClientInterface
 	auditSvc AuditService
@@ -82,7 +82,7 @@ func (s *invariantScanService) Scan(ctx context.Context) (*InvariantScanResult, 
 	var findings []InvariantFinding
 
 	// Execute directly via ExecuteRead without profile scoping
-	// This is the deliberate exception for admin invariant scanning
+	// This is the deliberate exception for operator-level invariant scanning.
 	_, err := s.client.ExecuteRead(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
 		result, err := tx.Run(ctx, query, nil)
 		if err != nil {

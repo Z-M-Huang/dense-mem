@@ -11,7 +11,7 @@ import (
 
 // ListTools fetches the authenticated caller's visible tool catalog from the
 // dense-mem HTTP API. The returned entries are the source of truth for MCP
-// discovery metadata such as availability and JSON schemas.
+// discovery metadata such as JSON schemas.
 func (c *Client) ListTools(ctx context.Context, profileID string) (*httpDto.ToolCatalogResponse, error) {
 	httpReq, err := c.newRequest(ctx, http.MethodGet, "/api/v1/tools", profileID, nil)
 	if err != nil {

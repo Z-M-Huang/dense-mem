@@ -1,5 +1,6 @@
-// Package recallservice implements hybrid semantic + keyword recall over
-// SourceFragments for a single profile.
+// Package recallservice implements high-level memory recall for a single
+// profile. Facts and validated claims are query-matched via full-text search;
+// fragment recall remains a hybrid semantic + keyword flow merged with RRF.
 //
 // Merge strategy: Reciprocal Rank Fusion (RRF). For each candidate fragment
 // we compute:
@@ -124,8 +125,8 @@ type SemanticSearcher interface {
 	QueryVectorIndex(ctx context.Context, profileID string, embedding []float32, limit int) ([]semanticsearch.SearchHit, error)
 }
 
-// KeywordSearcher is the narrow slice of the BM25 fragment searcher
-// (fragments only — the fact searcher is intentionally NOT invoked, AC-39).
+// KeywordSearcher is the narrow slice of the BM25 fragment searcher used for
+// the fragment tier of recall.
 type KeywordSearcher interface {
 	SearchContent(ctx context.Context, profileID string, query string, labels []string, limit int) ([]keywordsearch.FragmentSearchResult, error)
 }
@@ -135,34 +136,63 @@ type FragmentHydrator interface {
 	GetByID(ctx context.Context, profileID, fragmentID string) (*domain.Fragment, error)
 }
 
-// FactsLister fetches active facts for tier-1 recall enrichment.
-// Implementations must scope all queries to profileID (profile isolation invariant).
-// Passing nil is safe — tier-1 results are silently omitted.
-type FactsLister interface {
-	// ListActive returns up to limit active facts for profileID.
-	ListActive(ctx context.Context, profileID string, limit int) ([]*domain.Fact, error)
+// FactRecallResult is one query-matched tier-1 candidate before hydration.
+type FactRecallResult struct {
+	FactID     string
+	ProfileID  string
+	Score      float64
+	ValidFrom  *time.Time
+	ValidTo    *time.Time
+	RecordedAt time.Time
+	RecordedTo *time.Time
 }
 
-// ClaimsLister fetches validated claims for tier-1.5 recall enrichment.
-// Implementations must scope all queries to profileID (profile isolation invariant).
-// Passing nil is safe — tier-1.5 results are silently omitted.
-type ClaimsLister interface {
-	// ListValidated returns up to limit validated claims for profileID,
-	// ordered by confidence descending.
-	ListValidated(ctx context.Context, profileID string, limit int) ([]*domain.Claim, error)
+// ClaimRecallResult is one query-matched tier-1.5 candidate before hydration.
+type ClaimRecallResult struct {
+	ClaimID    string
+	ProfileID  string
+	Score      float64
+	ValidFrom  *time.Time
+	ValidTo    *time.Time
+	RecordedAt time.Time
+	RecordedTo *time.Time
+}
+
+// FactSearcher fetches query-matched active facts for tier-1 recall.
+// Implementations must scope all queries to profileID.
+type FactSearcher interface {
+	SearchActive(ctx context.Context, profileID string, query string, limit int) ([]FactRecallResult, error)
+}
+
+// ClaimSearcher fetches query-matched validated claims for tier-1.5 recall.
+// Implementations must scope all queries to profileID.
+type ClaimSearcher interface {
+	SearchValidated(ctx context.Context, profileID string, query string, limit int) ([]ClaimRecallResult, error)
+}
+
+// FactHydrator loads one fact by ID for the recall tier response.
+type FactHydrator interface {
+	Get(ctx context.Context, profileID string, factID string) (*domain.Fact, error)
+}
+
+// ClaimHydrator loads one claim by ID for the recall tier response.
+type ClaimHydrator interface {
+	Get(ctx context.Context, profileID string, claimID string) (*domain.Claim, error)
 }
 
 // recallService implements RecallService.
 type recallService struct {
-	embedder     EmbeddingProvider
-	semantic     SemanticSearcher
-	keyword      KeywordSearcher
-	hydrator     FragmentHydrator
-	factsLister  FactsLister  // optional; nil → tier-1 results omitted
-	claimsLister ClaimsLister // optional; nil → tier-1.5 results omitted
-	claimWeight  float64      // weight applied to claim scores (default DefaultRecallValidatedClaimWeight)
-	logger       observability.LogProvider
-	metrics      observability.DiscoverabilityMetrics
+	embedder      EmbeddingProvider
+	semantic      SemanticSearcher
+	keyword       KeywordSearcher
+	hydrator      FragmentHydrator
+	factSearcher  FactSearcher // optional; nil → tier-1 results omitted
+	factGet       FactHydrator
+	claimSearcher ClaimSearcher // optional; nil → tier-1.5 results omitted
+	claimGet      ClaimHydrator
+	claimWeight   float64 // weight applied to claim scores (default DefaultRecallValidatedClaimWeight)
+	logger        observability.LogProvider
+	metrics       observability.DiscoverabilityMetrics
 }
 
 var _ RecallService = (*recallService)(nil)
@@ -181,13 +211,14 @@ func NewRecallService(
 	logger observability.LogProvider,
 	metrics observability.DiscoverabilityMetrics,
 ) RecallService {
-	return NewRecallServiceWithTiers(embedder, semantic, keyword, hydrator, nil, nil, 0, logger, metrics)
+	return NewRecallServiceWithTiers(embedder, semantic, keyword, hydrator, nil, nil, nil, nil, 0, logger, metrics)
 }
 
 // NewRecallServiceWithTiers constructs a RecallService with optional tier-1
 // (active facts) and tier-1.5 (validated claims) enrichment.
 //
-// factsLister and claimsLister may be nil — those tiers are silently omitted.
+// factSearcher/factGet and claimSearcher/claimGet may be nil — those tiers are
+// silently omitted.
 // claimWeight is the multiplier applied to claim scores; pass 0 to use
 // DefaultRecallValidatedClaimWeight (0.5). This ensures active facts outrank
 // validated claims of equivalent base confidence under the default weight.
@@ -198,8 +229,10 @@ func NewRecallServiceWithTiers(
 	semantic SemanticSearcher,
 	keyword KeywordSearcher,
 	hydrator FragmentHydrator,
-	factsLister FactsLister,
-	claimsLister ClaimsLister,
+	factSearcher FactSearcher,
+	factGet FactHydrator,
+	claimSearcher ClaimSearcher,
+	claimGet ClaimHydrator,
 	claimWeight float64,
 	logger observability.LogProvider,
 	metrics observability.DiscoverabilityMetrics,
@@ -211,15 +244,17 @@ func NewRecallServiceWithTiers(
 		claimWeight = DefaultRecallValidatedClaimWeight
 	}
 	return &recallService{
-		embedder:     embedder,
-		semantic:     semantic,
-		keyword:      keyword,
-		hydrator:     hydrator,
-		factsLister:  factsLister,
-		claimsLister: claimsLister,
-		claimWeight:  claimWeight,
-		logger:       logger,
-		metrics:      metrics,
+		embedder:      embedder,
+		semantic:      semantic,
+		keyword:       keyword,
+		hydrator:      hydrator,
+		factSearcher:  factSearcher,
+		factGet:       factGet,
+		claimSearcher: claimSearcher,
+		claimGet:      claimGet,
+		claimWeight:   claimWeight,
+		logger:        logger,
+		metrics:       metrics,
 	}
 }
 
@@ -343,25 +378,31 @@ func (s *recallService) Recall(ctx context.Context, profileID string, req Recall
 }
 
 // enrichTierHits fetches tier-1 (active facts) and tier-1.5 (validated claims)
-// hits for the profile. Errors are logged and swallowed so that a failing tier
-// enrichment does not prevent fragment recall from completing.
-//
-// Profile isolation invariant: both FactsLister and ClaimsLister receive
-// profileID as an explicit parameter and must scope all queries to that profile.
+// hits that actually match the recall query. Errors are logged and swallowed so
+// that a failing tier enrichment does not prevent fragment recall from
+// completing.
 func (s *recallService) enrichTierHits(ctx context.Context, profileID string, limit int, req RecallRequest) []RecallHit {
 	var hits []RecallHit
 
-	if s.factsLister != nil {
-		facts, err := s.factsLister.ListActive(ctx, profileID, limit)
+	if s.factSearcher != nil && s.factGet != nil {
+		facts, err := s.factSearcher.SearchActive(ctx, profileID, req.Query, limit)
 		if err != nil {
 			if s.logger != nil {
-				s.logger.Warn("recall: tier-1 fact listing failed",
+				s.logger.Warn("recall: tier-1 fact search failed",
 					observability.String("error", err.Error()),
 				)
 			}
 		} else {
-			for _, f := range facts {
-				if f == nil {
+			for _, candidate := range facts {
+				if candidate.FactID == "" || candidate.ProfileID != "" && candidate.ProfileID != profileID {
+					continue
+				}
+				if !factCandidateMatchesRecallWindow(candidate, req.ValidAt, req.KnownAt) {
+					continue
+				}
+				f, err := s.factGet.Get(ctx, profileID, candidate.FactID)
+				if err != nil {
+					s.logHydrateError(candidate.FactID, err)
 					continue
 				}
 				if !factMatchesRecallWindow(f, req.ValidAt, req.KnownAt) {
@@ -381,17 +422,25 @@ func (s *recallService) enrichTierHits(ctx context.Context, profileID string, li
 		}
 	}
 
-	if s.claimsLister != nil {
-		claims, err := s.claimsLister.ListValidated(ctx, profileID, limit)
+	if s.claimSearcher != nil && s.claimGet != nil {
+		claims, err := s.claimSearcher.SearchValidated(ctx, profileID, req.Query, limit)
 		if err != nil {
 			if s.logger != nil {
-				s.logger.Warn("recall: tier-1.5 claim listing failed",
+				s.logger.Warn("recall: tier-1.5 claim search failed",
 					observability.String("error", err.Error()),
 				)
 			}
 		} else {
-			for _, c := range claims {
-				if c == nil {
+			for _, candidate := range claims {
+				if candidate.ClaimID == "" || candidate.ProfileID != "" && candidate.ProfileID != profileID {
+					continue
+				}
+				if !claimCandidateMatchesRecallWindow(candidate, req.ValidAt, req.KnownAt) {
+					continue
+				}
+				c, err := s.claimGet.Get(ctx, profileID, candidate.ClaimID)
+				if err != nil {
+					s.logHydrateError(candidate.ClaimID, err)
 					continue
 				}
 				if !claimMatchesRecallWindow(c, req.ValidAt, req.KnownAt) {
@@ -485,6 +534,46 @@ func claimMatchesRecallWindow(c *domain.Claim, validAt, knownAt *time.Time) bool
 	if c == nil {
 		return false
 	}
+	if validAt != nil {
+		if c.ValidFrom != nil && c.ValidFrom.After(*validAt) {
+			return false
+		}
+		if c.ValidTo != nil && !c.ValidTo.After(*validAt) {
+			return false
+		}
+	}
+	if knownAt != nil {
+		if c.RecordedAt.After(*knownAt) {
+			return false
+		}
+		if c.RecordedTo != nil && !c.RecordedTo.After(*knownAt) {
+			return false
+		}
+	}
+	return true
+}
+
+func factCandidateMatchesRecallWindow(f FactRecallResult, validAt, knownAt *time.Time) bool {
+	if validAt != nil {
+		if f.ValidFrom != nil && f.ValidFrom.After(*validAt) {
+			return false
+		}
+		if f.ValidTo != nil && !f.ValidTo.After(*validAt) {
+			return false
+		}
+	}
+	if knownAt != nil {
+		if f.RecordedAt.After(*knownAt) {
+			return false
+		}
+		if f.RecordedTo != nil && !f.RecordedTo.After(*knownAt) {
+			return false
+		}
+	}
+	return true
+}
+
+func claimCandidateMatchesRecallWindow(c ClaimRecallResult, validAt, knownAt *time.Time) bool {
 	if validAt != nil {
 		if c.ValidFrom != nil && c.ValidFrom.After(*validAt) {
 			return false

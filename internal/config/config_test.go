@@ -17,17 +17,10 @@ func clearEnv() {
 		"REDIS_ADDR",
 		"REDIS_PASSWORD",
 		"REDIS_DB",
-		"BOOTSTRAP_ADMIN_KEY",
-		"ARGON_MEMORY_KB",
-		"ARGON_TIME",
-		"ARGON_THREADS",
 		"RATE_LIMIT_PER_MINUTE",
-		"ADMIN_RATE_LIMIT_PER_MINUTE",
 		"SSE_HEARTBEAT_SECONDS",
 		"SSE_MAX_DURATION_SECONDS",
 		"SSE_MAX_CONCURRENT_STREAMS",
-		"ADMIN_QUERY_TIMEOUT_SECONDS",
-		"ADMIN_QUERY_ROW_CAP",
 		"EMBEDDING_DIMENSIONS",
 		"AI_API_URL",
 		"AI_API_KEY",
@@ -56,6 +49,13 @@ func setRequiredEnv() {
 	os.Setenv("NEO4J_PASSWORD", "password")
 }
 
+func setRequiredEmbeddingEnv() {
+	os.Setenv("AI_API_URL", "https://example.com/v1")
+	os.Setenv("AI_API_KEY", "sk-test")
+	os.Setenv("AI_API_EMBEDDING_MODEL", "text-embedding-3-small")
+	os.Setenv("AI_API_EMBEDDING_DIMENSIONS", "1536")
+}
+
 func TestLoadDefaults(t *testing.T) {
 	clearEnv()
 	setRequiredEnv()
@@ -74,9 +74,6 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.RateLimitPerMinute != 100 {
 		t.Errorf("RateLimitPerMinute default = %d, want %d", cfg.RateLimitPerMinute, 100)
 	}
-	if cfg.AdminRateLimitPerMinute != 1000 {
-		t.Errorf("AdminRateLimitPerMinute default = %d, want %d", cfg.AdminRateLimitPerMinute, 1000)
-	}
 	if cfg.SSEHeartbeatSeconds != 30 {
 		t.Errorf("SSEHeartbeatSeconds default = %d, want %d", cfg.SSEHeartbeatSeconds, 30)
 	}
@@ -86,12 +83,6 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.SSEMaxConcurrentStreams != 10 {
 		t.Errorf("SSEMaxConcurrentStreams default = %d, want %d", cfg.SSEMaxConcurrentStreams, 10)
 	}
-	if cfg.AdminQueryTimeoutSeconds != 30 {
-		t.Errorf("AdminQueryTimeoutSeconds default = %d, want %d", cfg.AdminQueryTimeoutSeconds, 30)
-	}
-	if cfg.AdminQueryRowCap != 1000 {
-		t.Errorf("AdminQueryRowCap default = %d, want %d", cfg.AdminQueryRowCap, 1000)
-	}
 	if cfg.EmbeddingDimensions != 1536 {
 		t.Errorf("EmbeddingDimensions default = %d, want %d", cfg.EmbeddingDimensions, 1536)
 	}
@@ -99,15 +90,6 @@ func TestLoadDefaults(t *testing.T) {
 	// Test other defaults
 	if cfg.RedisDB != 0 {
 		t.Errorf("RedisDB default = %d, want %d", cfg.RedisDB, 0)
-	}
-	if cfg.ArgonMemoryKB != 65536 {
-		t.Errorf("ArgonMemoryKB default = %d, want %d", cfg.ArgonMemoryKB, 65536)
-	}
-	if cfg.ArgonTime != 1 {
-		t.Errorf("ArgonTime default = %d, want %d", cfg.ArgonTime, 1)
-	}
-	if cfg.ArgonThreads != 4 {
-		t.Errorf("ArgonThreads default = %d, want %d", cfg.ArgonThreads, 4)
 	}
 }
 
@@ -257,17 +239,10 @@ func TestLoadOverrides(t *testing.T) {
 	os.Setenv("NEO4J_DATABASE", "testdb")
 	os.Setenv("REDIS_PASSWORD", "redispass")
 	os.Setenv("REDIS_DB", "5")
-	os.Setenv("BOOTSTRAP_ADMIN_KEY", "admin-key-123")
-	os.Setenv("ARGON_MEMORY_KB", "131072")
-	os.Setenv("ARGON_TIME", "3")
-	os.Setenv("ARGON_THREADS", "8")
 	os.Setenv("RATE_LIMIT_PER_MINUTE", "200")
-	os.Setenv("ADMIN_RATE_LIMIT_PER_MINUTE", "2000")
 	os.Setenv("SSE_HEARTBEAT_SECONDS", "60")
 	os.Setenv("SSE_MAX_DURATION_SECONDS", "600")
 	os.Setenv("SSE_MAX_CONCURRENT_STREAMS", "20")
-	os.Setenv("ADMIN_QUERY_TIMEOUT_SECONDS", "60")
-	os.Setenv("ADMIN_QUERY_ROW_CAP", "2000")
 	os.Setenv("EMBEDDING_DIMENSIONS", "768")
 
 	cfg, err := Load()
@@ -285,28 +260,13 @@ func TestLoadOverrides(t *testing.T) {
 	if cfg.RedisPassword != "redispass" {
 		t.Errorf("RedisPassword = %q, want %q", cfg.RedisPassword, "redispass")
 	}
-	if cfg.BootstrapAdminKey != "admin-key-123" {
-		t.Errorf("BootstrapAdminKey = %q, want %q", cfg.BootstrapAdminKey, "admin-key-123")
-	}
 
 	// Integer overrides
 	if cfg.RedisDB != 5 {
 		t.Errorf("RedisDB = %d, want %d", cfg.RedisDB, 5)
 	}
-	if cfg.ArgonMemoryKB != 131072 {
-		t.Errorf("ArgonMemoryKB = %d, want %d", cfg.ArgonMemoryKB, 131072)
-	}
-	if cfg.ArgonTime != 3 {
-		t.Errorf("ArgonTime = %d, want %d", cfg.ArgonTime, 3)
-	}
-	if cfg.ArgonThreads != 8 {
-		t.Errorf("ArgonThreads = %d, want %d", cfg.ArgonThreads, 8)
-	}
 	if cfg.RateLimitPerMinute != 200 {
 		t.Errorf("RateLimitPerMinute = %d, want %d", cfg.RateLimitPerMinute, 200)
-	}
-	if cfg.AdminRateLimitPerMinute != 2000 {
-		t.Errorf("AdminRateLimitPerMinute = %d, want %d", cfg.AdminRateLimitPerMinute, 2000)
 	}
 	if cfg.SSEHeartbeatSeconds != 60 {
 		t.Errorf("SSEHeartbeatSeconds = %d, want %d", cfg.SSEHeartbeatSeconds, 60)
@@ -316,12 +276,6 @@ func TestLoadOverrides(t *testing.T) {
 	}
 	if cfg.SSEMaxConcurrentStreams != 20 {
 		t.Errorf("SSEMaxConcurrentStreams = %d, want %d", cfg.SSEMaxConcurrentStreams, 20)
-	}
-	if cfg.AdminQueryTimeoutSeconds != 60 {
-		t.Errorf("AdminQueryTimeoutSeconds = %d, want %d", cfg.AdminQueryTimeoutSeconds, 60)
-	}
-	if cfg.AdminQueryRowCap != 2000 {
-		t.Errorf("AdminQueryRowCap = %d, want %d", cfg.AdminQueryRowCap, 2000)
 	}
 	if cfg.EmbeddingDimensions != 768 {
 		t.Errorf("EmbeddingDimensions = %d, want %d", cfg.EmbeddingDimensions, 768)
@@ -350,17 +304,10 @@ func TestConfigProviderInterface(t *testing.T) {
 	_ = provider.GetRedisAddr()
 	_ = provider.GetRedisPassword()
 	_ = provider.GetRedisDB()
-	_ = provider.GetBootstrapAdminKey()
-	_ = provider.GetArgonMemoryKB()
-	_ = provider.GetArgonTime()
-	_ = provider.GetArgonThreads()
 	_ = provider.GetRateLimitPerMinute()
-	_ = provider.GetAdminRateLimitPerMinute()
 	_ = provider.GetSSEHeartbeatSeconds()
 	_ = provider.GetSSEMaxDurationSeconds()
 	_ = provider.GetSSEMaxConcurrentStreams()
-	_ = provider.GetAdminQueryTimeoutSeconds()
-	_ = provider.GetAdminQueryRowCap()
 	_ = provider.GetEmbeddingDimensions()
 	_ = provider.GetAIAPIURL()
 	_ = provider.GetAIAPIKey()
@@ -443,10 +390,7 @@ func TestLoad_EmbeddingConfig_Complete(t *testing.T) {
 	os.Setenv("NEO4J_URI", "bolt://localhost:7687")
 	os.Setenv("NEO4J_USER", "neo4j")
 	os.Setenv("NEO4J_PASSWORD", "password")
-	os.Setenv("AI_API_URL", "https://example.com/v1")
-	os.Setenv("AI_API_KEY", "sk-test")
-	os.Setenv("AI_API_EMBEDDING_MODEL", "text-embedding-3-small")
-	os.Setenv("AI_API_EMBEDDING_DIMENSIONS", "1536")
+	setRequiredEmbeddingEnv()
 
 	cfg, err := Load()
 	if err != nil {
@@ -463,24 +407,41 @@ func TestLoad_EmbeddingConfig_Complete(t *testing.T) {
 	}
 }
 
-func TestLoad_EmbeddingConfig_NoneSet(t *testing.T) {
+func TestValidateServerStartup_RequiresEmbeddingConfig(t *testing.T) {
 	clearEnv()
-	os.Setenv("POSTGRES_DSN", "postgres://user:pass@localhost/db?sslmode=disable")
-	os.Setenv("NEO4J_URI", "bolt://localhost:7687")
-	os.Setenv("NEO4J_USER", "neo4j")
-	os.Setenv("NEO4J_PASSWORD", "password")
-	// No AI embedding vars set
+	setRequiredEnv()
 
 	cfg, err := Load()
 	if err != nil {
 		t.Fatalf("Load() returned unexpected error: %v", err)
 	}
-	if cfg.IsEmbeddingConfigured() {
-		t.Error("IsEmbeddingConfigured() = true, want false")
+
+	err = cfg.ValidateServerStartup()
+	if err == nil {
+		t.Fatal("ValidateServerStartup() expected error for missing embedding config, got nil")
 	}
-	// Default timeout should still be applied
-	if cfg.GetAIEmbeddingTimeoutSeconds() != 30 {
-		t.Errorf("GetAIEmbeddingTimeoutSeconds() = %d, want %d", cfg.GetAIEmbeddingTimeoutSeconds(), 30)
+
+	validationErr, ok := err.(*ValidationError)
+	if !ok {
+		t.Fatalf("expected *ValidationError, got %T", err)
+	}
+	if validationErr.Field != "AI_API_URL" {
+		t.Errorf("ValidationError.Field = %q, want %q", validationErr.Field, "AI_API_URL")
+	}
+}
+
+func TestValidateServerStartup_SucceedsWithEmbeddingConfig(t *testing.T) {
+	clearEnv()
+	setRequiredEnv()
+	setRequiredEmbeddingEnv()
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() returned unexpected error: %v", err)
+	}
+
+	if err := cfg.ValidateServerStartup(); err != nil {
+		t.Fatalf("ValidateServerStartup() returned unexpected error: %v", err)
 	}
 }
 

@@ -31,16 +31,16 @@ var _ recallservice.RecallService = (*stubRecallSvcForBootstrap)(nil)
 // handlers and assign them to ProtectedHandlers.
 //
 // Specifically it checks:
-//   - registry.BuildDefault succeeds without embedding services (matches both
-//     the MCP binary path and the non-embedding branch in main.go)
+//   - registry.BuildDefault succeeds without embedding services for isolated
+//     wiring tests and the MCP adapter path
 //   - handler.NewRecallHandler can be constructed and its Handle method
 //     assigned to ProtectedHandlers.Recall (AC-55, AC-62)
 //
 // No HTTP requests are issued and no database connections are opened.
 func TestServerBootstrapWiresKnowledgePipeline(t *testing.T) {
 	// registry.BuildDefault must succeed when no embedding services are wired.
-	// This mirrors cmd/mcp/main.go:48 and the !cfg.IsEmbeddingConfigured() path
-	// in main.go.
+	// This mirrors cmd/mcp/main.go and isolated wiring tests that do not boot
+	// the full production server.
 	reg, err := registry.BuildDefault(registry.Dependencies{})
 	require.NoError(t, err, "BuildDefault must succeed without embedding services")
 	require.NotNil(t, reg, "registry must be non-nil")

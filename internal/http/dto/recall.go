@@ -42,5 +42,5 @@ type RecallHitResponse struct {
 
 // RecallResponse wraps the ranked list of recall hits.
 type RecallResponse struct {
-	Items []RecallHitResponse `json:"items"`
+	Data []RecallHitResponse `json:"data"`
 }

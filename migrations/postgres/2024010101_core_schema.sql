@@ -22,32 +22,25 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_profiles_name_unique_active
     ON profiles (lower(name))
     WHERE deleted_at IS NULL;
 
--- API keys table: stores authentication keys with role-based access
+-- API keys table: stores profile-bound authentication keys
 CREATE TABLE IF NOT EXISTS api_keys (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    profile_id UUID NULL REFERENCES profiles(id) ON DELETE RESTRICT,
+    profile_id UUID NOT NULL REFERENCES profiles(id) ON DELETE RESTRICT,
     key_hash TEXT NOT NULL,
     key_prefix VARCHAR(12) NOT NULL,
     label VARCHAR(100) NOT NULL DEFAULT '',
-    role VARCHAR(20) NOT NULL CHECK (role IN ('standard', 'admin')),
     scopes TEXT[] NOT NULL DEFAULT ARRAY['read']::text[],
-    rate_limit INTEGER NOT NULL DEFAULT 0,
+    rate_limit INTEGER NOT NULL DEFAULT 0 CHECK (rate_limit >= 0),
     expires_at TIMESTAMPTZ NULL,
     revoked_at TIMESTAMPTZ NULL,
     last_used_at TIMESTAMPTZ NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-
-    -- Check constraint: admin keys must NOT have a profile_id; standard keys MUST have a profile_id
-    CONSTRAINT chk_api_keys_role_profile CHECK (
-        (role = 'admin' AND profile_id IS NULL) OR
-        (role = 'standard' AND profile_id IS NOT NULL)
-    )
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 -- Indexes for api_keys
 CREATE INDEX IF NOT EXISTS idx_api_keys_profile_id ON api_keys(profile_id);
-CREATE INDEX IF NOT EXISTS idx_api_keys_key_prefix ON api_keys(key_prefix);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_api_keys_key_prefix_unique ON api_keys(key_prefix);
 
 -- Audit log table: append-only record of all operations
 CREATE TABLE IF NOT EXISTS audit_log (

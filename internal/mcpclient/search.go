@@ -29,18 +29,18 @@ func NewKeywordSearch(c *Client) keywordsearch.KeywordSearchService {
 // keywordSearchHTTPRequest is the wire format for POST /api/v1/tools/keyword-search.
 // The HTTP handler maps req.Keywords → svc.Query, so we invert that mapping here.
 type keywordSearchHTTPRequest struct {
-	Keywords        string `json:"keywords"`
-	Limit           int    `json:"limit"`
-	ValidAt         string `json:"valid_at,omitempty"`
-	KnownAt         string `json:"known_at,omitempty"`
-	IncludeEvidence bool   `json:"include_evidence,omitempty"`
+	Keywords string   `json:"keywords"`
+	Limit    int      `json:"limit"`
+	Labels   []string `json:"labels,omitempty"`
+	ValidAt  string   `json:"valid_at,omitempty"`
+	KnownAt  string   `json:"known_at,omitempty"`
 }
 
 func (a *keywordSearchAdapter) Search(ctx context.Context, profileID string, req *keywordsearch.KeywordSearchRequest) (*keywordsearch.KeywordSearchResult, error) {
 	httpBody := keywordSearchHTTPRequest{
-		Keywords:        req.Query,
-		Limit:           req.Limit,
-		IncludeEvidence: req.IncludeEvidence,
+		Keywords: req.Query,
+		Limit:    req.Limit,
+		Labels:   req.Labels,
 	}
 	if req.ValidAt != nil {
 		httpBody.ValidAt = req.ValidAt.UTC().Format(time.RFC3339)

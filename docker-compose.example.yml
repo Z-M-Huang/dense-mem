@@ -14,8 +14,6 @@
 #   NEO4J_USER, NEO4J_DATABASE
 #   REDIS_PASSWORD, REDIS_DB
 #   HTTP_PORT (host port to expose the API on; default 8080)
-#   BOOTSTRAP_ADMIN_KEY (seed one admin key on first start; leave unset in
-#     production and mint admin keys via the /admin endpoints instead)
 #
 # The image entrypoint (/app/docker-entrypoint.sh) builds POSTGRES_DSN from
 # its component env vars at container start, so no credentialed connection

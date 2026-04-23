@@ -3,7 +3,7 @@
 // Every AI-exposed verb (save_memory, recall_memory, list_recent_memories,
 // get_memory, plus the lower-level keyword-search / semantic-search / graph-query
 // primitives) is registered once here with its name, description, JSON Schemas,
-// required scopes, availability flag, and a bound invoker. HTTP handlers, the
+// required scopes, and a bound invoker. HTTP handlers, the
 // catalog endpoint (Unit 21), the OpenAPI generator (Unit 23), and the MCP
 // server (Unit 24) all read from this registry instead of duplicating schemas.
 package registry
@@ -27,7 +27,6 @@ type Tool struct {
 	InputSchema    map[string]any
 	OutputSchema   map[string]any
 	RequiredScopes []string
-	Available      bool
 	Invoke         ToolInvoker
 }
 

@@ -24,7 +24,19 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     CGO_ENABLED=0 GOOS=linux \
     go build -trimpath -ldflags="-s -w" -o /out/server ./cmd/server && \
     CGO_ENABLED=0 GOOS=linux \
-    go build -trimpath -ldflags="-s -w" -o /out/migrate ./cmd/migrate
+    go build -trimpath -ldflags="-s -w" -o /out/migrate ./cmd/migrate && \
+    CGO_ENABLED=0 GOOS=linux \
+    go build -trimpath -ldflags="-s -w" -o /out/provision-profile ./cmd/provision-profile && \
+    CGO_ENABLED=0 GOOS=linux \
+    go build -trimpath -ldflags="-s -w" -o /out/list-profiles ./cmd/list-profiles && \
+    CGO_ENABLED=0 GOOS=linux \
+    go build -trimpath -ldflags="-s -w" -o /out/delete-profile ./cmd/delete-profile && \
+    CGO_ENABLED=0 GOOS=linux \
+    go build -trimpath -ldflags="-s -w" -o /out/list-keys ./cmd/list-keys && \
+    CGO_ENABLED=0 GOOS=linux \
+    go build -trimpath -ldflags="-s -w" -o /out/revoke-key ./cmd/revoke-key && \
+    CGO_ENABLED=0 GOOS=linux \
+    go build -trimpath -ldflags="-s -w" -o /out/rotate-key ./cmd/rotate-key
 
 # ============================================================================
 # Runtime stage
@@ -41,6 +53,12 @@ WORKDIR /app
 
 COPY --from=builder /out/server  /app/server
 COPY --from=builder /out/migrate /app/migrate
+COPY --from=builder /out/provision-profile /app/provision-profile
+COPY --from=builder /out/list-profiles /app/list-profiles
+COPY --from=builder /out/delete-profile /app/delete-profile
+COPY --from=builder /out/list-keys /app/list-keys
+COPY --from=builder /out/revoke-key /app/revoke-key
+COPY --from=builder /out/rotate-key /app/rotate-key
 
 # migrator.go discovers migrations via cwd-relative walk; WORKDIR=/app plus
 # this copy satisfies Strategy 1 in getMigrationsDir().

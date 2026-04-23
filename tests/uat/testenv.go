@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/neo4j"
@@ -21,8 +20,6 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/dense-mem/dense-mem/internal/config"
-	"github.com/dense-mem/dense-mem/internal/crypto"
-	"github.com/dense-mem/dense-mem/internal/domain"
 	httpserver "github.com/dense-mem/dense-mem/internal/http"
 	"github.com/dense-mem/dense-mem/internal/http/handler"
 	"github.com/dense-mem/dense-mem/internal/observability"
@@ -30,10 +27,10 @@ import (
 	"github.com/dense-mem/dense-mem/internal/repository"
 	"github.com/dense-mem/dense-mem/internal/service"
 	"github.com/dense-mem/dense-mem/internal/service/fragmentservice"
+	"github.com/dense-mem/dense-mem/internal/storage/inmem"
+	neo4jstorage "github.com/dense-mem/dense-mem/internal/storage/neo4j"
 	pgclient "github.com/dense-mem/dense-mem/internal/storage/postgres"
 	redisclient "github.com/dense-mem/dense-mem/internal/storage/redis"
-	neo4jstorage "github.com/dense-mem/dense-mem/internal/storage/neo4j"
-	"github.com/dense-mem/dense-mem/internal/storage/inmem"
 	"github.com/dense-mem/dense-mem/internal/tools/registry"
 )
 
@@ -75,7 +72,7 @@ func (a *fragmentAuditAdapter) Append(ctx context.Context, entry fragmentservice
 
 // TestEnvOptions configures how the test environment is set up.
 type TestEnvOptions struct {
-	NoRedisMode        bool
+	NoRedisMode bool
 	// RateLimitPerMinute overrides the default tier-based rate limit (100/min) when > 0.
 	// Set to a small value (e.g. 2) to exercise rate limiting without sending hundreds of requests.
 	RateLimitPerMinute int
@@ -129,20 +126,16 @@ type TestEnv struct {
 	serverURL  string
 
 	// Services
-	apiKeyRepo    repository.APIKeyRepository
-	profileRepo   repository.ProfileRepository
-	auditService  service.AuditService
-	profileSvc    service.ProfileService
-	apiKeySvc     service.APIKeyService
-	rateLimitSvc  *service.RateLimitService
+	apiKeyRepo   repository.APIKeyRepository
+	profileRepo  repository.ProfileRepository
+	auditService service.AuditService
+	profileSvc   service.ProfileService
+	apiKeySvc    service.APIKeyService
+	rateLimitSvc *service.RateLimitService
 
 	// Options
 	noRedisMode        bool
 	rateLimitPerMinute int
-
-	// Admin key for testing
-	adminKeyID  uuid.UUID
-	adminRawKey string
 
 	t *testing.T
 }
@@ -297,30 +290,6 @@ func (te *TestEnv) Setup(ctx context.Context) error {
 		te.rateLimitSvc = service.NewRateLimitService(te.redisClient)
 	}
 
-	// Bootstrap admin key
-	te.adminRawKey, err = crypto.GenerateRawKey()
-	if err != nil {
-		return fmt.Errorf("failed to generate admin key: %w", err)
-	}
-
-	keyHash, err := crypto.HashKey(te.adminRawKey)
-	if err != nil {
-		return fmt.Errorf("failed to hash admin key: %w", err)
-	}
-
-	adminKey := &domain.APIKey{
-		Label:     "uat-admin",
-		KeyHash:   keyHash,
-		KeyPrefix: crypto.GetKeyPrefix(te.adminRawKey),
-		Scopes:    []string{"admin", "read", "write"},
-		RateLimit: 0,
-	}
-
-	if err := te.apiKeyRepo.CreateAdminKey(ctx, adminKey); err != nil {
-		return fmt.Errorf("failed to create admin key: %w", err)
-	}
-	te.adminKeyID = adminKey.ID
-
 	// Create server with health checks
 	logger := observability.New(slog.LevelInfo)
 
@@ -382,8 +351,8 @@ func (te *TestEnv) Setup(ctx context.Context) error {
 	// Discoverability wiring: fragments, registry, OpenAPI, catalog
 	// ========================================
 	// Embedding is unconfigured in UAT (IsEmbeddingConfigured() == false), so the
-	// create and recall services remain nil. The registry correctly surfaces
-	// save_memory / recall_memory as Available=false. Read/list/delete work.
+	// create and recall services remain unwired in this harness. The registry
+	// still exposes the stable catalog and read/list/delete work.
 	profileScopeEnforcer := neo4jstorage.NewProfileScopeEnforcer(te.neo4jClient)
 	readerAdapter := &scopedReaderAdapter{inner: profileScopeEnforcer}
 	fragmentAuditor := &fragmentAuditAdapter{inner: te.auditService}
@@ -393,9 +362,8 @@ func (te *TestEnv) Setup(ctx context.Context) error {
 	fragmentDeleteSvc := fragmentservice.NewDeleteFragmentService(profileScopeEnforcer, readerAdapter, fragmentAuditor, slog.Default())
 
 	toolRegistry, err := registry.BuildDefault(registry.Dependencies{
-		FragmentGet:         fragmentGetSvc,
-		FragmentList:        fragmentListSvc,
-		EmbeddingConfigured: false,
+		FragmentGet:  fragmentGetSvc,
+		FragmentList: fragmentListSvc,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to build tool registry: %w", err)
@@ -487,11 +455,6 @@ func (te *TestEnv) GetNeo4jClient() *neo4jstorage.Neo4jClient        { return te
 func (te *TestEnv) GetHTTPClient() *httptest.Server                  { return te.httpServer }
 func (te *TestEnv) IsNoRedisMode() bool                              { return te.noRedisMode }
 
-// AdminKey returns the admin key ID and raw key for testing
-func (te *TestEnv) AdminKey() (uuid.UUID, string) {
-	return te.adminKeyID, te.adminRawKey
-}
-
 // NewTestEnv creates a new TestEnv instance
 func NewTestEnv(t *testing.T, opts ...TestEnvOptions) *TestEnv {
 	te := &TestEnv{t: t}
@@ -571,45 +534,35 @@ func (c *redisTestConfig) GetRedisDB() int          { return 0 }
 // buildConfig creates a full config provider for the test environment
 func (te *TestEnv) buildConfig() *testConfig {
 	rateLimit := 100
-	adminRateLimit := 1000
 	if te.rateLimitPerMinute > 0 {
 		rateLimit = te.rateLimitPerMinute
-		adminRateLimit = te.rateLimitPerMinute
 	}
 	return &testConfig{
-		httpAddr:                 ":0",
-		postgresDSN:              te.postgresDSN,
-		neo4jURI:                 te.neo4jURI,
-		neo4jUser:                te.neo4jUser,
-		neo4jPassword:            te.neo4jPassword,
-		neo4jDatabase:            "neo4j",
-		redisAddr:                te.redisAddr,
-		redisPassword:            "",
-		redisDB:                  0,
-		rateLimitPerMinute:       rateLimit,
-		adminRateLimitPerMinute:  adminRateLimit,
-		fragmentCreateRateLimit:  60,
-		fragmentReadRateLimit:    300,
-		argonMemoryKB:            65536,
-		argonTime:                1,
-		argonThreads:             4,
-		sseHeartbeatSeconds:      30,
-		sseMaxDurationSeconds:    300,
-		sseMaxConcurrentStreams:  10,
-		adminQueryTimeoutSeconds: 30,
-		adminQueryRowCap:         1000,
-		embeddingDimensions:      1536,
-		aiEmbeddingTimeoutSecs:   30,
+		httpAddr:                ":0",
+		postgresDSN:             te.postgresDSN,
+		neo4jURI:                te.neo4jURI,
+		neo4jUser:               te.neo4jUser,
+		neo4jPassword:           te.neo4jPassword,
+		neo4jDatabase:           "neo4j",
+		redisAddr:               te.redisAddr,
+		redisPassword:           "",
+		redisDB:                 0,
+		rateLimitPerMinute:      rateLimit,
+		fragmentCreateRateLimit: 60,
+		fragmentReadRateLimit:   300,
+		sseHeartbeatSeconds:     30,
+		sseMaxDurationSeconds:   300,
+		sseMaxConcurrentStreams: 10,
+		embeddingDimensions:     1536,
+		aiEmbeddingTimeoutSecs:  30,
 	}
 }
 
 // buildConfigConcrete creates a concrete config.Config for NewServer
 func (te *TestEnv) buildConfigConcrete() config.Config {
 	rateLimit := 100
-	adminRateLimit := 1000
 	if te.rateLimitPerMinute > 0 {
 		rateLimit = te.rateLimitPerMinute
-		adminRateLimit = te.rateLimitPerMinute
 	}
 	return config.Config{
 		HTTPAddr:                  ":0",
@@ -622,17 +575,11 @@ func (te *TestEnv) buildConfigConcrete() config.Config {
 		RedisPassword:             "",
 		RedisDB:                   0,
 		RateLimitPerMinute:        rateLimit,
-		AdminRateLimitPerMinute:   adminRateLimit,
 		FragmentCreateRateLimit:   60,
 		FragmentReadRateLimit:     300,
-		ArgonMemoryKB:             65536,
-		ArgonTime:                 1,
-		ArgonThreads:              4,
 		SSEHeartbeatSeconds:       30,
 		SSEMaxDurationSeconds:     300,
 		SSEMaxConcurrentStreams:   10,
-		AdminQueryTimeoutSeconds:  30,
-		AdminQueryRowCap:          1000,
 		EmbeddingDimensions:       1536,
 		AIEmbeddingTimeoutSeconds: 30,
 	}
@@ -640,70 +587,57 @@ func (te *TestEnv) buildConfigConcrete() config.Config {
 
 // testConfig implements config.ConfigProvider
 type testConfig struct {
-	httpAddr                 string
-	postgresDSN              string
-	neo4jURI                 string
-	neo4jUser                string
-	neo4jPassword            string
-	neo4jDatabase            string
-	redisAddr                string
-	redisPassword            string
-	redisDB                  int
-	rateLimitPerMinute       int
-	adminRateLimitPerMinute  int
-	fragmentCreateRateLimit  int
-	fragmentReadRateLimit    int
-	argonMemoryKB            int
-	argonTime                int
-	argonThreads             int
-	sseHeartbeatSeconds      int
-	sseMaxDurationSeconds    int
-	sseMaxConcurrentStreams  int
-	adminQueryTimeoutSeconds int
-	adminQueryRowCap         int
-	embeddingDimensions      int
-	aiAPIURL                 string
-	aiAPIKey                 string
-	aiEmbeddingModel         string
-	aiEmbeddingDimensions    int
-	aiEmbeddingTimeoutSecs   int
+	httpAddr                string
+	postgresDSN             string
+	neo4jURI                string
+	neo4jUser               string
+	neo4jPassword           string
+	neo4jDatabase           string
+	redisAddr               string
+	redisPassword           string
+	redisDB                 int
+	rateLimitPerMinute      int
+	fragmentCreateRateLimit int
+	fragmentReadRateLimit   int
+	sseHeartbeatSeconds     int
+	sseMaxDurationSeconds   int
+	sseMaxConcurrentStreams int
+	embeddingDimensions     int
+	aiAPIURL                string
+	aiAPIKey                string
+	aiEmbeddingModel        string
+	aiEmbeddingDimensions   int
+	aiEmbeddingTimeoutSecs  int
 }
 
-func (c *testConfig) GetHTTPAddr() string                 { return c.httpAddr }
-func (c *testConfig) GetPostgresDSN() string              { return c.postgresDSN }
-func (c *testConfig) GetNeo4jURI() string                 { return c.neo4jURI }
-func (c *testConfig) GetNeo4jUser() string                { return c.neo4jUser }
-func (c *testConfig) GetNeo4jPassword() string            { return c.neo4jPassword }
-func (c *testConfig) GetNeo4jDatabase() string            { return c.neo4jDatabase }
-func (c *testConfig) GetRedisAddr() string                { return c.redisAddr }
-func (c *testConfig) GetRedisPassword() string            { return c.redisPassword }
-func (c *testConfig) GetRedisDB() int                     { return c.redisDB }
-func (c *testConfig) GetBootstrapAdminKey() string        { return "" }
-func (c *testConfig) GetArgonMemoryKB() int               { return c.argonMemoryKB }
-func (c *testConfig) GetArgonTime() int                   { return c.argonTime }
-func (c *testConfig) GetArgonThreads() int                { return c.argonThreads }
-func (c *testConfig) GetRateLimitPerMinute() int          { return c.rateLimitPerMinute }
-func (c *testConfig) GetAdminRateLimitPerMinute() int     { return c.adminRateLimitPerMinute }
-func (c *testConfig) GetFragmentCreateRateLimit() int     { return c.fragmentCreateRateLimit }
-func (c *testConfig) GetFragmentReadRateLimit() int       { return c.fragmentReadRateLimit }
-func (c *testConfig) GetSSEHeartbeatSeconds() int         { return c.sseHeartbeatSeconds }
-func (c *testConfig) GetSSEMaxDurationSeconds() int       { return c.sseMaxDurationSeconds }
-func (c *testConfig) GetSSEMaxConcurrentStreams() int     { return c.sseMaxConcurrentStreams }
-func (c *testConfig) GetAdminQueryTimeoutSeconds() int    { return c.adminQueryTimeoutSeconds }
-func (c *testConfig) GetAdminQueryRowCap() int            { return c.adminQueryRowCap }
-func (c *testConfig) GetEmbeddingDimensions() int         { return c.embeddingDimensions }
-func (c *testConfig) GetAIAPIURL() string                 { return c.aiAPIURL }
-func (c *testConfig) GetAIAPIKey() string                 { return c.aiAPIKey }
-func (c *testConfig) GetAIEmbeddingModel() string         { return c.aiEmbeddingModel }
-func (c *testConfig) GetAIEmbeddingDimensions() int       { return c.aiEmbeddingDimensions }
-func (c *testConfig) GetAIEmbeddingTimeoutSeconds() int   { return c.aiEmbeddingTimeoutSecs }
+func (c *testConfig) GetHTTPAddr() string               { return c.httpAddr }
+func (c *testConfig) GetPostgresDSN() string            { return c.postgresDSN }
+func (c *testConfig) GetNeo4jURI() string               { return c.neo4jURI }
+func (c *testConfig) GetNeo4jUser() string              { return c.neo4jUser }
+func (c *testConfig) GetNeo4jPassword() string          { return c.neo4jPassword }
+func (c *testConfig) GetNeo4jDatabase() string          { return c.neo4jDatabase }
+func (c *testConfig) GetRedisAddr() string              { return c.redisAddr }
+func (c *testConfig) GetRedisPassword() string          { return c.redisPassword }
+func (c *testConfig) GetRedisDB() int                   { return c.redisDB }
+func (c *testConfig) GetRateLimitPerMinute() int        { return c.rateLimitPerMinute }
+func (c *testConfig) GetFragmentCreateRateLimit() int   { return c.fragmentCreateRateLimit }
+func (c *testConfig) GetFragmentReadRateLimit() int     { return c.fragmentReadRateLimit }
+func (c *testConfig) GetSSEHeartbeatSeconds() int       { return c.sseHeartbeatSeconds }
+func (c *testConfig) GetSSEMaxDurationSeconds() int     { return c.sseMaxDurationSeconds }
+func (c *testConfig) GetSSEMaxConcurrentStreams() int   { return c.sseMaxConcurrentStreams }
+func (c *testConfig) GetEmbeddingDimensions() int       { return c.embeddingDimensions }
+func (c *testConfig) GetAIAPIURL() string               { return c.aiAPIURL }
+func (c *testConfig) GetAIAPIKey() string               { return c.aiAPIKey }
+func (c *testConfig) GetAIEmbeddingModel() string       { return c.aiEmbeddingModel }
+func (c *testConfig) GetAIEmbeddingDimensions() int     { return c.aiEmbeddingDimensions }
+func (c *testConfig) GetAIEmbeddingTimeoutSeconds() int { return c.aiEmbeddingTimeoutSecs }
 func (c *testConfig) IsEmbeddingConfigured() bool {
 	return c.aiAPIURL != "" && c.aiAPIKey != "" && c.aiEmbeddingModel != "" && c.aiEmbeddingDimensions > 0
 }
-func (c *testConfig) GetAIVerifierModel() string            { return "gpt-4o-mini" }
-func (c *testConfig) GetAIVerifierMaxConcurrency() int      { return 5 }
-func (c *testConfig) GetClaimWriteRateLimit() int           { return 60 }
-func (c *testConfig) GetClaimReadRateLimit() int            { return 300 }
+func (c *testConfig) GetAIVerifierModel() string             { return "gpt-4o-mini" }
+func (c *testConfig) GetAIVerifierMaxConcurrency() int       { return 5 }
+func (c *testConfig) GetClaimWriteRateLimit() int            { return 60 }
+func (c *testConfig) GetClaimReadRateLimit() int             { return 300 }
 func (c *testConfig) GetRecallValidatedClaimWeight() float64 { return 0.5 }
-func (c *testConfig) GetPromoteTxTimeoutSeconds() int       { return 10 }
-func (c *testConfig) GetAICommunityMaxNodes() int           { return 500000 }
+func (c *testConfig) GetPromoteTxTimeoutSeconds() int        { return 10 }
+func (c *testConfig) GetAICommunityMaxNodes() int            { return 500000 }

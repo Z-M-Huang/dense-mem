@@ -19,44 +19,36 @@ import (
 // testRateLimitConfig implements config.ConfigProvider for rate limit tests.
 type testRateLimitConfig struct {
 	rateLimitPerMinute      int
-	adminRateLimitPerMinute int
 	fragmentCreateRateLimit int
 	fragmentReadRateLimit   int
 	claimWriteRateLimit     int
 	claimReadRateLimit      int
 }
 
-func (c *testRateLimitConfig) GetHTTPAddr() string                 { return ":8080" }
-func (c *testRateLimitConfig) GetPostgresDSN() string              { return "" }
-func (c *testRateLimitConfig) GetNeo4jURI() string                 { return "" }
-func (c *testRateLimitConfig) GetNeo4jUser() string                { return "" }
-func (c *testRateLimitConfig) GetNeo4jPassword() string            { return "" }
-func (c *testRateLimitConfig) GetNeo4jDatabase() string            { return "" }
-func (c *testRateLimitConfig) GetRedisAddr() string                { return "" }
-func (c *testRateLimitConfig) GetRedisPassword() string            { return "" }
-func (c *testRateLimitConfig) GetRedisDB() int                     { return 0 }
-func (c *testRateLimitConfig) GetBootstrapAdminKey() string        { return "" }
-func (c *testRateLimitConfig) GetArgonMemoryKB() int               { return 65536 }
-func (c *testRateLimitConfig) GetArgonTime() int                   { return 1 }
-func (c *testRateLimitConfig) GetArgonThreads() int                { return 4 }
-func (c *testRateLimitConfig) GetRateLimitPerMinute() int          { return c.rateLimitPerMinute }
-func (c *testRateLimitConfig) GetAdminRateLimitPerMinute() int     { return c.adminRateLimitPerMinute }
-func (c *testRateLimitConfig) GetFragmentCreateRateLimit() int     { return c.fragmentCreateRateLimit }
-func (c *testRateLimitConfig) GetFragmentReadRateLimit() int       { return c.fragmentReadRateLimit }
-func (c *testRateLimitConfig) GetSSEHeartbeatSeconds() int         { return 30 }
-func (c *testRateLimitConfig) GetSSEMaxDurationSeconds() int       { return 300 }
-func (c *testRateLimitConfig) GetSSEMaxConcurrentStreams() int     { return 10 }
-func (c *testRateLimitConfig) GetAdminQueryTimeoutSeconds() int    { return 30 }
-func (c *testRateLimitConfig) GetAdminQueryRowCap() int            { return 1000 }
-func (c *testRateLimitConfig) GetEmbeddingDimensions() int         { return 1536 }
-func (c *testRateLimitConfig) GetAIAPIURL() string                  { return "" }
-func (c *testRateLimitConfig) GetAIAPIKey() string                  { return "" }
-func (c *testRateLimitConfig) GetAIEmbeddingModel() string          { return "" }
-func (c *testRateLimitConfig) GetAIEmbeddingDimensions() int        { return 0 }
-func (c *testRateLimitConfig) GetAIEmbeddingTimeoutSeconds() int    { return 30 }
-func (c *testRateLimitConfig) IsEmbeddingConfigured() bool          { return false }
-func (c *testRateLimitConfig) GetAIVerifierModel() string             { return "gpt-4o-mini" }
-func (c *testRateLimitConfig) GetAIVerifierMaxConcurrency() int       { return 5 }
+func (c *testRateLimitConfig) GetHTTPAddr() string               { return ":8080" }
+func (c *testRateLimitConfig) GetPostgresDSN() string            { return "" }
+func (c *testRateLimitConfig) GetNeo4jURI() string               { return "" }
+func (c *testRateLimitConfig) GetNeo4jUser() string              { return "" }
+func (c *testRateLimitConfig) GetNeo4jPassword() string          { return "" }
+func (c *testRateLimitConfig) GetNeo4jDatabase() string          { return "" }
+func (c *testRateLimitConfig) GetRedisAddr() string              { return "" }
+func (c *testRateLimitConfig) GetRedisPassword() string          { return "" }
+func (c *testRateLimitConfig) GetRedisDB() int                   { return 0 }
+func (c *testRateLimitConfig) GetRateLimitPerMinute() int        { return c.rateLimitPerMinute }
+func (c *testRateLimitConfig) GetFragmentCreateRateLimit() int   { return c.fragmentCreateRateLimit }
+func (c *testRateLimitConfig) GetFragmentReadRateLimit() int     { return c.fragmentReadRateLimit }
+func (c *testRateLimitConfig) GetSSEHeartbeatSeconds() int       { return 30 }
+func (c *testRateLimitConfig) GetSSEMaxDurationSeconds() int     { return 300 }
+func (c *testRateLimitConfig) GetSSEMaxConcurrentStreams() int   { return 10 }
+func (c *testRateLimitConfig) GetEmbeddingDimensions() int       { return 1536 }
+func (c *testRateLimitConfig) GetAIAPIURL() string               { return "" }
+func (c *testRateLimitConfig) GetAIAPIKey() string               { return "" }
+func (c *testRateLimitConfig) GetAIEmbeddingModel() string       { return "" }
+func (c *testRateLimitConfig) GetAIEmbeddingDimensions() int     { return 0 }
+func (c *testRateLimitConfig) GetAIEmbeddingTimeoutSeconds() int { return 30 }
+func (c *testRateLimitConfig) IsEmbeddingConfigured() bool       { return false }
+func (c *testRateLimitConfig) GetAIVerifierModel() string        { return "gpt-4o-mini" }
+func (c *testRateLimitConfig) GetAIVerifierMaxConcurrency() int  { return 5 }
 func (c *testRateLimitConfig) GetClaimWriteRateLimit() int {
 	if c.claimWriteRateLimit != 0 {
 		return c.claimWriteRateLimit
@@ -70,8 +62,8 @@ func (c *testRateLimitConfig) GetClaimReadRateLimit() int {
 	return 300
 }
 func (c *testRateLimitConfig) GetRecallValidatedClaimWeight() float64 { return 0.5 }
-func (c *testRateLimitConfig) GetPromoteTxTimeoutSeconds() int      { return 10 }
-func (c *testRateLimitConfig) GetAICommunityMaxNodes() int          { return 500000 }
+func (c *testRateLimitConfig) GetPromoteTxTimeoutSeconds() int        { return 10 }
+func (c *testRateLimitConfig) GetAICommunityMaxNodes() int            { return 500000 }
 
 // runRateLimitMiddlewareContract is the shared contract helper for rate limit
 // middleware. It exercises header contract and 429 behavior for any backend
@@ -84,7 +76,6 @@ func runRateLimitMiddlewareContract(t *testing.T, name string, svc service.RateL
 
 	cfg := &testRateLimitConfig{
 		rateLimitPerMinute:      2,
-		adminRateLimitPerMinute: 2,
 		fragmentCreateRateLimit: 60,
 		fragmentReadRateLimit:   300,
 	}
@@ -127,51 +118,43 @@ func TestRateLimitMiddleware_Contract_InMemory(t *testing.T) {
 
 // redisRateLimitConfig implements config.ConfigProvider for Redis-backed rate limit tests.
 type redisRateLimitConfig struct {
-	addr                     string
-	password                 string
-	db                       int
-	rateLimitPerMinute       int
-	adminRateLimitPerMinute  int
-	fragmentCreateRateLimit  int
-	fragmentReadRateLimit    int
+	addr                    string
+	password                string
+	db                      int
+	rateLimitPerMinute      int
+	fragmentCreateRateLimit int
+	fragmentReadRateLimit   int
 }
 
-func (c *redisRateLimitConfig) GetHTTPAddr() string                 { return ":8080" }
-func (c *redisRateLimitConfig) GetPostgresDSN() string              { return "" }
-func (c *redisRateLimitConfig) GetNeo4jURI() string                 { return "" }
-func (c *redisRateLimitConfig) GetNeo4jUser() string                { return "" }
-func (c *redisRateLimitConfig) GetNeo4jPassword() string            { return "" }
-func (c *redisRateLimitConfig) GetNeo4jDatabase() string            { return "" }
-func (c *redisRateLimitConfig) GetRedisAddr() string                { return c.addr }
-func (c *redisRateLimitConfig) GetRedisPassword() string            { return c.password }
-func (c *redisRateLimitConfig) GetRedisDB() int                     { return c.db }
-func (c *redisRateLimitConfig) GetBootstrapAdminKey() string        { return "" }
-func (c *redisRateLimitConfig) GetArgonMemoryKB() int               { return 65536 }
-func (c *redisRateLimitConfig) GetArgonTime() int                   { return 1 }
-func (c *redisRateLimitConfig) GetArgonThreads() int                { return 4 }
-func (c *redisRateLimitConfig) GetRateLimitPerMinute() int          { return c.rateLimitPerMinute }
-func (c *redisRateLimitConfig) GetAdminRateLimitPerMinute() int     { return c.adminRateLimitPerMinute }
-func (c *redisRateLimitConfig) GetFragmentCreateRateLimit() int     { return c.fragmentCreateRateLimit }
-func (c *redisRateLimitConfig) GetFragmentReadRateLimit() int       { return c.fragmentReadRateLimit }
-func (c *redisRateLimitConfig) GetSSEHeartbeatSeconds() int         { return 30 }
-func (c *redisRateLimitConfig) GetSSEMaxDurationSeconds() int       { return 300 }
-func (c *redisRateLimitConfig) GetSSEMaxConcurrentStreams() int     { return 10 }
-func (c *redisRateLimitConfig) GetAdminQueryTimeoutSeconds() int    { return 30 }
-func (c *redisRateLimitConfig) GetAdminQueryRowCap() int            { return 1000 }
-func (c *redisRateLimitConfig) GetEmbeddingDimensions() int         { return 1536 }
-func (c *redisRateLimitConfig) GetAIAPIURL() string                  { return "" }
-func (c *redisRateLimitConfig) GetAIAPIKey() string                  { return "" }
-func (c *redisRateLimitConfig) GetAIEmbeddingModel() string          { return "" }
-func (c *redisRateLimitConfig) GetAIEmbeddingDimensions() int        { return 0 }
-func (c *redisRateLimitConfig) GetAIEmbeddingTimeoutSeconds() int    { return 30 }
-func (c *redisRateLimitConfig) IsEmbeddingConfigured() bool          { return false }
-func (c *redisRateLimitConfig) GetAIVerifierModel() string           { return "gpt-4o-mini" }
-func (c *redisRateLimitConfig) GetAIVerifierMaxConcurrency() int     { return 5 }
-func (c *redisRateLimitConfig) GetClaimWriteRateLimit() int          { return 60 }
-func (c *redisRateLimitConfig) GetClaimReadRateLimit() int           { return 300 }
+func (c *redisRateLimitConfig) GetHTTPAddr() string                    { return ":8080" }
+func (c *redisRateLimitConfig) GetPostgresDSN() string                 { return "" }
+func (c *redisRateLimitConfig) GetNeo4jURI() string                    { return "" }
+func (c *redisRateLimitConfig) GetNeo4jUser() string                   { return "" }
+func (c *redisRateLimitConfig) GetNeo4jPassword() string               { return "" }
+func (c *redisRateLimitConfig) GetNeo4jDatabase() string               { return "" }
+func (c *redisRateLimitConfig) GetRedisAddr() string                   { return c.addr }
+func (c *redisRateLimitConfig) GetRedisPassword() string               { return c.password }
+func (c *redisRateLimitConfig) GetRedisDB() int                        { return c.db }
+func (c *redisRateLimitConfig) GetRateLimitPerMinute() int             { return c.rateLimitPerMinute }
+func (c *redisRateLimitConfig) GetFragmentCreateRateLimit() int        { return c.fragmentCreateRateLimit }
+func (c *redisRateLimitConfig) GetFragmentReadRateLimit() int          { return c.fragmentReadRateLimit }
+func (c *redisRateLimitConfig) GetSSEHeartbeatSeconds() int            { return 30 }
+func (c *redisRateLimitConfig) GetSSEMaxDurationSeconds() int          { return 300 }
+func (c *redisRateLimitConfig) GetSSEMaxConcurrentStreams() int        { return 10 }
+func (c *redisRateLimitConfig) GetEmbeddingDimensions() int            { return 1536 }
+func (c *redisRateLimitConfig) GetAIAPIURL() string                    { return "" }
+func (c *redisRateLimitConfig) GetAIAPIKey() string                    { return "" }
+func (c *redisRateLimitConfig) GetAIEmbeddingModel() string            { return "" }
+func (c *redisRateLimitConfig) GetAIEmbeddingDimensions() int          { return 0 }
+func (c *redisRateLimitConfig) GetAIEmbeddingTimeoutSeconds() int      { return 30 }
+func (c *redisRateLimitConfig) IsEmbeddingConfigured() bool            { return false }
+func (c *redisRateLimitConfig) GetAIVerifierModel() string             { return "gpt-4o-mini" }
+func (c *redisRateLimitConfig) GetAIVerifierMaxConcurrency() int       { return 5 }
+func (c *redisRateLimitConfig) GetClaimWriteRateLimit() int            { return 60 }
+func (c *redisRateLimitConfig) GetClaimReadRateLimit() int             { return 300 }
 func (c *redisRateLimitConfig) GetRecallValidatedClaimWeight() float64 { return 0.5 }
-func (c *redisRateLimitConfig) GetPromoteTxTimeoutSeconds() int      { return 10 }
-func (c *redisRateLimitConfig) GetAICommunityMaxNodes() int          { return 500000 }
+func (c *redisRateLimitConfig) GetPromoteTxTimeoutSeconds() int        { return 10 }
+func (c *redisRateLimitConfig) GetAICommunityMaxNodes() int            { return 500000 }
 
 func TestRateLimitMiddleware_Contract_Redis(t *testing.T) {
 	t.Parallel()
@@ -184,7 +167,6 @@ func TestRateLimitMiddleware_Contract_Redis(t *testing.T) {
 	cfg := &redisRateLimitConfig{
 		addr:                    redisAddr,
 		rateLimitPerMinute:      2,
-		adminRateLimitPerMinute: 2,
 		fragmentCreateRateLimit: 60,
 		fragmentReadRateLimit:   300,
 	}
@@ -203,13 +185,12 @@ func TestRateLimitMiddleware_Contract_Redis(t *testing.T) {
 // TestSelectRateLimit_FragmentTiers asserts AC-54: fragment writes use the
 // stricter FragmentCreateRateLimit while fragment reads use the looser
 // FragmentReadRateLimit. Non-fragment traffic falls back to the standard tier
-// and admin callers always use the admin tier.
+// for the profile.
 func TestSelectRateLimit_FragmentTiers(t *testing.T) {
 	t.Parallel()
 
 	cfg := &testRateLimitConfig{
 		rateLimitPerMinute:      100,
-		adminRateLimitPerMinute: 1000,
 		fragmentCreateRateLimit: 60,
 		fragmentReadRateLimit:   300,
 	}
@@ -221,7 +202,6 @@ func TestSelectRateLimit_FragmentTiers(t *testing.T) {
 		path   string
 		want   int
 	}{
-		{"admin overrides fragment route", "admin", "POST", "/api/v1/profiles/:id/fragments", 1000},
 		{"fragment create POST uses write tier", "standard", "POST", "/api/v1/profiles/:id/fragments", 60},
 		{"fragment delete DELETE uses write tier", "standard", "DELETE", "/api/v1/profiles/:id/fragments/:fragmentId", 60},
 		{"fragment list GET uses read tier", "standard", "GET", "/api/v1/profiles/:id/fragments", 300},
@@ -244,14 +224,12 @@ func TestSelectRateLimit_FragmentTiers(t *testing.T) {
 }
 
 // TestSelectRateLimit_ClaimTiers asserts that POST and DELETE on /claims routes
-// use GetClaimWriteRateLimit and GETs use GetClaimReadRateLimit. Admin callers
-// always bypass claim-tier selection and use the admin tier.
+// use GetClaimWriteRateLimit and GETs use GetClaimReadRateLimit.
 func TestSelectRateLimit_ClaimTiers(t *testing.T) {
 	t.Parallel()
 
 	cfg := &testRateLimitConfig{
 		rateLimitPerMinute:      100,
-		adminRateLimitPerMinute: 1000,
 		fragmentCreateRateLimit: 60,
 		fragmentReadRateLimit:   300,
 		claimWriteRateLimit:     40,
@@ -265,7 +243,6 @@ func TestSelectRateLimit_ClaimTiers(t *testing.T) {
 		path   string
 		want   int
 	}{
-		{"admin overrides claim route", "admin", "POST", "/api/v1/claims", 1000},
 		{"claim create POST uses write tier", "standard", "POST", "/api/v1/claims", 40},
 		{"claim delete DELETE uses write tier", "standard", "DELETE", "/api/v1/claims/:id", 40},
 		{"claim list GET uses read tier", "standard", "GET", "/api/v1/claims", 200},
@@ -300,7 +277,6 @@ func TestRateLimitMiddleware_EnforcesStricterFragmentWriteTier(t *testing.T) {
 	// Tight numbers for a fast, deterministic test: writes get 2/min, reads 5/min.
 	cfg := &testRateLimitConfig{
 		rateLimitPerMinute:      50,
-		adminRateLimitPerMinute: 50,
 		fragmentCreateRateLimit: 2,
 		fragmentReadRateLimit:   5,
 	}

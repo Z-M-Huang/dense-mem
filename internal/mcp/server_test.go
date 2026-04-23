@@ -26,7 +26,6 @@ func TestServerIgnoresProfileOverride(t *testing.T) {
 		Name:        "probe",
 		Description: "captures invocation context",
 		InputSchema: map[string]any{"type": "object"},
-		Available:   true,
 		Invoke: func(ctx context.Context, profileID string, input map[string]any) (map[string]any, error) {
 			gotProfile = profileID
 			gotArgs = input
@@ -68,7 +67,6 @@ func TestSanitizeToolError(t *testing.T) {
 		Name:        "leaky",
 		Description: "returns error with secrets",
 		InputSchema: map[string]any{"type": "object"},
-		Available:   true,
 		Invoke: func(ctx context.Context, profileID string, input map[string]any) (map[string]any, error) {
 			return nil, errors.New("upstream call failed: Bearer sk-abc123secret — retry later")
 		},
@@ -238,13 +236,11 @@ func TestMCP_ToolsListMirrorsRegistry(t *testing.T) {
 		Name:        "save_memory",
 		Description: "store",
 		InputSchema: map[string]any{"type": "object"},
-		Available:   true,
 	})
 	_ = reg.Register(registry.Tool{
 		Name:        "recall_memory",
 		Description: "recall",
 		InputSchema: map[string]any{"type": "object"},
-		Available:   true,
 	})
 	s := NewServer(reg, "pA", logger)
 
@@ -287,7 +283,6 @@ func TestMCP_ToolsCallInvokesRegistry(t *testing.T) {
 		Name:        "save_memory",
 		Description: "store",
 		InputSchema: map[string]any{"type": "object"},
-		Available:   true,
 		Invoke: func(ctx context.Context, profileID string, input map[string]any) (map[string]any, error) {
 			gotProfile = profileID
 			gotArgs = input
@@ -344,17 +339,15 @@ func TestMCP_ToolsCallUnknownToolReturnsError(t *testing.T) {
 	}
 }
 
-func TestMCP_ToolsCallUnavailableToolReturnsError(t *testing.T) {
+func TestMCP_ToolsCallProviderErrorReturnsError(t *testing.T) {
 	logger, _ := testLogger(t)
 	reg := registry.New()
 	_ = reg.Register(registry.Tool{
 		Name:        "recall_memory",
 		Description: "recall",
 		InputSchema: map[string]any{"type": "object"},
-		Available:   false, // gated
 		Invoke: func(ctx context.Context, profileID string, input map[string]any) (map[string]any, error) {
-			t.Fatal("invoker should not be called for unavailable tool")
-			return nil, nil
+			return nil, errors.New("embedding provider unavailable")
 		},
 	})
 	s := NewServer(reg, "pA", logger)
@@ -367,6 +360,9 @@ func TestMCP_ToolsCallUnavailableToolReturnsError(t *testing.T) {
 	if resp.Error == nil || resp.Error.Code != errCodeToolFailure {
 		t.Errorf("expected tool failure code; got %+v", resp.Error)
 	}
+	if !strings.Contains(resp.Error.Message, "embedding provider unavailable") {
+		t.Errorf("error message should surface sanitized reason; got %q", resp.Error.Message)
+	}
 }
 
 func TestMCP_ToolErrorSurfacesWithoutLeak(t *testing.T) {
@@ -376,7 +372,6 @@ func TestMCP_ToolErrorSurfacesWithoutLeak(t *testing.T) {
 		Name:        "boom",
 		Description: "broken",
 		InputSchema: map[string]any{"type": "object"},
-		Available:   true,
 		Invoke: func(ctx context.Context, profileID string, input map[string]any) (map[string]any, error) {
 			return nil, errors.New("recall: embedding provider unavailable")
 		},
@@ -439,7 +434,6 @@ func TestMCP_ProtocolStdoutClean(t *testing.T) {
 		Name:        "noop",
 		Description: "noop",
 		InputSchema: map[string]any{"type": "object"},
-		Available:   true,
 		Invoke: func(ctx context.Context, profileID string, input map[string]any) (map[string]any, error) {
 			return map[string]any{"ok": true}, nil
 		},

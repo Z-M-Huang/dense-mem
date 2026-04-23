@@ -7,11 +7,14 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/dense-mem/dense-mem/internal/domain"
 	"github.com/dense-mem/dense-mem/internal/embedding"
 	"github.com/dense-mem/dense-mem/internal/tools/keywordsearch"
 	"github.com/dense-mem/dense-mem/internal/tools/semanticsearch"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // --- fakes -----------------------------------------------------------------
@@ -90,6 +93,56 @@ func (f *fakeHydrator) GetByID(ctx context.Context, profileID, fragmentID string
 		return frag, nil
 	}
 	return &domain.Fragment{FragmentID: fragmentID, ProfileID: profileID, Content: fragmentID + " content"}, nil
+}
+
+type fakeFactSearcher struct {
+	results   []FactRecallResult
+	lastQuery string
+	lastLimit int
+}
+
+func (f *fakeFactSearcher) SearchActive(ctx context.Context, profileID string, query string, limit int) ([]FactRecallResult, error) {
+	f.lastQuery = query
+	f.lastLimit = limit
+	out := make([]FactRecallResult, len(f.results))
+	copy(out, f.results)
+	return out, nil
+}
+
+type fakeClaimSearcher struct {
+	results   []ClaimRecallResult
+	lastQuery string
+	lastLimit int
+}
+
+func (f *fakeClaimSearcher) SearchValidated(ctx context.Context, profileID string, query string, limit int) ([]ClaimRecallResult, error) {
+	f.lastQuery = query
+	f.lastLimit = limit
+	out := make([]ClaimRecallResult, len(f.results))
+	copy(out, f.results)
+	return out, nil
+}
+
+type fakeFactGetter struct {
+	facts map[string]*domain.Fact
+}
+
+func (f *fakeFactGetter) Get(ctx context.Context, profileID string, factID string) (*domain.Fact, error) {
+	if fact, ok := f.facts[factID]; ok {
+		return fact, nil
+	}
+	return nil, errors.New("fact not found")
+}
+
+type fakeClaimGetter struct {
+	claims map[string]*domain.Claim
+}
+
+func (f *fakeClaimGetter) Get(ctx context.Context, profileID string, claimID string) (*domain.Claim, error) {
+	if claim, ok := f.claims[claimID]; ok {
+		return claim, nil
+	}
+	return nil, errors.New("claim not found")
 }
 
 // --- tests -----------------------------------------------------------------
@@ -264,6 +317,65 @@ func TestRecallService_RejectsBlankQuery(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for blank query")
 	}
+}
+
+func TestRecallService_TierEnrichmentUsesQueryMatchedSearchers(t *testing.T) {
+	sem := &fakeSemanticSearcher{}
+	kw := &fakeKeywordSearcher{}
+	factSearcher := &fakeFactSearcher{
+		results: []FactRecallResult{{FactID: "fact-1", ProfileID: "pA"}},
+	}
+	claimSearcher := &fakeClaimSearcher{
+		results: []ClaimRecallResult{{ClaimID: "claim-1", ProfileID: "pA"}},
+	}
+	factGetter := &fakeFactGetter{
+		facts: map[string]*domain.Fact{
+			"fact-1": {
+				FactID:     "fact-1",
+				ProfileID:  "pA",
+				Status:     domain.FactStatusActive,
+				TruthScore: 0.95,
+				RecordedAt: time.Now().UTC(),
+			},
+		},
+	}
+	claimGetter := &fakeClaimGetter{
+		claims: map[string]*domain.Claim{
+			"claim-1": {
+				ClaimID:     "claim-1",
+				ProfileID:   "pA",
+				Status:      domain.StatusValidated,
+				ExtractConf: 0.8,
+				RecordedAt:  time.Now().UTC(),
+			},
+		},
+	}
+
+	svc := NewRecallServiceWithTiers(
+		&stubEmbedding{DimensionsResult: 4},
+		sem,
+		kw,
+		&fakeHydrator{},
+		factSearcher,
+		factGetter,
+		claimSearcher,
+		claimGetter,
+		0,
+		nil,
+		nil,
+	)
+
+	out, err := svc.Recall(context.Background(), "pA", RecallRequest{Query: "mars mission", Limit: 5})
+	require.NoError(t, err)
+	require.Len(t, out, 2)
+	assert.Equal(t, "mars mission", factSearcher.lastQuery)
+	assert.Equal(t, "mars mission", claimSearcher.lastQuery)
+	assert.Equal(t, TierActiveFact, out[0].Tier)
+	require.NotNil(t, out[0].Fact)
+	assert.Equal(t, "fact-1", out[0].Fact.FactID)
+	assert.Equal(t, TierValidatedClaim, out[1].Tier)
+	require.NotNil(t, out[1].Claim)
+	assert.Equal(t, "claim-1", out[1].Claim.ClaimID)
 }
 
 // TestRecallService_RejectsEmptyProfileID enforces profile isolation input.

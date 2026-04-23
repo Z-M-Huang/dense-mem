@@ -15,7 +15,7 @@ Playwright end-to-end tests for the dense-mem knowledge pipeline API.
 | `phase4-contradiction.spec.ts` | UAT-07a–d | Contradiction detection on promote |
 | `phase4-promote-concurrency.spec.ts` | UAT-08a–c | Concurrent promote idempotency |
 | `phase6-retract.spec.ts` | UAT-09a–e | Fragment retraction & cascade |
-| `phase7-community.spec.ts` | UAT-10a–d | Community detection (admin) |
+| `phase7-community.spec.ts` | UAT-10a–d | Community detection |
 | `phase8-mcp.spec.ts` | UAT-11a–d | MCP server tool surface |
 | `phase9-recall.spec.ts` | UAT-12a–e, AC-X2 regression | Semantic recall endpoint |
 | `e2e-journey.spec.ts` | UAT-13, AC-X2, AC-X6, isolation | Full pipeline end-to-end |
@@ -32,7 +32,6 @@ Playwright end-to-end tests for the dense-mem knowledge pipeline API.
 |----------|-------------|---------|
 | `BASE_URL` | Server base URL | `http://localhost:8080` |
 | `API_KEY` | Standard API key | `test-api-key` |
-| `ADMIN_KEY` | Admin API key | `test-admin-key` |
 | `PROFILE_ID` | Default profile ID for tests | `test-profile-id` |
 | `NEO4J_URI` | Neo4j Bolt URI | `bolt://localhost:7687` |
 | `NEO4J_USER` | Neo4j username | `neo4j` |
@@ -51,7 +50,7 @@ npx playwright install
 npx playwright test --list
 
 # Run all tests against a live server
-BASE_URL=http://localhost:8080 API_KEY=<key> ADMIN_KEY=<admin-key> PROFILE_ID=<id> \
+BASE_URL=http://localhost:8080 API_KEY=<key> PROFILE_ID=<id> \
   npx playwright test
 
 # Run a single phase
@@ -72,8 +71,6 @@ as the test files are syntactically valid — actual test execution requires a r
 | Export | Purpose |
 |--------|---------|
 | `headers(profileId)` | Standard auth headers for a profile |
-| `adminHeaders()` | Admin-level auth headers |
-| `adminProfileHeaders(profileId)` | Admin headers with profile ID |
 | `neo4jQuery(cypher, params)` | Direct Neo4j query for assertions |
 | `spawnMcp(env)` | Spawn and communicate with the MCP binary |
 | `seedFragmentForProfile(request, profileId, content, opts)` | Create a fragment via API |
@@ -94,7 +91,6 @@ GET  /api/v1/facts/:id
 GET  /api/v1/facts
 POST /api/v1/fragments
 POST /api/v1/fragments/:id/retract
-POST /api/v1/admin/graph/query
-POST /api/v1/admin/profiles/:id/community/detect
+POST /api/v1/tools/detect_community
 GET  /api/v1/openapi.json
 ```

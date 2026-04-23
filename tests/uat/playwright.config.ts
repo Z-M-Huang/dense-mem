@@ -20,6 +20,6 @@ export default defineConfig({
     actionTimeout: 10_000,
   },
   // No webServer — tests expect a running instance at BASE_URL.
-  // Set BASE_URL, API_KEY, ADMIN_KEY, PROFILE_ID, NEO4J_URI,
+  // Set BASE_URL, API_KEY, PROFILE_ID, NEO4J_URI,
   // NEO4J_USER, NEO4J_PASSWORD env vars before running.
 });

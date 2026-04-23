@@ -39,7 +39,7 @@ func (s *neo4jEmbeddingSearcher) QueryVectorIndex(ctx context.Context, profileID
 
 	// Build the Cypher query with vector index search.
 	// Uses db.index.vector.queryNodes for vector similarity search.
-	cypherQuery := `CALL db.index.vector.queryNodes('fragment_embedding_idx', $embedding, $limit) YIELD node AS f, score
+	cypherQuery := `CALL db.index.vector.queryNodes('fragment_embedding_idx', $limit, $embedding) YIELD node AS f, score
 WHERE f.profile_id = $profileId AND ` + fragmentActive + `
 RETURN f.fragment_id AS id, f.content AS content, score, f.labels AS labels, f.metadata AS metadata, f.profile_id AS profile_id`
 

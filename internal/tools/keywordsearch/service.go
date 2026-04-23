@@ -27,12 +27,11 @@ type SearchHit struct {
 
 // KeywordSearchRequest represents the request for keyword search.
 type KeywordSearchRequest struct {
-	Query           string     `json:"query"`
-	Limit           int        `json:"limit"`
-	Labels          []string   `json:"labels,omitempty"`
-	ValidAt         *time.Time `json:"valid_at,omitempty"`
-	KnownAt         *time.Time `json:"known_at,omitempty"`
-	IncludeEvidence bool       `json:"include_evidence,omitempty"`
+	Query   string     `json:"query"`
+	Limit   int        `json:"limit"`
+	Labels  []string   `json:"labels,omitempty"`
+	ValidAt *time.Time `json:"valid_at,omitempty"`
+	KnownAt *time.Time `json:"known_at,omitempty"`
 }
 
 // KeywordSearchRequestInterface is the companion interface for KeywordSearchRequest.

@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
@@ -255,6 +256,50 @@ func TestKeywordSearchHandler_BindsDTO_Keywords(t *testing.T) {
 	e.POST("/api/v1/tools/keyword-search", h.Handle)
 
 	body := `{"keywords": "alpha", "limit": 5}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/tools/keyword-search", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Profile-ID", profileID.String())
+	rec := httptest.NewRecorder()
+
+	e.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+}
+
+func TestKeywordSearchHandler_PassesLabelsAndTemporalFilters(t *testing.T) {
+	e := newTestEcho()
+	profileID := uuid.New()
+	validAt := time.Date(2024, 3, 1, 12, 0, 0, 0, time.UTC)
+	knownAt := time.Date(2024, 3, 2, 12, 0, 0, 0, time.UTC)
+
+	mockSvc := &mockKeywordSearchService{
+		searchFunc: func(ctx context.Context, pid string, req *keywordsearch.KeywordSearchRequest) (*keywordsearch.KeywordSearchResult, error) {
+			assert.Equal(t, profileID.String(), pid)
+			assert.Equal(t, "alpha", req.Query)
+			assert.Equal(t, []string{"science", "history"}, req.Labels)
+			require.NotNil(t, req.ValidAt)
+			require.NotNil(t, req.KnownAt)
+			assert.True(t, req.ValidAt.Equal(validAt))
+			assert.True(t, req.KnownAt.Equal(knownAt))
+			return &keywordsearch.KeywordSearchResult{
+				Data: []keywordsearch.SearchHit{},
+				Meta: keywordsearch.KeywordSearchMeta{LimitApplied: 5},
+			}, nil
+		},
+	}
+	h := NewKeywordSearchHandler(mockSvc)
+
+	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			ctx := middleware.SetResolvedProfileIDForTest(c.Request().Context(), profileID)
+			c.SetRequest(c.Request().WithContext(ctx))
+			return next(c)
+		}
+	})
+
+	e.POST("/api/v1/tools/keyword-search", h.Handle)
+
+	body := `{"keywords":"alpha","limit":5,"labels":["science","history"],"valid_at":"2024-03-01T12:00:00Z","known_at":"2024-03-02T12:00:00Z"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/tools/keyword-search", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Profile-ID", profileID.String())

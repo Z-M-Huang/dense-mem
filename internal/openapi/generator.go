@@ -9,7 +9,7 @@ import (
 	"github.com/dense-mem/dense-mem/internal/tools/registry"
 )
 
-// SpecVariant distinguishes the public AI-safe spec from the full admin spec.
+// SpecVariant distinguishes the public AI-safe spec from the full runtime spec.
 type SpecVariant string
 
 const (

@@ -370,7 +370,7 @@ func knowledgeSchemas() map[string]any {
 		},
 
 		// CommunityDetectRequest is the request body for
-		// POST /api/v1/admin/profiles/{profileId}/community/detect.
+		// Community detection request/response payloads.
 		// All fields are optional tuning parameters for the underlying GDS algorithm.
 		"CommunityDetectRequest": map[string]any{
 			"type": "object",
@@ -494,11 +494,8 @@ func knowledgeSchemas() map[string]any {
 					"type":  "array",
 					"items": map[string]any{"type": "string"},
 				},
-				"available": map[string]any{
-					"type": "boolean",
-				},
 			},
-			"required": []string{"name", "description", "input_schema", "output_schema", "required_scopes", "available"},
+			"required": []string{"name", "description", "input_schema", "output_schema", "required_scopes"},
 		},
 
 		// ToolCatalogResponse is the list envelope returned by GET /api/v1/tools.

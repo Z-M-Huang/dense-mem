@@ -14,8 +14,54 @@ contracts rather than internal implementation details.
 | 4. Fact promotion | `claim_id` (validated only) | `Fact (active)` node | `POST /api/v1/claims/{id}/promote` |
 | 5. Fact revalidation | Fragment retraction event | Fact status updated | (internal trigger) |
 | 6. Fragment retraction | `fragment_id` | Soft-tombstone + revalidation | `POST /api/v1/fragments/{id}/retract` |
-| 7. Community detection | `profile_id` + algorithm | Community assignments | `POST /api/v1/admin/profiles/{id}/community/detect` |
+| 7. Community detection | `profile_id` + algorithm | Community assignments | `POST /api/v1/tools/detect_community` |
 | 9. Hybrid recall | Query string | Ranked `RecallHit` list (tiers 1/1.5/2) | `GET /api/v1/recall` |
+
+## Entity Relationships
+
+```mermaid
+flowchart LR
+    SF["SourceFragment<br/>raw evidence"]
+    C["Claim<br/>candidate / validated / disputed / promoted"]
+    F["Fact<br/>authoritative memory"]
+    CM["Community<br/>summary node"]
+
+    C -- "SUPPORTED_BY" --> SF
+    C -- "PROMOTES_TO" --> F
+    C -- "CONTRADICTS" --> F
+    F -- "SUPERSEDED_BY" --> C
+
+    SF -. "grouped by community_id" .-> CM
+    C -. "grouped by community_id" .-> CM
+    F -. "grouped by community_id" .-> CM
+```
+
+Fragments are stored evidence units. Claims are structured propositions derived
+from fragments and retain their lineage through the `SUPPORTED_BY` edge.
+Facts are promoted claims that dense-mem treats as authoritative memory until a
+new contradiction or superseding claim changes that state. Communities are a
+summary layer over fragments, claims, and facts that share a `community_id`.
+
+## Claim Validation Flow
+
+```mermaid
+flowchart LR
+    C["Claim"] --> Load["Load supporting fragments"]
+    Load --> Build["Build verifier request<br/>subject + predicate + object + fragment text"]
+    Build --> V["Configured verifier model/provider"]
+    V --> E["entailed"]
+    V --> X["contradicted"]
+    V --> I["insufficient"]
+
+    E --> CV["Claim.status = validated"]
+    X --> CD["Claim.status = disputed"]
+    I --> CC["Claim stays candidate"]
+```
+
+Dense-mem does not self-validate claims through graph topology alone. A
+configured verifier model/provider evaluates the claim against its supporting
+fragments and returns the status transition. That makes the graph durable and
+traceable, while validation policy stays explicit and replaceable.
 
 ## Recall Tier Definitions
 
@@ -26,7 +72,8 @@ contracts rather than internal implementation details.
 | `"2"` | Source Fragment | `SourceFragment` node | RRF merged semantic + keyword rank |
 
 Tier `"1"` outranks `"1.5"` under equal base scores due to the 0.5 claim weight.
-Only `validated` claims are included; `candidate` and `disputed` claims are excluded.
+Only query-matched active facts and query-matched validated claims are included.
+`candidate` and `disputed` claims are excluded.
 
 ## RecallHit Schema
 
@@ -58,5 +105,5 @@ this at two levels:
 |-------|-----------|---------|
 | `ErrEmbeddingUnavailable` | 503 | Embedding provider down or unconfigured |
 | `ErrKeywordUnavailable` | 503 | BM25 index unavailable |
-| Missing `q` parameter | 422 | Validation failure |
+| Missing `query` parameter | 400 | Validation failure |
 | Missing profile context | 400 | Auth middleware did not resolve profile |

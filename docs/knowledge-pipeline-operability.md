@@ -78,4 +78,4 @@ deployed without a migration step.
 |------|----|----------|------------|
 | Claim weight misconfiguration causes facts to rank below claims | RK-13 | Medium | DefaultRecallValidatedClaimWeight is a named constant; test coverage asserts tier "1" outranks "1.5" for equal base scores |
 | Tier enrichment failure silently degrades recall quality | RK-14 | Low | enrichTierHits logs and swallows errors; callers still get fragment results |
-| Large community detection run blocks Neo4j GDS write lock | RK-15 | High | CommunityDetectRequest requires explicit `algorithm` and `min_size` parameters; admin-only route; enforce GDS timeout |
+| Large community detection run blocks Neo4j GDS write lock | RK-15 | High | CommunityDetectRequest requires explicit tuning parameters; tool execution should enforce GDS timeout |

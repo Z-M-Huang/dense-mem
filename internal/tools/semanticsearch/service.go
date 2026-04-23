@@ -5,7 +5,6 @@ import (
 	"errors"
 	"sort"
 	"strconv"
-	"time"
 )
 
 const (
@@ -77,13 +76,10 @@ func (h *SearchHit) GetProfileID() string {
 
 // SemanticSearchRequest represents the request for semantic search.
 type SemanticSearchRequest struct {
-	Embedding       []float32  `json:"embedding"`
-	Query           string     `json:"query,omitempty"` // Optional, for logging/debugging
-	Limit           int        `json:"limit"`
-	Threshold       float64    `json:"threshold,omitempty"` // Optional similarity threshold
-	ValidAt         *time.Time `json:"valid_at,omitempty"`
-	KnownAt         *time.Time `json:"known_at,omitempty"`
-	IncludeEvidence bool       `json:"include_evidence,omitempty"`
+	Embedding []float32 `json:"embedding"`
+	Query     string    `json:"query,omitempty"` // Optional, for logging/debugging
+	Limit     int       `json:"limit"`
+	Threshold float64   `json:"threshold,omitempty"` // Optional similarity threshold
 }
 
 // SemanticSearchRequestInterface is the companion interface for SemanticSearchRequest.
@@ -277,6 +273,9 @@ func (s *semanticSearchService) Search(ctx context.Context, profileID string, re
 	if err != nil {
 		return nil, err
 	}
+	if req.Threshold < 0 || req.Threshold > 1 {
+		return nil, NewValidationError("threshold must be between 0 and 1")
+	}
 
 	// Query vector index on SourceFragment.embedding
 	hits, err := s.embeddingSearcher.QueryVectorIndex(ctx, profileID, req.Embedding, limitApplied)
@@ -288,9 +287,13 @@ func (s *semanticSearchService) Search(ctx context.Context, profileID string, re
 	// profile A must never receive profile B rows even if B contains the nearest global vector candidate
 	filteredHits := make([]SearchHit, 0, len(hits))
 	for _, hit := range hits {
-		if hit.ProfileID == profileID {
-			filteredHits = append(filteredHits, hit)
+		if hit.ProfileID != profileID {
+			continue
 		}
+		if req.Threshold > 0 && hit.Score < req.Threshold {
+			continue
+		}
+		filteredHits = append(filteredHits, hit)
 	}
 
 	// Sort by score descending (deterministic for testing)

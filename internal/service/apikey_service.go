@@ -39,18 +39,12 @@ type ProfileStatePurger interface {
 // Consumers and tests depend on this abstraction rather than the concrete struct.
 type APIKeyService interface {
 	CreateStandardKey(ctx context.Context, profileID uuid.UUID, req CreateAPIKeyRequest, actorKeyID *string, actorRole, clientIP, correlationID string) (*domain.APIKey, string, error)
-	CreateAdminKey(ctx context.Context, req CreateAPIKeyRequest, actorKeyID *string, actorRole, clientIP, correlationID string) (*domain.APIKey, string, error)
 	ListByProfile(ctx context.Context, profileID uuid.UUID, limit, offset int) ([]*domain.APIKey, error)
 	CountByProfile(ctx context.Context, profileID uuid.UUID) (int64, error)
-	// GetByID is ADMIN ONLY — does not filter by profile. Standard callers must use GetByIDForProfile.
-	GetByID(ctx context.Context, id uuid.UUID) (*domain.APIKey, error)
 	// GetByIDForProfile returns the key only when it belongs to profileID; NOT_FOUND otherwise (no existence oracle).
 	GetByIDForProfile(ctx context.Context, profileID, id uuid.UUID) (*domain.APIKey, error)
-	// Revoke is ADMIN ONLY — does not filter by profile. Standard callers must use RevokeForProfile.
-	Revoke(ctx context.Context, id uuid.UUID, actorKeyID *string, actorRole, clientIP, correlationID string) error
 	// RevokeForProfile revokes the key only when it belongs to profileID; NOT_FOUND otherwise.
 	RevokeForProfile(ctx context.Context, profileID, id uuid.UUID, actorKeyID *string, actorRole, clientIP, correlationID string) error
-	BootstrapAdminKey(ctx context.Context, rawEnvKey string) error
 }
 
 // APIKeyServiceImpl implements the APIKeyService interface.
@@ -176,137 +170,10 @@ func (s *APIKeyServiceImpl) CreateStandardKey(ctx context.Context, profileID uui
 	return key, rawKey, nil
 }
 
-// CreateAdminKey creates a new admin API key.
-// Returns the created key and the plaintext raw key (returned exactly once).
-func (s *APIKeyServiceImpl) CreateAdminKey(ctx context.Context, req CreateAPIKeyRequest, actorKeyID *string, actorRole, clientIP, correlationID string) (*domain.APIKey, string, error) {
-	// Generate raw key
-	rawKey, err := crypto.GenerateRawKey()
-	if err != nil {
-		return nil, "", fmt.Errorf("failed to generate raw key: %w", err)
-	}
-
-	// Hash the key
-	keyHash, err := crypto.HashKey(rawKey)
-	if err != nil {
-		return nil, "", fmt.Errorf("failed to hash key: %w", err)
-	}
-
-	// Create the key record
-	key := &domain.APIKey{
-		Label:     req.Label,
-		KeyHash:   keyHash,
-		KeyPrefix: crypto.GetKeyPrefix(rawKey),
-		Scopes:    req.Scopes,
-		RateLimit: req.RateLimit,
-		ExpiresAt: req.ExpiresAt,
-	}
-
-	if err := s.repo.CreateAdminKey(ctx, key); err != nil {
-		return nil, "", fmt.Errorf("failed to create admin api key: %w", err)
-	}
-
-	// Audit the creation (without the raw key or hash)
-	afterPayload := map[string]interface{}{
-		"id":         key.ID.String(),
-		"label":      key.Label,
-		"scopes":     key.Scopes,
-		"rate_limit": key.RateLimit,
-		"role":       "admin",
-	}
-	if key.ExpiresAt != nil {
-		afterPayload["expires_at"] = key.ExpiresAt.Format(time.RFC3339)
-	}
-
-	if err := s.auditService.APIKeyCreated(ctx, nil, key.ID.String(), afterPayload, actorKeyID, actorRole, clientIP, correlationID); err != nil {
-		// Log the audit failure but don't fail the operation
-		s.logAuditError(err, "CREATE", key.ID.String(), correlationID)
-	}
-
-	// Return the key (without hash) and the raw key (shown exactly once)
-	key.KeyHash = ""
-	return key, rawKey, nil
-}
-
 // ListByProfile retrieves API keys for a profile.
 // Never returns the key_hash field.
 func (s *APIKeyServiceImpl) ListByProfile(ctx context.Context, profileID uuid.UUID, limit, offset int) ([]*domain.APIKey, error) {
 	return s.repo.ListByProfile(ctx, profileID, limit, offset)
-}
-
-// GetByID retrieves an API key by ID.
-// Never returns the key_hash field.
-func (s *APIKeyServiceImpl) GetByID(ctx context.Context, id uuid.UUID) (*domain.APIKey, error) {
-	key, err := s.repo.GetByID(ctx, id)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get api key: %w", err)
-	}
-	if key == nil {
-		return nil, httperr.New(httperr.NOT_FOUND, fmt.Sprintf("api key with id '%s' not found", id.String()))
-	}
-	return key, nil
-}
-
-// Revoke marks an API key as revoked.
-// Invalidates any active sessions for the key.
-func (s *APIKeyServiceImpl) Revoke(ctx context.Context, id uuid.UUID, actorKeyID *string, actorRole, clientIP, correlationID string) error {
-	// Get the key first for audit and to check if already revoked
-	key, err := s.repo.GetByID(ctx, id)
-	if err != nil {
-		return fmt.Errorf("failed to get api key: %w", err)
-	}
-	if key == nil {
-		return httperr.New(httperr.NOT_FOUND, fmt.Sprintf("api key with id '%s' not found", id.String()))
-	}
-
-	// Check if already revoked
-	if key.RevokedAt != nil {
-		return httperr.New(httperr.CONFLICT, "api key is already revoked")
-	}
-
-	// Build before payload for audit
-	beforePayload := map[string]interface{}{
-		"id":         key.ID.String(),
-		"profile_id": key.ProfileID.String(),
-		"label":      key.Label,
-		"scopes":     key.Scopes,
-		"rate_limit": key.RateLimit,
-		"revoked_at": nil,
-	}
-
-	// Revoke the key
-	if err := s.repo.Revoke(ctx, id); err != nil {
-		return fmt.Errorf("failed to revoke api key: %w", err)
-	}
-
-	// Invalidate sessions (nil-safe)
-	if s.sessionInvalidator != nil {
-		profileIDStr := ""
-		if key.ProfileID != uuid.Nil {
-			profileIDStr = key.ProfileID.String()
-		}
-		if profileIDStr != "" {
-			if err := s.sessionInvalidator.InvalidateKeySessions(ctx, profileIDStr, id.String()); err != nil {
-				// Log but don't fail the operation
-				s.logger.Warn("session_invalidation_failed", slog.String("error", err.Error()), slog.String("key_id", id.String()))
-			}
-		}
-	}
-
-	// Audit the revocation
-	profileIDStr := ""
-	if key.ProfileID != uuid.Nil {
-		profileIDStr = key.ProfileID.String()
-	}
-	var profileIDPtr *string
-	if profileIDStr != "" {
-		profileIDPtr = &profileIDStr
-	}
-	if err := s.auditService.APIKeyRevoked(ctx, profileIDPtr, key.ID.String(), beforePayload, actorKeyID, actorRole, clientIP, correlationID); err != nil {
-		// Log the audit failure but don't fail the operation
-		s.logAuditError(err, "REVOKE", key.ID.String(), correlationID)
-	}
-
-	return nil
 }
 
 // CountByProfile returns the total number of API keys for a profile (used for pagination totals).
@@ -370,47 +237,6 @@ func (s *APIKeyServiceImpl) RevokeForProfile(ctx context.Context, profileID, id 
 	profileIDStr := profileID.String()
 	if err := s.auditService.APIKeyRevoked(ctx, &profileIDStr, key.ID.String(), beforePayload, actorKeyID, actorRole, clientIP, correlationID); err != nil {
 		s.logAuditError(err, "REVOKE", key.ID.String(), correlationID)
-	}
-
-	return nil
-}
-
-// BootstrapAdminKey creates an admin key from an environment variable if:
-// 1. The env key is set and non-empty
-// 2. No admin key exists in the database
-// This is idempotent - calling it twice will not create duplicate admin keys.
-func (s *APIKeyServiceImpl) BootstrapAdminKey(ctx context.Context, rawEnvKey string) error {
-	// Check if env key is set
-	if rawEnvKey == "" {
-		return nil // No env key set, skip bootstrap
-	}
-
-	// Check if admin key already exists (by role, not label)
-	exists, err := s.repo.AdminKeyExists(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to check admin key existence: %w", err)
-	}
-	if exists {
-		return nil // Admin key already exists, skip bootstrap
-	}
-
-	// Hash the env key
-	keyHash, err := crypto.HashKey(rawEnvKey)
-	if err != nil {
-		return fmt.Errorf("failed to hash bootstrap key: %w", err)
-	}
-
-	// Create the admin key
-	key := &domain.APIKey{
-		Label:     "bootstrap-admin",
-		KeyHash:   keyHash,
-		KeyPrefix: crypto.GetKeyPrefix(rawEnvKey),
-		Scopes:    []string{"admin", "read", "write"},
-		RateLimit: 0, // No rate limit for admin
-	}
-
-	if err := s.repo.CreateAdminKey(ctx, key); err != nil {
-		return fmt.Errorf("failed to create bootstrap admin key: %w", err)
 	}
 
 	return nil

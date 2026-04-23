@@ -2,7 +2,6 @@ package middleware
 
 import (
 	"context"
-	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -15,11 +14,11 @@ import (
 )
 
 // RateLimitMiddleware creates a rate limiting middleware using the fixed-window algorithm.
-// It reads the Principal from context to determine the profile and role for tier selection.
-// Admin roles use AdminRateLimitPerMinute. Fragment writes (POST/DELETE) use
-// FragmentCreateRateLimit and fragment reads (GET) use FragmentReadRateLimit —
-// writes are stricter because they trigger an embedding call plus graph write.
-// All other standard profile traffic falls back to RateLimitPerMinute.
+// It reads the Principal from context to determine the caller profile for tier
+// selection. Fragment writes (POST/DELETE) use FragmentCreateRateLimit and
+// fragment reads (GET) use FragmentReadRateLimit — writes are stricter because
+// they trigger an embedding call plus graph write. All other profile traffic
+// falls back to RateLimitPerMinute.
 func RateLimitMiddleware(svc service.RateLimitServiceInterface, cfg config.ConfigProvider, auditSvc service.AuditService) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
@@ -31,21 +30,16 @@ func RateLimitMiddleware(svc service.RateLimitServiceInterface, cfg config.Confi
 				return next(c)
 			}
 
-			// Get profile ID - admin keys have no profile
-			var profileID string
-			if principal.ProfileID != nil {
-				profileID = principal.ProfileID.String()
-			} else {
-				// Admin keys without profile use special identifier
-				profileID = fmt.Sprintf("admin:%s", principal.KeyID.String())
+			if principal.ProfileID == nil {
+				return httperr.New(httperr.FORBIDDEN, "authentication required")
 			}
+			profileID := principal.ProfileID.String()
 
 			// Get route path for stable bucket
 			routePath := c.Path()
 
-			// Select limit tier. Admin overrides everything; otherwise
-			// fragment routes get their write/read tier and everything else
-			// falls back to the standard per-profile tier.
+			// Select limit tier. Fragment routes get their write/read tier and
+			// everything else falls back to the standard per-profile tier.
 			limit := selectRateLimit(cfg, principal.Role, c.Request().Method, routePath)
 
 			// Perform rate limit check
@@ -95,7 +89,7 @@ func logRateLimit(c echo.Context, auditSvc service.AuditService, profileID, rout
 		"route_path": routePath,
 		"limit":      limit,
 		"remaining":  remaining,
-		"reset_at":    resetAt.Unix(),
+		"reset_at":   resetAt.Unix(),
 	}
 
 	// Use a background context with timeout for logging
@@ -111,17 +105,13 @@ func logRateLimit(c echo.Context, auditSvc service.AuditService, profileID, rout
 }
 
 // selectRateLimit resolves the rate-limit tier for a single request.
-// Admin callers always use the admin tier. Standard callers hit:
+// Callers hit:
 //   - fragment write tier for POST/DELETE on /fragments (stricter: triggers embedding + graph write)
 //   - fragment read tier for GET on /fragments
 //   - claim write tier for POST/DELETE on /claims
 //   - claim read tier for GET on /claims
 //   - default standard tier for everything else
 func selectRateLimit(cfg config.ConfigProvider, role, method, routePath string) int {
-	if role == "admin" {
-		return cfg.GetAdminRateLimitPerMinute()
-	}
-
 	if isFragmentRoute(routePath) {
 		switch method {
 		case "POST", "DELETE":

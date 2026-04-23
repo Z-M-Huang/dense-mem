@@ -37,25 +37,24 @@ func buildRemoteRegistry(ctx context.Context, client *mcpclient.Client, profileI
 	}
 
 	localRegistry, err := registry.BuildDefault(registry.Dependencies{
-		FragmentCreate:      mcpclient.NewFragmentCreate(client),
-		FragmentGet:         mcpclient.NewFragmentGet(client),
-		FragmentList:        mcpclient.NewFragmentList(client),
-		Recall:              mcpclient.NewRecall(client),
-		KeywordSearch:       mcpclient.NewKeywordSearch(client),
-		SemanticSearch:      mcpclient.NewSemanticSearch(client),
-		GraphQuery:          mcpclient.NewGraphQuery(client),
-		ClaimCreate:         mcpclient.NewClaimCreate(client),
-		ClaimGet:            mcpclient.NewClaimGet(client),
-		ClaimList:           mcpclient.NewClaimList(client),
-		ClaimVerify:         mcpclient.NewClaimVerify(client),
-		FactPromote:         mcpclient.NewClaimPromote(client),
-		FactGet:             mcpclient.NewFactGet(client),
-		FactList:            mcpclient.NewFactList(client),
-		FragmentRetract:     mcpclient.NewFragmentRetract(client),
-		CommunityDetect:     mcpclient.NewCommunityDetect(client),
-		CommunityGet:        mcpclient.NewCommunityGet(client),
-		CommunityList:       mcpclient.NewCommunityList(client),
-		EmbeddingConfigured: true,
+		FragmentCreate:  mcpclient.NewFragmentCreate(client),
+		FragmentGet:     mcpclient.NewFragmentGet(client),
+		FragmentList:    mcpclient.NewFragmentList(client),
+		Recall:          mcpclient.NewRecall(client),
+		KeywordSearch:   mcpclient.NewKeywordSearch(client),
+		SemanticSearch:  mcpclient.NewSemanticSearch(client),
+		GraphQuery:      mcpclient.NewGraphQuery(client),
+		ClaimCreate:     mcpclient.NewClaimCreate(client),
+		ClaimGet:        mcpclient.NewClaimGet(client),
+		ClaimList:       mcpclient.NewClaimList(client),
+		ClaimVerify:     mcpclient.NewClaimVerify(client),
+		FactPromote:     mcpclient.NewClaimPromote(client),
+		FactGet:         mcpclient.NewFactGet(client),
+		FactList:        mcpclient.NewFactList(client),
+		FragmentRetract: mcpclient.NewFragmentRetract(client),
+		CommunityDetect: mcpclient.NewCommunityDetect(client),
+		CommunityGet:    mcpclient.NewCommunityGet(client),
+		CommunityList:   mcpclient.NewCommunityList(client),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("build local tool adapters: %w", err)
@@ -71,16 +70,13 @@ func buildRemoteRegistry(ctx context.Context, client *mcpclient.Client, profileI
 		remoteByName[tool.Name] = tool
 	}
 	for _, name := range requiredMCPTools {
-		remoteTool, ok := remoteByName[name]
+		_, ok := remoteByName[name]
 		if !ok {
 			return nil, fmt.Errorf("required MCP tool missing from remote catalog: %s", name)
 		}
 		localTool, ok := localByName[name]
 		if !ok || localTool.Invoke == nil {
 			return nil, fmt.Errorf("required MCP tool has no local invoker: %s", name)
-		}
-		if remoteTool.Available && !localTool.Available {
-			return nil, fmt.Errorf("required MCP tool unavailable locally: %s", name)
 		}
 	}
 
@@ -96,7 +92,6 @@ func buildRemoteRegistry(ctx context.Context, client *mcpclient.Client, profileI
 			InputSchema:    remoteTool.InputSchema,
 			OutputSchema:   remoteTool.OutputSchema,
 			RequiredScopes: remoteTool.RequiredScopes,
-			Available:      remoteTool.Available,
 			Invoke:         localTool.Invoke,
 		}); err != nil {
 			return nil, fmt.Errorf("register tool %s: %w", remoteTool.Name, err)

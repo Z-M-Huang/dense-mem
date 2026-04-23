@@ -217,15 +217,12 @@ func (b *memoryBackend) handleTools(w http.ResponseWriter) {
 			InputSchema:    map[string]any{"type": "object", "title": name},
 			OutputSchema:   map[string]any{"type": "object"},
 			RequiredScopes: []string{"read"},
-			Available:      false,
 		}
 		switch name {
 		case "save_memory":
 			entry.RequiredScopes = []string{"write"}
-			entry.Available = true
 		case "get_memory", "list_recent_memories":
 			entry.RequiredScopes = []string{"read"}
-			entry.Available = true
 		}
 		catalog.Tools = append(catalog.Tools, entry)
 	}

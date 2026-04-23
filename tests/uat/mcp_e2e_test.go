@@ -215,10 +215,9 @@ func startWritableMemoryServer(t *testing.T, env *TestEnv) (*httptest.Server, fr
 	fragmentListSvc := fragmentservice.NewListFragmentsService(readerAdapter)
 
 	reg, err := registry.BuildDefault(registry.Dependencies{
-		FragmentCreate:      fragmentCreateSvc,
-		FragmentGet:         fragmentGetSvc,
-		FragmentList:        fragmentListSvc,
-		EmbeddingConfigured: true,
+		FragmentCreate: fragmentCreateSvc,
+		FragmentGet:    fragmentGetSvc,
+		FragmentList:   fragmentListSvc,
 	})
 	require.NoError(t, err)
 
@@ -253,14 +252,14 @@ func createProfileAndKey(t *testing.T, ctx context.Context, env *TestEnv) (strin
 	profile, err := env.profileSvc.Create(ctx, service.CreateProfileRequest{
 		Name:        fmt.Sprintf("uat-mcp-%d", time.Now().UnixNano()),
 		Description: "MCP runtime verification profile",
-	}, nil, "admin", "", "uat-mcp-runtime")
+	}, nil, "operator", "", "uat-mcp-runtime")
 	require.NoError(t, err)
 
 	_, rawKey, err := env.apiKeySvc.CreateStandardKey(ctx, profile.ID, service.CreateAPIKeyRequest{
 		Label:     "uat-mcp-runtime",
 		Scopes:    []string{"read", "write"},
 		RateLimit: 0,
-	}, nil, "admin", "", "uat-mcp-runtime")
+	}, nil, "operator", "", "uat-mcp-runtime")
 	require.NoError(t, err)
 
 	return profile.ID.String(), rawKey

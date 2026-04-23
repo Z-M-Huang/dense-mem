@@ -14,6 +14,8 @@ const (
 	IndexFragmentContent   = "fragment_content_idx"
 	IndexFragmentEmbedding = "fragment_embedding_idx"
 	IndexFactPredicate     = "fact_predicate_idx"
+	IndexFactRecall        = "fact_recall_idx"
+	IndexClaimRecall       = "claim_recall_idx"
 
 	// Composite indexes for fragment deduplication and lookup (Unit 12)
 	IndexFragmentProfileIdempotency = "fragment_profile_idempotency_idx"
@@ -176,6 +178,8 @@ func (s *SchemaBootstrapper) EnsureSchema(ctx context.Context) error {
 		"DROP INDEX sourcefragment_embedding IF EXISTS",
 		"DROP INDEX fact_predicate IF EXISTS",
 		"DROP INDEX fact_predicate_idx IF EXISTS",
+		"DROP INDEX fact_recall_idx IF EXISTS",
+		"DROP INDEX claim_recall_idx IF EXISTS",
 	}
 
 	for _, cypher := range legacyDrops {
@@ -203,6 +207,14 @@ func (s *SchemaBootstrapper) EnsureSchema(ctx context.Context) error {
 		{
 			"CREATE FULLTEXT INDEX fact_predicate_idx IF NOT EXISTS FOR (f:Fact) ON EACH [f.predicate]",
 			"fact_predicate_idx",
+		},
+		{
+			"CREATE FULLTEXT INDEX fact_recall_idx IF NOT EXISTS FOR (f:Fact) ON EACH [f.subject, f.predicate, f.object]",
+			"fact_recall_idx",
+		},
+		{
+			"CREATE FULLTEXT INDEX claim_recall_idx IF NOT EXISTS FOR (c:Claim) ON EACH [c.subject, c.predicate, c.object]",
+			"claim_recall_idx",
 		},
 	}
 

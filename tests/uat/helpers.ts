@@ -8,7 +8,6 @@ import { ChildProcess, spawn } from 'child_process';
 
 export const BASE_URL = process.env.BASE_URL || 'http://localhost:8080';
 export const API_KEY = process.env.API_KEY || 'test-api-key';
-export const ADMIN_KEY = process.env.ADMIN_KEY || 'test-admin-key';
 export const PROFILE_ID = process.env.PROFILE_ID || 'test-profile-id';
 export const DENSE_MEM_URL = process.env.DENSE_MEM_URL || BASE_URL;
 export const DENSE_MEM_API_KEY = process.env.DENSE_MEM_API_KEY || API_KEY;
@@ -28,22 +27,6 @@ export function headers(profileId: string): Record<string, string> {
     'Authorization': `Bearer ${API_KEY}`,
     'X-Profile-ID': profileId,
     'Content-Type': 'application/json',
-  };
-}
-
-/** Admin-level authenticated headers (no profile required). */
-export function adminHeaders(): Record<string, string> {
-  return {
-    'Authorization': `Bearer ${ADMIN_KEY}`,
-    'Content-Type': 'application/json',
-  };
-}
-
-/** Admin headers that also carry a profile ID (profile-scoped admin ops). */
-export function adminProfileHeaders(profileId: string): Record<string, string> {
-  return {
-    ...adminHeaders(),
-    'X-Profile-ID': profileId,
   };
 }
 

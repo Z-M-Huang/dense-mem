@@ -1,12 +1,17 @@
 package handler
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
+	"sort"
 	"strings"
 
 	"github.com/labstack/echo/v4"
 
+	"github.com/dense-mem/dense-mem/internal/embedding"
 	"github.com/dense-mem/dense-mem/internal/http/dto"
 	"github.com/dense-mem/dense-mem/internal/http/middleware"
 	"github.com/dense-mem/dense-mem/internal/httperr"
@@ -62,21 +67,19 @@ func (h *ToolExecuteHandler) Handle(c echo.Context) error {
 	if !principalCanSeeTool(principal, tool) {
 		return httperr.New(httperr.FORBIDDEN, "insufficient scope for tool")
 	}
-	if toolRequiresAdmin(tool.Name) && principal.Role != "admin" {
-		return httperr.New(httperr.FORBIDDEN, "admin access required")
-	}
-	if !tool.Available {
-		return httperr.New(httperr.SERVICE_UNAVAILABLE, "tool unavailable")
-	}
 	if tool.Invoke == nil {
 		return httperr.New(httperr.INTERNAL_ERROR, "tool not executable")
 	}
 
 	args := map[string]any{}
 	if c.Request().ContentLength != 0 {
-		if err := c.Bind(&args); err != nil {
+		decoder := json.NewDecoder(c.Request().Body)
+		if err := decoder.Decode(&args); err != nil && !errors.Is(err, io.EOF) {
 			return httperr.New(httperr.VALIDATION_ERROR, "malformed JSON body")
 		}
+	}
+	if apiErr := validateToolInput(tool, args); apiErr != nil {
+		return apiErr
 	}
 	delete(args, "profile_id")
 
@@ -119,7 +122,7 @@ func (h *ToolReadHandler) Handle(c echo.Context) error {
 
 	principal := middleware.GetPrincipal(c.Request().Context())
 	if principal != nil {
-		if !principalCanSeeTool(principal, tool) || (toolRequiresAdmin(tool.Name) && principal.Role != "admin") {
+		if !principalCanSeeTool(principal, tool) {
 			return httperr.New(httperr.NOT_FOUND, "tool not found")
 		}
 	}
@@ -130,7 +133,6 @@ func (h *ToolReadHandler) Handle(c echo.Context) error {
 		InputSchema:    tool.InputSchema,
 		OutputSchema:   tool.OutputSchema,
 		RequiredScopes: tool.RequiredScopes,
-		Available:      tool.Available,
 	})
 }
 
@@ -151,8 +153,73 @@ func principalCanSeeTool(principal *middleware.Principal, tool registry.Tool) bo
 	return true
 }
 
-func toolRequiresAdmin(name string) bool {
-	return name == "detect_community"
+func validateToolInput(tool registry.Tool, args map[string]any) *httperr.APIError {
+	schema := tool.InputSchema
+	if len(schema) == 0 {
+		return nil
+	}
+
+	for _, name := range schemaRequiredFields(schema) {
+		if _, ok := args[name]; !ok {
+			return httperr.New(httperr.VALIDATION_ERROR, fmt.Sprintf("%s is required", name))
+		}
+	}
+
+	if schemaDisallowsAdditionalProperties(schema) {
+		allowed := schemaProperties(schema)
+		for key := range args {
+			if _, ok := allowed[key]; !ok {
+				return httperr.New(httperr.VALIDATION_ERROR, fmt.Sprintf("unknown field: %s", key))
+			}
+		}
+	}
+
+	return nil
+}
+
+func schemaRequiredFields(schema map[string]any) []string {
+	raw, ok := schema["required"]
+	if !ok {
+		return nil
+	}
+
+	switch v := raw.(type) {
+	case []string:
+		return append([]string(nil), v...)
+	case []any:
+		required := make([]string, 0, len(v))
+		for _, item := range v {
+			if name, ok := item.(string); ok && name != "" {
+				required = append(required, name)
+			}
+		}
+		sort.Strings(required)
+		return required
+	default:
+		return nil
+	}
+}
+
+func schemaDisallowsAdditionalProperties(schema map[string]any) bool {
+	v, ok := schema["additionalProperties"].(bool)
+	return ok && !v
+}
+
+func schemaProperties(schema map[string]any) map[string]struct{} {
+	props := make(map[string]struct{})
+	raw, ok := schema["properties"]
+	if !ok {
+		return props
+	}
+
+	switch v := raw.(type) {
+	case map[string]any:
+		for key := range v {
+			props[key] = struct{}{}
+		}
+	}
+
+	return props
 }
 
 func mapToolExecuteError(err error) *httperr.APIError {
@@ -167,6 +234,14 @@ func mapToolExecuteError(err error) *httperr.APIError {
 		return httperr.New(httperr.ErrFactNotFound, "fact not found")
 	case errors.Is(err, fragmentservice.ErrFragmentNotFound):
 		return httperr.New(httperr.NOT_FOUND, "fragment not found")
+	case errors.Is(err, embedding.ErrEmbeddingTimeout):
+		return httperr.New(httperr.SERVICE_UNAVAILABLE, "embedding request timed out")
+	case errors.Is(err, embedding.ErrEmbeddingProvider):
+		return httperr.New(httperr.SERVICE_UNAVAILABLE, "embedding service unavailable")
+	case errors.Is(err, embedding.ErrEmbeddingRateLimit):
+		return httperr.New(httperr.SERVICE_UNAVAILABLE, "embedding service rate limited")
+	case errors.Is(err, fragmentservice.ErrEmbeddingFailed):
+		return httperr.New(httperr.SERVICE_UNAVAILABLE, "embedding service unavailable")
 	case errors.Is(err, communityservice.ErrCommunityUnavailable):
 		return httperr.New(httperr.SERVICE_UNAVAILABLE, "community detection service unavailable")
 	case errors.Is(err, communityservice.ErrCommunityGraphTooLarge):

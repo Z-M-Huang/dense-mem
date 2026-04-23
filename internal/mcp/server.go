@@ -228,9 +228,6 @@ func (s *Server) handleToolsCall(ctx context.Context, raw json.RawMessage) (map[
 	if !ok {
 		return nil, &rpcError{Code: errCodeMethodNotFound, Message: fmt.Sprintf("tool not found: %s", params.Name)}
 	}
-	if !tool.Available {
-		return nil, &rpcError{Code: errCodeToolFailure, Message: "tool unavailable"}
-	}
 	if tool.Invoke == nil {
 		return nil, &rpcError{Code: errCodeToolFailure, Message: "tool not executable"}
 	}

@@ -63,20 +63,16 @@ type communityDetectAdapter struct {
 var _ communityservice.DetectCommunityService = (*communityDetectAdapter)(nil)
 
 // NewCommunityDetect returns a DetectCommunityService backed by the dense-mem HTTP API.
-// Calls POST /api/v1/admin/profiles/:profileId/community/detect with optional
-// Leiden tuning parameters in the JSON body.
+// Calls POST /api/v1/tools/detect_community with optional Leiden tuning
+// parameters in the JSON body.
 // Returns communityservice.ErrCommunityUnavailable on 503 and
 // communityservice.ErrCommunityGraphTooLarge on 422.
-//
-// Security invariant: profileID is embedded in the URL path for this admin
-// endpoint — the server reads it from the path parameter, not X-Profile-ID.
-// X-Profile-ID is also sent (via newRequest) for defence-in-depth.
 func NewCommunityDetect(c *Client) communityservice.DetectCommunityService {
 	return &communityDetectAdapter{c: c}
 }
 
 func (a *communityDetectAdapter) Detect(ctx context.Context, profileID string, opts communityservice.DetectOptions) error {
-	path := "/api/v1/admin/profiles/" + url.PathEscape(profileID) + "/community/detect"
+	path := "/api/v1/tools/detect_community"
 	var body any
 	if opts != (communityservice.DetectOptions{}) {
 		body = dto.CommunityDetectRequest{

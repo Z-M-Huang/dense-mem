@@ -11,6 +11,8 @@ import (
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+
+	"github.com/dense-mem/dense-mem/internal/storage/postgres"
 )
 
 // AuditLogEntry represents a single audit log entry to be written.
@@ -64,6 +66,7 @@ type AuditService interface {
 type AuditServiceImpl struct {
 	db     *gorm.DB
 	logger *slog.Logger
+	rls    postgres.RLSHelper
 }
 
 // Ensure AuditServiceImpl implements AuditService
@@ -74,12 +77,12 @@ func NewAuditService(db *gorm.DB) *AuditServiceImpl {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
 	}))
-	return &AuditServiceImpl{db: db, logger: logger}
+	return &AuditServiceImpl{db: db, logger: logger, rls: postgres.NewRLS()}
 }
 
 // NewAuditServiceWithLogger creates a new audit service instance with a custom logger.
 func NewAuditServiceWithLogger(db *gorm.DB, logger *slog.Logger) *AuditServiceImpl {
-	return &AuditServiceImpl{db: db, logger: logger}
+	return &AuditServiceImpl{db: db, logger: logger, rls: postgres.NewRLS()}
 }
 
 // sensitiveFields contains the list of fields that must be redacted from audit payloads.
@@ -164,8 +167,8 @@ func (s *AuditServiceImpl) Append(ctx context.Context, entry AuditLogEntry) erro
 		id = uuid.New().String()
 	}
 
-	// Execute the insert
-	err := s.db.WithContext(ctx).Exec(`
+	insertFn := func(tx *gorm.DB) error {
+		return tx.Exec(`
 			INSERT INTO audit_log (
 				id, profile_id, timestamp, operation, entity_type, entity_id,
 				before_payload, after_payload, actor_key_id, actor_role,
@@ -175,21 +178,28 @@ func (s *AuditServiceImpl) Append(ctx context.Context, entry AuditLogEntry) erro
 				$7, $8, $9, $10, $11, $12, $13
 			)
 		`,
-		id,
-		entry.ProfileID,
-		timestamp,
-		entry.Operation,
-		entry.EntityType,
-		entry.EntityID,
-		beforeJSON,
-		afterJSON,
-		entry.ActorKeyID,
-		entry.ActorRole,
-		entry.ClientIP,
-		entry.CorrelationID,
-		metadataJSON,
-	).Error
+			id,
+			entry.ProfileID,
+			timestamp,
+			entry.Operation,
+			entry.EntityType,
+			entry.EntityID,
+			beforeJSON,
+			afterJSON,
+			entry.ActorKeyID,
+			entry.ActorRole,
+			entry.ClientIP,
+			entry.CorrelationID,
+			metadataJSON,
+		).Error
+	}
 
+	var err error
+	if s.rls != nil {
+		err = s.rls.WithSystemTx(ctx, s.db, insertFn)
+	} else {
+		err = insertFn(s.db.WithContext(ctx))
+	}
 	if err != nil {
 		return fmt.Errorf("failed to append audit log entry: %w", err)
 	}
@@ -202,82 +212,99 @@ func (s *AuditServiceImpl) Append(ctx context.Context, entry AuditLogEntry) erro
 // The profileID parameter ensures profile-scoped listing - admin can only see
 // the requested profile's log on this route.
 func (s *AuditServiceImpl) List(ctx context.Context, profileID string, limit, offset int) ([]AuditLogEntry, int, error) {
-	// Query entries for the specific profile
-	rows, err := s.db.WithContext(ctx).Raw(`
-		SELECT id, profile_id, timestamp, operation, entity_type, entity_id,
-		       before_payload, after_payload, actor_key_id, actor_role,
-		       client_ip, correlation_id, metadata
-		FROM audit_log
-		WHERE profile_id = $1
-		ORDER BY timestamp DESC
-		LIMIT $2 OFFSET $3
-	`, profileID, limit, offset).Rows()
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to query audit log: %w", err)
-	}
-	defer rows.Close()
-
 	var entries []AuditLogEntry
-	for rows.Next() {
-		var entry AuditLogEntry
-		var beforePayloadJSON, afterPayloadJSON, metadataJSON []byte
-		var profileIDNullable sql.NullString
-		var actorKeyIDNullable sql.NullString
-
-		err := rows.Scan(
-			&entry.ID,
-			&profileIDNullable,
-			&entry.Timestamp,
-			&entry.Operation,
-			&entry.EntityType,
-			&entry.EntityID,
-			&beforePayloadJSON,
-			&afterPayloadJSON,
-			&actorKeyIDNullable,
-			&entry.ActorRole,
-			&entry.ClientIP,
-			&entry.CorrelationID,
-			&metadataJSON,
-		)
+	queryFn := func(tx *gorm.DB) error {
+		rows, err := tx.Raw(`
+			SELECT id, profile_id, timestamp, operation, entity_type, entity_id,
+			       before_payload, after_payload, actor_key_id, actor_role,
+			       client_ip, correlation_id, metadata
+			FROM audit_log
+			WHERE profile_id = $1
+			ORDER BY timestamp DESC
+			LIMIT $2 OFFSET $3
+		`, profileID, limit, offset).Rows()
 		if err != nil {
-			return nil, 0, fmt.Errorf("failed to scan audit log entry: %w", err)
+			return err
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var entry AuditLogEntry
+			var beforePayloadJSON, afterPayloadJSON, metadataJSON []byte
+			var profileIDNullable sql.NullString
+			var actorKeyIDNullable sql.NullString
+
+			err := rows.Scan(
+				&entry.ID,
+				&profileIDNullable,
+				&entry.Timestamp,
+				&entry.Operation,
+				&entry.EntityType,
+				&entry.EntityID,
+				&beforePayloadJSON,
+				&afterPayloadJSON,
+				&actorKeyIDNullable,
+				&entry.ActorRole,
+				&entry.ClientIP,
+				&entry.CorrelationID,
+				&metadataJSON,
+			)
+			if err != nil {
+				return err
+			}
+
+			// Handle nullable fields
+			if profileIDNullable.Valid {
+				entry.ProfileID = &profileIDNullable.String
+			}
+			if actorKeyIDNullable.Valid {
+				entry.ActorKeyID = &actorKeyIDNullable.String
+			}
+
+			// Parse JSON payloads
+			if len(beforePayloadJSON) > 0 {
+				if err := json.Unmarshal(beforePayloadJSON, &entry.BeforePayload); err != nil {
+					entry.BeforePayload = nil
+				}
+			}
+			if len(afterPayloadJSON) > 0 {
+				if err := json.Unmarshal(afterPayloadJSON, &entry.AfterPayload); err != nil {
+					entry.AfterPayload = nil
+				}
+			}
+			if len(metadataJSON) > 0 {
+				if err := json.Unmarshal(metadataJSON, &entry.Metadata); err != nil {
+					entry.Metadata = nil
+				}
+			}
+
+			entries = append(entries, entry)
 		}
 
-		// Handle nullable fields
-		if profileIDNullable.Valid {
-			entry.ProfileID = &profileIDNullable.String
-		}
-		if actorKeyIDNullable.Valid {
-			entry.ActorKeyID = &actorKeyIDNullable.String
-		}
-
-		// Parse JSON payloads
-		if len(beforePayloadJSON) > 0 {
-			if err := json.Unmarshal(beforePayloadJSON, &entry.BeforePayload); err != nil {
-				entry.BeforePayload = nil
-			}
-		}
-		if len(afterPayloadJSON) > 0 {
-			if err := json.Unmarshal(afterPayloadJSON, &entry.AfterPayload); err != nil {
-				entry.AfterPayload = nil
-			}
-		}
-		if len(metadataJSON) > 0 {
-			if err := json.Unmarshal(metadataJSON, &entry.Metadata); err != nil {
-				entry.Metadata = nil
-			}
-		}
-
-		entries = append(entries, entry)
+		return rows.Err()
 	}
 
-	// Get total count for pagination
 	var total int
-	err = s.db.WithContext(ctx).Raw(`
-		SELECT COUNT(*) FROM audit_log WHERE profile_id = $1
-	`, profileID).Scan(&total).Error
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to count audit log entries: %w", err)
+	if s.rls != nil {
+		if err := s.rls.WithProfileTx(ctx, s.db, profileID, queryFn); err != nil {
+			return nil, 0, fmt.Errorf("failed to query audit log: %w", err)
+		}
+		if err := s.rls.WithProfileTx(ctx, s.db, profileID, func(tx *gorm.DB) error {
+			return tx.Raw(`
+				SELECT COUNT(*) FROM audit_log WHERE profile_id = $1
+			`, profileID).Scan(&total).Error
+		}); err != nil {
+			return nil, 0, fmt.Errorf("failed to count audit log entries: %w", err)
+		}
+	} else {
+		if err := queryFn(s.db.WithContext(ctx)); err != nil {
+			return nil, 0, fmt.Errorf("failed to query audit log: %w", err)
+		}
+		if err := s.db.WithContext(ctx).Raw(`
+			SELECT COUNT(*) FROM audit_log WHERE profile_id = $1
+		`, profileID).Scan(&total).Error; err != nil {
+			return nil, 0, fmt.Errorf("failed to count audit log entries: %w", err)
+		}
 	}
 
 	return entries, total, nil

@@ -28,14 +28,14 @@ func TestRLSPoliciesProfileIsolation(t *testing.T) {
 	profileB := createTestProfile(t, db, "Profile B")
 
 	// Create an API key for profile A
-	apiKeyA := createTestAPIKey(t, db, profileA, "standard")
+	apiKeyA := createTestAPIKey(t, db, profileA)
 
 	// Create an API key for profile B
-	apiKeyB := createTestAPIKey(t, db, profileB, "standard")
+	apiKeyB := createTestAPIKey(t, db, profileB)
 
 	// Verify profile A can only see its own API keys
 	var count int64
-	err := rls.WithProfileTx(ctx, db, profileA.String(), "standard", func(tx *gorm.DB) error {
+	err := rls.WithProfileTx(ctx, db, profileA.String(), func(tx *gorm.DB) error {
 		return tx.Model(&APIKey{}).Count(&count).Error
 	})
 	if err != nil {
@@ -47,7 +47,7 @@ func TestRLSPoliciesProfileIsolation(t *testing.T) {
 
 	// Verify profile A cannot see profile B's API key
 	var foundKey APIKey
-	err = rls.WithProfileTx(ctx, db, profileA.String(), "standard", func(tx *gorm.DB) error {
+	err = rls.WithProfileTx(ctx, db, profileA.String(), func(tx *gorm.DB) error {
 		return tx.First(&foundKey, "id = ?", apiKeyB).Error
 	})
 	if err == nil {
@@ -55,7 +55,7 @@ func TestRLSPoliciesProfileIsolation(t *testing.T) {
 	}
 
 	// Verify profile B can only see its own API keys
-	err = rls.WithProfileTx(ctx, db, profileB.String(), "standard", func(tx *gorm.DB) error {
+	err = rls.WithProfileTx(ctx, db, profileB.String(), func(tx *gorm.DB) error {
 		return tx.Model(&APIKey{}).Count(&count).Error
 	})
 	if err != nil {
@@ -66,7 +66,7 @@ func TestRLSPoliciesProfileIsolation(t *testing.T) {
 	}
 
 	// Verify profile B cannot see profile A's API key
-	err = rls.WithProfileTx(ctx, db, profileB.String(), "standard", func(tx *gorm.DB) error {
+	err = rls.WithProfileTx(ctx, db, profileB.String(), func(tx *gorm.DB) error {
 		return tx.First(&foundKey, "id = ?", apiKeyA).Error
 	})
 	if err == nil {
@@ -74,8 +74,9 @@ func TestRLSPoliciesProfileIsolation(t *testing.T) {
 	}
 }
 
-// TestRLSPoliciesAdminSeesAll verifies admin role can read all rows across profiles
-func TestRLSPoliciesAdminSeesAll(t *testing.T) {
+// TestRLSPoliciesSystemSeesAll verifies internal/system transactions can read
+// all rows across profiles.
+func TestRLSPoliciesSystemSeesAll(t *testing.T) {
 	ctx := context.Background()
 
 	// Create test database connection
@@ -89,34 +90,35 @@ func TestRLSPoliciesAdminSeesAll(t *testing.T) {
 	profileB := createTestProfile(t, db, "Profile B")
 
 	// Create API keys for both profiles
-	createTestAPIKey(t, db, profileA, "standard")
-	createTestAPIKey(t, db, profileB, "standard")
+	createTestAPIKey(t, db, profileA)
+	createTestAPIKey(t, db, profileB)
 
-	// Verify admin can see all API keys
+	// Verify system transactions can see all API keys.
 	var count int64
-	err := rls.WithAdminTx(ctx, db, func(tx *gorm.DB) error {
+	err := rls.WithSystemTx(ctx, db, func(tx *gorm.DB) error {
 		return tx.Model(&APIKey{}).Count(&count).Error
 	})
 	if err != nil {
-		t.Fatalf("failed to query as admin: %v", err)
+		t.Fatalf("failed to query as system transaction: %v", err)
 	}
 	if count != 2 {
-		t.Errorf("admin should see exactly 2 API keys, got %d", count)
+		t.Errorf("system transaction should see exactly 2 API keys, got %d", count)
 	}
 
-	// Verify admin can see all profiles
-	err = rls.WithAdminTx(ctx, db, func(tx *gorm.DB) error {
+	// Verify system transactions can see all profiles.
+	err = rls.WithSystemTx(ctx, db, func(tx *gorm.DB) error {
 		return tx.Model(&Profile{}).Count(&count).Error
 	})
 	if err != nil {
-		t.Fatalf("failed to query profiles as admin: %v", err)
+		t.Fatalf("failed to query profiles as system transaction: %v", err)
 	}
 	if count < 2 {
-		t.Errorf("admin should see at least 2 profiles, got %d", count)
+		t.Errorf("system transaction should see at least 2 profiles, got %d", count)
 	}
 }
 
-// TestRLSPoliciesAuditLogAppendable verifies all roles can insert to audit_log
+// TestRLSPoliciesAuditLogAppendable verifies profile and system transactions
+// can insert audit_log entries.
 func TestRLSPoliciesAuditLogAppendable(t *testing.T) {
 	ctx := context.Background()
 
@@ -131,48 +133,48 @@ func TestRLSPoliciesAuditLogAppendable(t *testing.T) {
 
 	// Verify standard role can insert audit log
 	auditID := uuid.New()
-	err := rls.WithProfileTx(ctx, db, profile.String(), "standard", func(tx *gorm.DB) error {
+	err := rls.WithProfileTx(ctx, db, profile.String(), func(tx *gorm.DB) error {
 		return tx.Create(&AuditLog{
-			ID:          auditID,
-			ProfileID:   &profile,
-			Operation:   "test_operation",
-			EntityType:  "test_entity",
-			EntityID:    "test-123",
-			ActorRole:   "standard",
-			Timestamp:   time.Now(),
+			ID:         auditID,
+			ProfileID:  &profile,
+			Operation:  "test_operation",
+			EntityType: "test_entity",
+			EntityID:   "test-123",
+			ActorRole:  "standard",
+			Timestamp:  time.Now(),
 		}).Error
 	})
 	if err != nil {
 		t.Fatalf("standard role should be able to insert audit log: %v", err)
 	}
 
-	// Verify admin role can insert audit log
+	// Verify system transactions can insert audit log.
 	auditID2 := uuid.New()
-	err = rls.WithAdminTx(ctx, db, func(tx *gorm.DB) error {
+	err = rls.WithSystemTx(ctx, db, func(tx *gorm.DB) error {
 		return tx.Create(&AuditLog{
-			ID:          auditID2,
-			ProfileID:   &profile,
-			Operation:   "admin_test_operation",
-			EntityType:  "test_entity",
-			EntityID:    "test-456",
-			ActorRole:   "admin",
-			Timestamp:   time.Now(),
+			ID:         auditID2,
+			ProfileID:  &profile,
+			Operation:  "system_test_operation",
+			EntityType: "test_entity",
+			EntityID:   "test-456",
+			ActorRole:  "system",
+			Timestamp:  time.Now(),
 		}).Error
 	})
 	if err != nil {
-		t.Fatalf("admin role should be able to insert audit log: %v", err)
+		t.Fatalf("system transaction should be able to insert audit log: %v", err)
 	}
 
-	// Verify admin can read both entries
+	// Verify system transactions can read both entries.
 	var count int64
-	err = rls.WithAdminTx(ctx, db, func(tx *gorm.DB) error {
+	err = rls.WithSystemTx(ctx, db, func(tx *gorm.DB) error {
 		return tx.Model(&AuditLog{}).Count(&count).Error
 	})
 	if err != nil {
 		t.Fatalf("failed to count audit logs: %v", err)
 	}
 	if count < 2 {
-		t.Errorf("admin should see at least 2 audit log entries, got %d", count)
+		t.Errorf("system transaction should see at least 2 audit log entries, got %d", count)
 	}
 }
 
@@ -187,26 +189,25 @@ func TestWithProfileTx(t *testing.T) {
 	rls := NewRLS()
 
 	profileID := uuid.New().String()
-	role := "standard"
 
 	// Execute transaction with profile context
-	err := rls.WithProfileTx(ctx, db, profileID, role, func(tx *gorm.DB) error {
+	err := rls.WithProfileTx(ctx, db, profileID, func(tx *gorm.DB) error {
 		// Verify variables are set inside the transaction
 		var currentProfileID string
-		var currentRole string
+		var currentTxMode string
 
 		if err := tx.Raw("SELECT current_setting('app.current_profile_id', true)").Scan(&currentProfileID).Error; err != nil {
 			return err
 		}
-		if err := tx.Raw("SELECT current_setting('app.role', true)").Scan(&currentRole).Error; err != nil {
+		if err := tx.Raw("SELECT current_setting('app.tx_mode', true)").Scan(&currentTxMode).Error; err != nil {
 			return err
 		}
 
 		if currentProfileID != profileID {
 			t.Errorf("expected profile_id %s, got %s", profileID, currentProfileID)
 		}
-		if currentRole != role {
-			t.Errorf("expected role %s, got %s", role, currentRole)
+		if currentTxMode != "profile" {
+			t.Errorf("expected tx_mode profile, got %s", currentTxMode)
 		}
 
 		return nil
@@ -217,7 +218,7 @@ func TestWithProfileTx(t *testing.T) {
 
 	// Verify variables are NOT set outside the transaction (SET LOCAL scoped correctly)
 	var currentProfileID string
-	var currentRole string
+	var currentTxMode string
 
 	err = db.Raw("SELECT current_setting('app.current_profile_id', true)").Scan(&currentProfileID).Error
 	if err != nil {
@@ -227,17 +228,17 @@ func TestWithProfileTx(t *testing.T) {
 		t.Errorf("profile_id should be empty outside transaction (SET LOCAL worked), got %s", currentProfileID)
 	}
 
-	err = db.Raw("SELECT current_setting('app.role', true)").Scan(&currentRole).Error
+	err = db.Raw("SELECT current_setting('app.tx_mode', true)").Scan(&currentTxMode).Error
 	if err != nil {
-		t.Fatalf("failed to check role outside transaction: %v", err)
+		t.Fatalf("failed to check tx_mode outside transaction: %v", err)
 	}
-	if currentRole != "" {
-		t.Errorf("role should be empty outside transaction (SET LOCAL worked), got %s", currentRole)
+	if currentTxMode != "" {
+		t.Errorf("tx_mode should be empty outside transaction (SET LOCAL worked), got %s", currentTxMode)
 	}
 }
 
-// TestWithAdminTx verifies admin session variables are set correctly
-func TestWithAdminTx(t *testing.T) {
+// TestWithSystemTx verifies system session variables are set correctly.
+func TestWithSystemTx(t *testing.T) {
 	ctx := context.Background()
 
 	// Create test database connection
@@ -246,24 +247,24 @@ func TestWithAdminTx(t *testing.T) {
 
 	rls := NewRLS()
 
-	// Execute transaction with admin context
-	err := rls.WithAdminTx(ctx, db, func(tx *gorm.DB) error {
+	// Execute transaction with system context.
+	err := rls.WithSystemTx(ctx, db, func(tx *gorm.DB) error {
 		// Verify variables are set inside the transaction
 		var currentProfileID string
-		var currentRole string
+		var currentTxMode string
 
 		if err := tx.Raw("SELECT current_setting('app.current_profile_id', true)").Scan(&currentProfileID).Error; err != nil {
 			return err
 		}
-		if err := tx.Raw("SELECT current_setting('app.role', true)").Scan(&currentRole).Error; err != nil {
+		if err := tx.Raw("SELECT current_setting('app.tx_mode', true)").Scan(&currentTxMode).Error; err != nil {
 			return err
 		}
 
 		if currentProfileID != "" {
-			t.Errorf("expected empty profile_id for admin, got %s", currentProfileID)
+			t.Errorf("expected empty profile_id for system transaction, got %s", currentProfileID)
 		}
-		if currentRole != "admin" {
-			t.Errorf("expected role admin, got %s", currentRole)
+		if currentTxMode != "system" {
+			t.Errorf("expected tx_mode system, got %s", currentTxMode)
 		}
 
 		return nil
@@ -273,18 +274,18 @@ func TestWithAdminTx(t *testing.T) {
 	}
 
 	// Verify variables are NOT set outside the transaction
-	var currentRole string
-	err = db.Raw("SELECT current_setting('app.role', true)").Scan(&currentRole).Error
+	var currentTxMode string
+	err = db.Raw("SELECT current_setting('app.tx_mode', true)").Scan(&currentTxMode).Error
 	if err != nil {
-		t.Fatalf("failed to check role outside transaction: %v", err)
+		t.Fatalf("failed to check tx_mode outside transaction: %v", err)
 	}
-	if currentRole != "" {
-		t.Errorf("role should be empty outside transaction (SET LOCAL worked), got %s", currentRole)
+	if currentTxMode != "" {
+		t.Errorf("tx_mode should be empty outside transaction (SET LOCAL worked), got %s", currentTxMode)
 	}
 }
 
 // setupTestDB creates a test database connection, runs all migrations,
-// and returns a cleanup function that truncates fixture tables under admin context.
+// and returns a cleanup function that truncates fixture tables under system context.
 // Skips the test when DATABASE_URL is not set.
 func setupTestDB(t *testing.T) (*gorm.DB, func()) {
 	t.Helper()
@@ -309,16 +310,16 @@ func setupTestDB(t *testing.T) (*gorm.DB, func()) {
 		t.Fatalf("failed to run migrations: %v", err)
 	}
 
-	// Clean slate before test: truncate fixture tables under admin context so FORCE RLS allows the write.
+	// Clean slate before test: truncate fixture tables under system context.
 	rls := NewRLS()
-	if err := rls.WithAdminTx(ctx, db, func(tx *gorm.DB) error {
+	if err := rls.WithSystemTx(ctx, db, func(tx *gorm.DB) error {
 		return tx.Exec("TRUNCATE profiles, api_keys, audit_log CASCADE").Error
 	}); err != nil {
 		t.Fatalf("failed to truncate fixture tables before test: %v", err)
 	}
 
 	cleanup := func() {
-		if err := rls.WithAdminTx(ctx, db, func(tx *gorm.DB) error {
+		if err := rls.WithSystemTx(ctx, db, func(tx *gorm.DB) error {
 			return tx.Exec("TRUNCATE profiles, api_keys, audit_log CASCADE").Error
 		}); err != nil {
 			t.Logf("warning: cleanup truncate failed: %v", err)
@@ -337,14 +338,14 @@ func setupTestDB(t *testing.T) (*gorm.DB, func()) {
 
 // Profile represents the profiles table
 type Profile struct {
-	ID          uuid.UUID `gorm:"type:uuid;primary_key"`
-	Name        string    `gorm:"type:varchar(100);not null"`
-	Description string    `gorm:"type:text;not null;default:''"`
-	Metadata    string    `gorm:"type:jsonb;not null;default:'{}'"`
-	Config      string    `gorm:"type:jsonb;not null;default:'{}'"`
-	Status      string    `gorm:"type:varchar(20);not null;default:'active'"`
-	CreatedAt   time.Time `gorm:"type:timestamptz;not null;default:now()"`
-	UpdatedAt   time.Time `gorm:"type:timestamptz;not null;default:now()"`
+	ID          uuid.UUID  `gorm:"type:uuid;primary_key"`
+	Name        string     `gorm:"type:varchar(100);not null"`
+	Description string     `gorm:"type:text;not null;default:''"`
+	Metadata    string     `gorm:"type:jsonb;not null;default:'{}'"`
+	Config      string     `gorm:"type:jsonb;not null;default:'{}'"`
+	Status      string     `gorm:"type:varchar(20);not null;default:'active'"`
+	CreatedAt   time.Time  `gorm:"type:timestamptz;not null;default:now()"`
+	UpdatedAt   time.Time  `gorm:"type:timestamptz;not null;default:now()"`
 	DeletedAt   *time.Time `gorm:"type:timestamptz"`
 }
 
@@ -354,18 +355,18 @@ func (Profile) TableName() string {
 
 // APIKey represents the api_keys table
 type APIKey struct {
-	ID          uuid.UUID  `gorm:"type:uuid;primary_key"`
-	ProfileID   *uuid.UUID `gorm:"type:uuid"`
-	KeyHash     string     `gorm:"type:text;not null"`
-	KeyPrefix   string     `gorm:"type:varchar(12);not null"`
-	Label       string     `gorm:"type:varchar(100);not null;default:''"`
-	Role        string     `gorm:"type:varchar(20);not null"`
-	Scopes      string     `gorm:"type:text[];not null;default:ARRAY['read']"`
-	ExpiresAt   *time.Time `gorm:"type:timestamptz"`
-	RevokedAt   *time.Time `gorm:"type:timestamptz"`
-	LastUsedAt  *time.Time `gorm:"type:timestamptz"`
-	CreatedAt   time.Time  `gorm:"type:timestamptz;not null;default:now()"`
-	UpdatedAt   time.Time  `gorm:"type:timestamptz;not null;default:now()"`
+	ID         uuid.UUID  `gorm:"type:uuid;primary_key"`
+	ProfileID  uuid.UUID  `gorm:"type:uuid;not null"`
+	KeyHash    string     `gorm:"type:text;not null"`
+	KeyPrefix  string     `gorm:"type:varchar(12);not null"`
+	Label      string     `gorm:"type:varchar(100);not null;default:''"`
+	Scopes     string     `gorm:"type:text[];not null;default:ARRAY['read']"`
+	RateLimit  int        `gorm:"type:integer;not null;default:0"`
+	ExpiresAt  *time.Time `gorm:"type:timestamptz"`
+	RevokedAt  *time.Time `gorm:"type:timestamptz"`
+	LastUsedAt *time.Time `gorm:"type:timestamptz"`
+	CreatedAt  time.Time  `gorm:"type:timestamptz;not null;default:now()"`
+	UpdatedAt  time.Time  `gorm:"type:timestamptz;not null;default:now()"`
 }
 
 func (APIKey) TableName() string {
@@ -393,7 +394,7 @@ func (AuditLog) TableName() string {
 	return "audit_log"
 }
 
-// createTestProfile inserts a profile using admin RLS context so FORCE RLS does not block the write.
+// createTestProfile inserts a profile using profile-scoped RLS context.
 func createTestProfile(t *testing.T, db *gorm.DB, name string) uuid.UUID {
 	t.Helper()
 	id := uuid.New()
@@ -407,7 +408,7 @@ func createTestProfile(t *testing.T, db *gorm.DB, name string) uuid.UUID {
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
 	}
-	err := NewRLS().WithAdminTx(context.Background(), db, func(tx *gorm.DB) error {
+	err := NewRLS().WithProfileTx(context.Background(), db, id.String(), func(tx *gorm.DB) error {
 		return tx.Create(&profile).Error
 	})
 	if err != nil {
@@ -416,22 +417,22 @@ func createTestProfile(t *testing.T, db *gorm.DB, name string) uuid.UUID {
 	return id
 }
 
-// createTestAPIKey inserts an api_key using admin RLS context so FORCE RLS does not block the write.
-func createTestAPIKey(t *testing.T, db *gorm.DB, profileID uuid.UUID, role string) uuid.UUID {
+// createTestAPIKey inserts an api_key using profile-scoped RLS context.
+func createTestAPIKey(t *testing.T, db *gorm.DB, profileID uuid.UUID) uuid.UUID {
 	t.Helper()
 	id := uuid.New()
 	key := APIKey{
 		ID:        id,
-		ProfileID: &profileID,
+		ProfileID: profileID,
 		KeyHash:   "test_hash_" + id.String(),
-		KeyPrefix: "test",
+		KeyPrefix: id.String()[:12],
 		Label:     "Test Key",
-		Role:      role,
 		Scopes:    "{read}",
+		RateLimit: 0,
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
-	err := NewRLS().WithAdminTx(context.Background(), db, func(tx *gorm.DB) error {
+	err := NewRLS().WithProfileTx(context.Background(), db, profileID.String(), func(tx *gorm.DB) error {
 		return tx.Create(&key).Error
 	})
 	if err != nil {

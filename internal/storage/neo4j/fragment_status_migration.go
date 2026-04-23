@@ -11,8 +11,8 @@ import (
 // FragmentStatusMigrationRunner provides batch-safe migration for backfilling
 // status='active' on SourceFragment nodes that have a null status property.
 //
-// ADMIN OPERATION — GLOBAL SCOPE (AC-43):
-// This migration is intentionally an admin-only operation that processes ALL
+// OPERATOR OPERATION — GLOBAL SCOPE (AC-43):
+// This migration is intentionally an operator-level operation that processes ALL
 // SourceFragment nodes across ALL profiles in a single sweep. This design mirrors
 // the existing FragmentMigrationRunner (fragment_migration.go) and is appropriate
 // because:
@@ -21,8 +21,8 @@ import (
 //     exposes, or cross-contaminates profile data.
 //   - After migration, every node retains its original sf.profile_id so that
 //     subsequent scoped queries (WHERE sf.profile_id = $profileId) remain correct.
-//   - Caller (e.g. an admin CLI or startup hook) is responsible for ensuring no
-//     regular profile traffic can observe intermediate migration state.
+//   - Caller (e.g. an operator CLI or startup hook) is responsible for ensuring no
+//     normal profile traffic can observe intermediate migration state.
 //
 // ADDITIVE MIGRATION CONTRACT (AC-43):
 // - This migration is ADDITIVE ONLY.
@@ -34,7 +34,7 @@ import (
 // Per-profile isolation is NOT required here because migrations are not scoped
 // to individual profiles — they are administered globally by operators with
 // elevated access. The profile-isolation rule (.claude/rules/profile-isolation.md)
-// governs data-plane queries; admin migrations are intentionally exempt.
+// governs data-plane queries; operator-run migrations are intentionally exempt.
 type FragmentStatusMigrationRunner interface {
 	// BackfillFragmentStatus sets status='active' on SourceFragment nodes where
 	// status is null. It processes in batches of batchSize to avoid a single

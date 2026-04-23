@@ -57,7 +57,7 @@ type AuditLogResponse struct {
 }
 
 // Get handles GET /api/v1/profiles/:profileId/audit-log.
-// Requires admin role or same-profile principal.
+// Requires a same-profile principal.
 // Returns 200 with paginated audit log entries for the requested profile only.
 // No update/delete endpoints are provided - audit log is append-only.
 func (h *AuditHandler) Get(c echo.Context) error {
@@ -83,14 +83,10 @@ func (h *AuditHandler) Get(c echo.Context) error {
 		return httperr.New(httperr.INVALID_UUID, "invalid profile ID format")
 	}
 
-	// Permission check: admin or same-profile principal
+	// Permission check: same-profile principal only.
 	if principal != nil {
-		// Admin can access any profile's audit log on this route
-		if principal.Role != "admin" {
-			// Standard principal must have same profile ID
-			if principal.ProfileID == nil || *principal.ProfileID != profileID {
-				return httperr.New(httperr.FORBIDDEN, "access denied to this profile's audit log")
-			}
+		if principal.ProfileID == nil || *principal.ProfileID != profileID {
+			return httperr.New(httperr.FORBIDDEN, "access denied to this profile's audit log")
 		}
 	}
 

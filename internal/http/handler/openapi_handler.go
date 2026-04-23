@@ -11,9 +11,8 @@ import (
 // OpenAPIHandler serves the generated OpenAPI document for a given variant.
 //
 // The handler does NOT decide authorization — the router binds the AI-safe
-// variant to the normal protected chain and the full variant to the admin
-// chain, so whoever reaches this handler is already authorized for the
-// requested variant.
+// variant and full runtime variant to protected routes, so whoever reaches
+// this handler is already authorized for the requested variant.
 type OpenAPIHandler struct {
 	gen     openapi.Generator
 	variant openapi.SpecVariant

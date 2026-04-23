@@ -25,7 +25,7 @@ import (
 // AC trace: AC-11, AC-12, AC-13, AC-14, AC-15, AC-16, AC-47, AC-54.
 func TestUAT5_EmbeddingProviderStartup(t *testing.T) {
 	// Config contract must expose the four AI_* getters used by the bootstrap
-	// and the IsEmbeddingConfigured gate that the tool registry reads.
+	// and the IsEmbeddingConfigured helper used during server setup.
 	cfg := readFile(t, "internal/config/config.go")
 	for _, sym := range []string{
 		"GetAIAPIURL", "GetAIAPIKey",
@@ -192,9 +192,8 @@ func TestUAT10_ToolCatalogAndOpenAPI(t *testing.T) {
 		"OpenAPI generator must read from the shared registry, not redefine schemas")
 
 	// In-process contract check: BuildDefault advertises every canonical tool
-	// even with zero service wiring — the availability flag gates execution,
-	// not advertisement, so discovery never silently drops entries. Phase 8
-	// (knowledge pipeline) added 9 new tools on top of the original 7.
+	// even with zero service wiring, so discovery never silently drops entries.
+	// Phase 8 (knowledge pipeline) added 9 new tools on top of the original 7.
 	reg, err := registry.BuildDefault(registry.Dependencies{})
 	require.NoError(t, err)
 	list := reg.List()
@@ -217,12 +216,10 @@ func TestUAT10_ToolCatalogAndOpenAPI(t *testing.T) {
 	}
 	assert.GreaterOrEqual(t, len(list), 7, "BuildDefault must register at least the original 7 canonical tools")
 
-	// save_memory is write-scoped; without FragmentCreate + embedding, it is
-	// advertised but marked unavailable (AC-32).
+	// save_memory stays part of the stable catalog even when the write service is
+	// not wired in this test harness.
 	save, ok := reg.Get("save_memory")
 	require.True(t, ok)
-	assert.False(t, save.Available,
-		"save_memory must be unavailable when FragmentCreate/embedding are absent")
 	assert.Contains(t, save.RequiredScopes, "write",
 		"save_memory must require the write scope")
 }

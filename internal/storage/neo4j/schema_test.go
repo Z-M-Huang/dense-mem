@@ -423,6 +423,8 @@ func TestEnsureSchema_CreatesFullTextIndexes(t *testing.T) {
 		_, _ = tx.Run(ctx, "DROP INDEX fragment_content_idx IF EXISTS", nil)
 		_, _ = tx.Run(ctx, "DROP INDEX fact_predicate IF EXISTS", nil)
 		_, _ = tx.Run(ctx, "DROP INDEX fact_predicate_idx IF EXISTS", nil)
+		_, _ = tx.Run(ctx, "DROP INDEX fact_recall_idx IF EXISTS", nil)
+		_, _ = tx.Run(ctx, "DROP INDEX claim_recall_idx IF EXISTS", nil)
 		return nil, nil
 	})
 
@@ -438,6 +440,8 @@ func TestEnsureSchema_CreatesFullTextIndexes(t *testing.T) {
 	ftIndexes := []string{
 		"fragment_content_idx",
 		"fact_predicate_idx",
+		"fact_recall_idx",
+		"claim_recall_idx",
 	}
 
 	for _, indexName := range ftIndexes {

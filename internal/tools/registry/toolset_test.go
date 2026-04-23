@@ -74,36 +74,10 @@ func TestBuildDefault_SchemaFieldsPopulated(t *testing.T) {
 	}
 }
 
-func TestBuildDefault_AvailabilityReflectsDeps(t *testing.T) {
-	// No deps → save_memory and recall_memory are Available=false.
-	reg, _ := BuildDefault(Dependencies{})
-	for _, name := range []string{"save_memory", "recall_memory"} {
-		tool, _ := reg.Get(name)
-		if tool.Available {
-			t.Errorf("%s Available = true; want false when deps missing", name)
-		}
-	}
-	// With FragmentCreate + embedding configured, save_memory becomes available.
-	reg2, _ := BuildDefault(Dependencies{
-		FragmentCreate:      &stubCreate{},
-		EmbeddingConfigured: true,
-	})
-	save, _ := reg2.Get("save_memory")
-	if !save.Available {
-		t.Error("save_memory Available = false; want true when deps present")
-	}
-	// Recall stays unavailable without a recall service.
-	recall, _ := reg2.Get("recall_memory")
-	if recall.Available {
-		t.Error("recall_memory Available = true; want false when deps.Recall is nil")
-	}
-}
-
 func TestBuildDefault_SaveInvokerCallsService(t *testing.T) {
 	create := &stubCreate{}
 	reg, _ := BuildDefault(Dependencies{
-		FragmentCreate:      create,
-		EmbeddingConfigured: true,
+		FragmentCreate: create,
 	})
 	tool, _ := reg.Get("save_memory")
 	out, err := tool.Invoke(context.Background(), "pA", map[string]any{"content": "hello"})
@@ -164,19 +138,12 @@ func TestBuildDefault_ListInvokerWraps(t *testing.T) {
 	}
 }
 
-func TestBuildDefault_RecallAvailableOnlyWithBothDepsAndEmbedding(t *testing.T) {
+func TestBuildDefault_RecallInvokerCallsServiceWhenWired(t *testing.T) {
 	rec := stubRecall{}
-	// Recall service present but embedding not configured → still unavailable.
 	reg, _ := BuildDefault(Dependencies{Recall: rec})
 	tool, _ := reg.Get("recall_memory")
-	if tool.Available {
-		t.Error("recall_memory Available = true; want false when embedding not configured")
-	}
-	// Both → available.
-	reg2, _ := BuildDefault(Dependencies{Recall: rec, EmbeddingConfigured: true})
-	tool2, _ := reg2.Get("recall_memory")
-	if !tool2.Available {
-		t.Error("recall_memory Available = false; want true when deps + embedding present")
+	if _, err := tool.Invoke(context.Background(), "pA", map[string]any{"query": "hello"}); err != nil {
+		t.Fatalf("Invoke: %v", err)
 	}
 }
 
@@ -291,44 +258,28 @@ func TestBuildDefaultIncludesKnowledgeTools(t *testing.T) {
 	}
 }
 
-// TestBuildDefaultKnowledgeTools_AvailabilityReflectsDeps verifies that each
-// knowledge tool's Available flag mirrors whether its dependency is wired.
-func TestBuildDefaultKnowledgeTools_AvailabilityReflectsDeps(t *testing.T) {
-	// No deps → all knowledge tools unavailable.
+func TestBuildDefaultKnowledgeTools_ReturnUnavailableWhenDepsMissing(t *testing.T) {
 	reg, _ := BuildDefault(Dependencies{})
-	for _, name := range []string{
-		"post_claim", "get_claim", "list_claims", "verify_claim",
-		"promote_claim", "get_fact", "list_facts",
-		"retract_fragment", "detect_community", "get_community_summary", "list_communities",
-	} {
-		tool, _ := reg.Get(name)
-		if tool.Available {
-			t.Errorf("%s Available = true; want false when deps missing", name)
-		}
+	cases := []struct {
+		name  string
+		input map[string]any
+	}{
+		{"post_claim", map[string]any{"supported_by": []any{"fragment-1"}}},
+		{"get_claim", map[string]any{"id": "claim-1"}},
+		{"list_claims", map[string]any{}},
+		{"verify_claim", map[string]any{"id": "claim-1"}},
+		{"promote_claim", map[string]any{"claim_id": "claim-1"}},
+		{"get_fact", map[string]any{"id": "fact-1"}},
+		{"list_facts", map[string]any{}},
+		{"retract_fragment", map[string]any{"id": "fragment-1"}},
+		{"detect_community", map[string]any{}},
+		{"get_community_summary", map[string]any{"community_id": "community-1"}},
+		{"list_communities", map[string]any{}},
 	}
-
-	// Wire all deps → all knowledge tools available.
-	reg2, _ := BuildDefault(Dependencies{
-		ClaimCreate:     &stubClaimCreate{},
-		ClaimGet:        stubClaimGet{},
-		ClaimList:       stubClaimList{},
-		ClaimVerify:     stubClaimVerify{},
-		FactPromote:     stubFactPromote{},
-		FactGet:         stubFactGet{},
-		FactList:        stubFactList{},
-		FragmentRetract: &stubFragmentRetract{},
-		CommunityDetect: &stubCommunityDetect{},
-		CommunityGet:    stubCommunityGet{},
-		CommunityList:   &stubCommunityList{},
-	})
-	for _, name := range []string{
-		"post_claim", "get_claim", "list_claims", "verify_claim",
-		"promote_claim", "get_fact", "list_facts",
-		"retract_fragment", "detect_community", "get_community_summary", "list_communities",
-	} {
-		tool, _ := reg2.Get(name)
-		if !tool.Available {
-			t.Errorf("%s Available = false; want true when dep wired", name)
+	for _, tc := range cases {
+		tool, _ := reg.Get(tc.name)
+		if _, err := tool.Invoke(context.Background(), "profileA", tc.input); !errors.Is(err, ErrToolUnavailable) {
+			t.Errorf("%s err = %v; want ErrToolUnavailable", tc.name, err)
 		}
 	}
 }

@@ -17,25 +17,19 @@ import (
 // Consumers and tests depend on this abstraction rather than the concrete struct.
 type APIKeyRepository interface {
 	CreateStandardKey(ctx context.Context, key *domain.APIKey) error
-	CreateAdminKey(ctx context.Context, key *domain.APIKey) error
 	ListByProfile(ctx context.Context, profileID uuid.UUID, limit, offset int) ([]*domain.APIKey, error)
 	CountByProfile(ctx context.Context, profileID uuid.UUID) (int64, error)
-	// GetByID returns an API key by id without a profile scope — use ONLY for admin paths.
-	GetByID(ctx context.Context, id uuid.UUID) (*domain.APIKey, error)
 	// GetByIDForProfile returns an API key only when it belongs to profileID. Returns nil on mismatch.
 	GetByIDForProfile(ctx context.Context, profileID, id uuid.UUID) (*domain.APIKey, error)
 	GetActiveByPrefix(ctx context.Context, prefix string) (*domain.APIKey, error)
-	// Revoke marks a key revoked without profile scope — use ONLY for admin paths.
-	Revoke(ctx context.Context, id uuid.UUID) error
 	// RevokeForProfile marks a key revoked only when it belongs to profileID. Returns number of rows affected.
 	RevokeForProfile(ctx context.Context, profileID, id uuid.UUID) (int64, error)
 	TouchLastUsed(ctx context.Context, id uuid.UUID) error
-	AdminKeyExists(ctx context.Context) (bool, error)
 }
 
 // APIKeyRepositoryImpl implements the APIKeyRepository interface.
 // Every query runs inside an RLS-aware transaction so Postgres FORCE RLS
-// policies (app.current_profile_id / app.role) enforce tenant isolation
+// policies (app.current_profile_id / app.tx_mode) enforce tenant isolation
 // even if a caller ever reaches the repository without the service layer.
 type APIKeyRepositoryImpl struct {
 	db  *gorm.DB
@@ -74,51 +68,15 @@ func (r *APIKeyRepositoryImpl) CreateStandardKey(ctx context.Context, key *domai
 	// Scopes must be wrapped in pq.Array — the pgx driver (via gorm.io/driver/postgres)
 	// does not encode a naked []string as Postgres text[]; it writes NULL and the
 	// authorization layer later sees an empty scope set.
-	err := r.rls.WithProfileTx(ctx, r.db, key.ProfileID.String(), "standard", func(tx *gorm.DB) error {
+	err := r.rls.WithProfileTx(ctx, r.db, key.ProfileID.String(), func(tx *gorm.DB) error {
 		return tx.Exec(`
-			INSERT INTO api_keys (id, profile_id, key_hash, key_prefix, label, role, scopes, rate_limit, expires_at, revoked_at, last_used_at, created_at, updated_at)
-			VALUES ($1, $2, $3, $4, $5, 'standard', $6, $7, $8, NULL, NULL, $9, $9)
+			INSERT INTO api_keys (id, profile_id, key_hash, key_prefix, label, scopes, rate_limit, expires_at, revoked_at, last_used_at, created_at, updated_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULL, NULL, $9, $9)
 		`, key.ID, key.ProfileID, key.KeyHash, keyPrefix, key.Label, pq.Array(key.Scopes), key.RateLimit, key.ExpiresAt, now).Error
 	})
 
 	if err != nil {
 		return fmt.Errorf("failed to create standard api key: %w", err)
-	}
-
-	return nil
-}
-
-// CreateAdminKey creates a new admin API key (no profile association).
-func (r *APIKeyRepositoryImpl) CreateAdminKey(ctx context.Context, key *domain.APIKey) error {
-	if key.ID == uuid.Nil {
-		key.ID = uuid.New()
-	}
-
-	now := time.Now().UTC()
-	key.CreatedAt = now
-
-	// Admin keys must NOT have a profile_id
-	// Use the KeyPrefix field from the domain object (derived from raw key)
-	keyPrefix := key.KeyPrefix
-	if keyPrefix == "" {
-		// Fallback: derive from hash (incorrect but legacy support)
-		keyPrefix = GetKeyPrefixFromHash(key.KeyHash)
-	}
-
-	// Admin key creation has profile_id=NULL; we run under admin RLS context
-	// because this is bootstrap/operator territory. No RLS policy explicitly
-	// allows INSERT with NULL profile_id — admin bootstrap therefore requires
-	// a DB role with BYPASSRLS or a policy extension. The wiring here makes
-	// the intent explicit; any enforcement gap is a schema concern, not code.
-	err := r.rls.WithAdminTx(ctx, r.db, func(tx *gorm.DB) error {
-		return tx.Exec(`
-			INSERT INTO api_keys (id, profile_id, key_hash, key_prefix, label, role, scopes, rate_limit, expires_at, revoked_at, last_used_at, created_at, updated_at)
-			VALUES ($1, NULL, $2, $3, $4, 'admin', $5, $6, $7, NULL, NULL, $8, $8)
-		`, key.ID, key.KeyHash, keyPrefix, key.Label, pq.Array(key.Scopes), key.RateLimit, key.ExpiresAt, now).Error
-	})
-
-	if err != nil {
-		return fmt.Errorf("failed to create admin api key: %w", err)
 	}
 
 	return nil
@@ -150,7 +108,7 @@ func (r *APIKeyRepositoryImpl) ListByProfile(ctx context.Context, profileID uuid
 	}
 
 	keys := make([]*domain.APIKey, 0)
-	err := r.rls.WithProfileTx(ctx, r.db, profileID.String(), "standard", func(tx *gorm.DB) error {
+	err := r.rls.WithProfileTx(ctx, r.db, profileID.String(), func(tx *gorm.DB) error {
 		rows, rerr := tx.Raw(`
 			SELECT id, profile_id, label, scopes, rate_limit, last_used_at, expires_at, created_at, revoked_at
 			FROM api_keys
@@ -189,55 +147,6 @@ func (r *APIKeyRepositoryImpl) ListByProfile(ctx context.Context, profileID uuid
 	return keys, nil
 }
 
-// GetByID retrieves an API key by ID.
-// Excludes the key_hash field from results.
-//
-// Uses *sql.Rows + pq.Array() — see GetActiveByPrefix for the rationale.
-func (r *APIKeyRepositoryImpl) GetByID(ctx context.Context, id uuid.UUID) (*domain.APIKey, error) {
-	var key domain.APIKey
-	var profileID *uuid.UUID
-	found := false
-
-	err := r.rls.WithAdminTx(ctx, r.db, func(tx *gorm.DB) error {
-		rows, rerr := tx.Raw(`
-			SELECT id, profile_id, label, scopes, rate_limit, last_used_at, expires_at, created_at, revoked_at
-			FROM api_keys
-			WHERE id = $1
-		`, id).Rows()
-		if rerr != nil {
-			return rerr
-		}
-		defer rows.Close()
-
-		if rows.Next() {
-			found = true
-			return rows.Scan(
-				&key.ID,
-				&profileID,
-				&key.Label,
-				pq.Array(&key.Scopes),
-				&key.RateLimit,
-				&key.LastUsedAt,
-				&key.ExpiresAt,
-				&key.CreatedAt,
-				&key.RevokedAt,
-			)
-		}
-		return rows.Err()
-	})
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to get api key: %w", err)
-	}
-	if !found {
-		return nil, nil
-	}
-	if profileID != nil {
-		key.ProfileID = *profileID
-	}
-	return &key, nil
-}
-
 // GetActiveByPrefix retrieves an active (non-revoked, non-expired) API key by its prefix.
 // This is used during authentication to look up the key hash for verification.
 // Includes the key_hash field for verification purposes.
@@ -251,7 +160,7 @@ func (r *APIKeyRepositoryImpl) GetActiveByPrefix(ctx context.Context, prefix str
 	var profileID *uuid.UUID
 	found := false
 
-	err := r.rls.WithAdminTx(ctx, r.db, func(tx *gorm.DB) error {
+	err := r.rls.WithSystemTx(ctx, r.db, func(tx *gorm.DB) error {
 		rows, rerr := tx.Raw(`
 			SELECT id, profile_id, key_hash, label, scopes, rate_limit, last_used_at, expires_at, created_at, revoked_at
 			FROM api_keys
@@ -294,28 +203,6 @@ func (r *APIKeyRepositoryImpl) GetActiveByPrefix(ctx context.Context, prefix str
 	return &key, nil
 }
 
-// Revoke marks an API key as revoked WITHOUT profile scope — reserved for admin paths.
-// Standard-role callers MUST use RevokeForProfile to prevent cross-profile revocation.
-func (r *APIKeyRepositoryImpl) Revoke(ctx context.Context, id uuid.UUID) error {
-	now := time.Now().UTC()
-
-	// Unscoped admin-only revoke; runs in admin RLS context. Standard callers
-	// must use RevokeForProfile instead (enforced at the service layer).
-	err := r.rls.WithAdminTx(ctx, r.db, func(tx *gorm.DB) error {
-		return tx.Exec(`
-			UPDATE api_keys
-			SET revoked_at = $1, updated_at = $1
-			WHERE id = $2 AND revoked_at IS NULL
-		`, now, id).Error
-	})
-
-	if err != nil {
-		return fmt.Errorf("failed to revoke api key: %w", err)
-	}
-
-	return nil
-}
-
 // RevokeForProfile marks an API key as revoked only when it belongs to profileID.
 // Returns the number of rows affected (0 means the id/profile combination did not match).
 func (r *APIKeyRepositoryImpl) RevokeForProfile(ctx context.Context, profileID, id uuid.UUID) (int64, error) {
@@ -323,7 +210,7 @@ func (r *APIKeyRepositoryImpl) RevokeForProfile(ctx context.Context, profileID, 
 
 	// Profile-scoped revoke; UPDATE must satisfy api_keys_self_access.
 	var rowsAffected int64
-	err := r.rls.WithProfileTx(ctx, r.db, profileID.String(), "standard", func(tx *gorm.DB) error {
+	err := r.rls.WithProfileTx(ctx, r.db, profileID.String(), func(tx *gorm.DB) error {
 		res := tx.Exec(`
 			UPDATE api_keys
 			SET revoked_at = $1, updated_at = $1
@@ -353,7 +240,7 @@ func (r *APIKeyRepositoryImpl) GetByIDForProfile(ctx context.Context, profileID,
 	var rowProfileID *uuid.UUID
 	found := false
 
-	err := r.rls.WithProfileTx(ctx, r.db, profileID.String(), "standard", func(tx *gorm.DB) error {
+	err := r.rls.WithProfileTx(ctx, r.db, profileID.String(), func(tx *gorm.DB) error {
 		rows, rerr := tx.Raw(`
 			SELECT id, profile_id, label, scopes, rate_limit, last_used_at, expires_at, created_at, revoked_at
 			FROM api_keys
@@ -397,7 +284,7 @@ func (r *APIKeyRepositoryImpl) GetByIDForProfile(ctx context.Context, profileID,
 // Used to populate pagination totals without a second full-result scan.
 func (r *APIKeyRepositoryImpl) CountByProfile(ctx context.Context, profileID uuid.UUID) (int64, error) {
 	var count int64
-	err := r.rls.WithProfileTx(ctx, r.db, profileID.String(), "standard", func(tx *gorm.DB) error {
+	err := r.rls.WithProfileTx(ctx, r.db, profileID.String(), func(tx *gorm.DB) error {
 		return tx.Raw(`
 			SELECT COUNT(*) FROM api_keys WHERE profile_id = $1
 		`, profileID).Scan(&count).Error
@@ -413,10 +300,9 @@ func (r *APIKeyRepositoryImpl) CountByProfile(ctx context.Context, profileID uui
 func (r *APIKeyRepositoryImpl) TouchLastUsed(ctx context.Context, id uuid.UUID) error {
 	now := time.Now().UTC()
 
-	// Auth-path update: callers don't have profile context (admin keys have
-	// profile_id=NULL and standard keys were just authenticated). Admin RLS
-	// context keeps auth hot-path writes consistent across both key roles.
-	err := r.rls.WithAdminTx(ctx, r.db, func(tx *gorm.DB) error {
+	// Auth-path update: callers only know the key ID from bearer authentication,
+	// so this write runs without a profile-scoped transaction.
+	err := r.rls.WithSystemTx(ctx, r.db, func(tx *gorm.DB) error {
 		return tx.Exec(`
 			UPDATE api_keys
 			SET last_used_at = $1
@@ -429,26 +315,4 @@ func (r *APIKeyRepositoryImpl) TouchLastUsed(ctx context.Context, id uuid.UUID) 
 	}
 
 	return nil
-}
-
-// AdminKeyExists checks if any admin key exists in the database.
-// This is used to ensure idempotent bootstrap admin key creation.
-func (r *APIKeyRepositoryImpl) AdminKeyExists(ctx context.Context) (bool, error) {
-	var count int64
-
-	// Bootstrap check: counts admin keys across the table; requires admin RLS
-	// context to see rows with profile_id=NULL.
-	err := r.rls.WithAdminTx(ctx, r.db, func(tx *gorm.DB) error {
-		return tx.Raw(`
-			SELECT COUNT(*)
-			FROM api_keys
-			WHERE role = 'admin'
-		`).Scan(&count).Error
-	})
-
-	if err != nil {
-		return false, fmt.Errorf("failed to check admin key existence: %w", err)
-	}
-
-	return count > 0, nil
 }

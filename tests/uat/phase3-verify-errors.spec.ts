@@ -13,7 +13,7 @@
  */
 
 import { test, expect } from '@playwright/test';
-import { headers, adminHeaders, seedFragmentForProfile, BASE_URL } from './helpers';
+import { headers, seedFragmentForProfile, BASE_URL } from './helpers';
 
 const profileId = process.env.PROFILE_ID || 'uat-profile-phase3-errors';
 

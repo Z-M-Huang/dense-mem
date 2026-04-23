@@ -14,14 +14,17 @@ Returns a ranked list of knowledge hits spanning all pipeline tiers.
 
 | Parameter | Type | Required | Constraints | Description |
 |-----------|------|----------|-------------|-------------|
-| `q` | string | yes | max 512 chars | Natural-language query |
+| `query` | string | yes | max 512 chars | Natural-language query |
 | `limit` | int | no | 0–50; default 10 | Maximum hits to return |
+| `valid_at` | RFC3339 timestamp | no | optional | Filters fact/claim tiers to the valid-time view |
+| `known_at` | RFC3339 timestamp | no | optional | Filters fact/claim tiers to the known-time view |
+| `include_evidence` | bool | no | optional | Includes fact/claim evidence payloads when `true` |
 
 **Success response — 200**
 
 ```json
 {
-  "items": [
+  "data": [
     {
       "tier": "1",
       "score": 0.92,
@@ -68,7 +71,7 @@ Returns a ranked list of knowledge hits spanning all pipeline tiers.
 | Code | Body | Trigger |
 |------|------|---------|
 | 400 | `{"error": "profile ID is required"}` | Missing or unresolvable `X-Profile-ID` header |
-| 422 | `{"error": "validation failed: q is required"}` | Missing or invalid `q` |
+| 400 | `{"error": "query is required"}` | Missing or invalid `query` |
 | 503 | `{"error": "embedding provider unavailable"}` | AI embedding service down |
 | 503 | `{"error": "keyword search unavailable"}` | BM25 index unavailable |
 
@@ -114,9 +117,9 @@ Returns a ranked list of knowledge hits spanning all pipeline tiers.
 3. **Pagination**: The `limit` parameter caps total hits. For paginated UIs, use
    cursor-based listing on `/api/v1/facts` and `/api/v1/claims` instead of recall.
 
-4. **Score display**: `score` ranges [0, 1] for tier-1 (truth_score) and approximately
-   [0, 0.5] for tier-1.5 (extract_conf × 0.5). Tier-2 scores are RRF values and are
-   not directly comparable — present them as relative rankings, not percentages.
+4. **Score display**: Tier `1` and `1.5` hits are query-matched first and then ordered by
+   their authority-oriented tier scores. Tier `2` scores are RRF values. Present all scores
+   as relative ranking hints, not calibrated probabilities.
 
 5. **Cross-profile isolation**: The `X-Profile-ID` header MUST match the authenticated
    API key's profile. Any attempt to query another profile's data returns 403.

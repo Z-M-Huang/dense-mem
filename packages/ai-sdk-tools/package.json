@@ -1,0 +1,53 @@
+{
+  "name": "@dense-mem/ai-sdk-tools",
+  "version": "0.1.0",
+  "description": "Vercel AI SDK tools for dense-mem over the HTTP tool surface.",
+  "type": "module",
+  "main": "./index.js",
+  "types": "./index.d.ts",
+  "scripts": {
+    "check": "node --check index.js",
+    "pack:dry-run": "npm pack --dry-run",
+    "prepublishOnly": "npm run check && npm run pack:dry-run"
+  },
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "default": "./index.js"
+    }
+  },
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "README.md",
+    "LICENSE"
+  ],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=22"
+  },
+  "peerDependencies": {
+    "ai": ">=6.0.0"
+  },
+  "keywords": [
+    "ai-sdk",
+    "dense-mem",
+    "memory",
+    "llm",
+    "tools",
+    "vercel"
+  ],
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Z-M-Huang/dense-mem.git",
+    "directory": "packages/ai-sdk-tools"
+  },
+  "bugs": {
+    "url": "https://github.com/Z-M-Huang/dense-mem/issues"
+  },
+  "homepage": "https://github.com/Z-M-Huang/dense-mem/tree/main/packages/ai-sdk-tools#readme",
+  "publishConfig": {
+    "access": "public"
+  }
+}

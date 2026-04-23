@@ -12,7 +12,6 @@
 import { test, expect } from '@playwright/test';
 import {
   headers,
-  adminHeaders,
   seedFragmentForProfile,
   BASE_URL,
 } from './helpers';

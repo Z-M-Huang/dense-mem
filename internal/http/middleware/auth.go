@@ -18,11 +18,11 @@ import (
 
 // Principal represents the authenticated principal stored in context.
 type Principal struct {
-	KeyID      uuid.UUID
-	ProfileID  *uuid.UUID
-	Role       string
-	Scopes     []string
-	KeyPrefix  string
+	KeyID     uuid.UUID
+	ProfileID *uuid.UUID
+	Role      string
+	Scopes    []string
+	KeyPrefix string
 }
 
 // PrincipalInterface is the companion interface for Principal.
@@ -39,11 +39,11 @@ type PrincipalInterface interface {
 var _ PrincipalInterface = (*Principal)(nil)
 
 // Getters for PrincipalInterface
-func (p *Principal) GetKeyID() uuid.UUID   { return p.KeyID }
+func (p *Principal) GetKeyID() uuid.UUID      { return p.KeyID }
 func (p *Principal) GetProfileID() *uuid.UUID { return p.ProfileID }
-func (p *Principal) GetRole() string         { return p.Role }
-func (p *Principal) GetScopes() []string     { return p.Scopes }
-func (p *Principal) GetKeyPrefix() string    { return p.KeyPrefix }
+func (p *Principal) GetRole() string          { return p.Role }
+func (p *Principal) GetScopes() []string      { return p.Scopes }
+func (p *Principal) GetKeyPrefix() string     { return p.KeyPrefix }
 
 // principalContextKey is the unexported context key type for storing principals.
 // Using an unexported type prevents downstream code from constructing fake principals.
@@ -117,21 +117,17 @@ func AuthMiddleware(repo repository.APIKeyRepository, auditSvc service.AuditServ
 				return httperr.New(httperr.AUTH_INVALID, "invalid api key")
 			}
 
-			// Build principal
-			var profileIDPtr *uuid.UUID
-			if key.ProfileID != uuid.Nil {
-				profileIDPtr = &key.ProfileID
-			}
-
-			role := "standard"
-			if profileIDPtr == nil {
-				role = "admin"
+			// All runtime keys must be profile-bound. Legacy profile-less keys are
+			// rejected so the server only accepts the multi-tenant bearer model.
+			if key.ProfileID == uuid.Nil {
+				logAuthFailure(c, auditSvc, nil, "AUTH_INVALID", "api key is not profile bound")
+				return httperr.New(httperr.AUTH_INVALID, "invalid api key")
 			}
 
 			principal := &Principal{
 				KeyID:     key.ID,
-				ProfileID: profileIDPtr,
-				Role:      role,
+				ProfileID: &key.ProfileID,
+				Role:      "standard",
 				Scopes:    key.Scopes,
 				KeyPrefix: prefix,
 			}
