@@ -182,13 +182,8 @@ func (m *MockAuditService) RateLimited(ctx context.Context, profileID *string, o
 	return args.Error(0)
 }
 
-func (m *MockAuditService) AdminQuery(ctx context.Context, queryType string, metadata map[string]interface{}, actorKeyID *string, actorRole, clientIP, correlationID string) error {
+func (m *MockAuditService) SystemQuery(ctx context.Context, queryType string, metadata map[string]interface{}, actorKeyID *string, actorRole, clientIP, correlationID string) error {
 	args := m.Called(ctx, queryType, metadata, actorKeyID, actorRole, clientIP, correlationID)
-	return args.Error(0)
-}
-
-func (m *MockAuditService) AdminBypass(ctx context.Context, operation string, reason string, metadata map[string]interface{}, actorKeyID *string, actorRole, clientIP, correlationID string) error {
-	args := m.Called(ctx, operation, reason, metadata, actorKeyID, actorRole, clientIP, correlationID)
 	return args.Error(0)
 }
 
@@ -319,7 +314,7 @@ func TestAPIKeyServiceCreate(t *testing.T) {
 		RateLimit: 100,
 	}
 
-	key, rawKey, err := service.CreateStandardKey(ctx, profileID, req, nil, "admin", "127.0.0.1", "test-correlation")
+	key, rawKey, err := service.CreateStandardKey(ctx, profileID, req, nil, "system", "127.0.0.1", "test-correlation")
 
 	require.NoError(t, err)
 	assert.NotNil(t, key)
@@ -402,7 +397,7 @@ func TestAPIKeyServiceRevokeForProfile_CallsSessionInvalidator(t *testing.T) {
 	mockSessionInvalidator.On("InvalidateKeySessions", ctx, profileID.String(), keyID.String()).Return(nil)
 	mockAuditService.On("APIKeyRevoked", ctx, mock.AnythingOfType("*string"), keyID.String(), mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
-	err := service.RevokeForProfile(ctx, profileID, keyID, nil, "admin", "127.0.0.1", "test-correlation")
+	err := service.RevokeForProfile(ctx, profileID, keyID, nil, "system", "127.0.0.1", "test-correlation")
 
 	require.NoError(t, err)
 	mockSessionInvalidator.AssertCalled(t, "InvalidateKeySessions", ctx, profileID.String(), keyID.String())
@@ -440,7 +435,7 @@ func TestAPIKeyServiceRevokeForProfile_NilInvalidatorIsSafe(t *testing.T) {
 	mockRepo.On("RevokeForProfile", ctx, profileID, keyID).Return(int64(1), nil)
 	mockAuditService.On("APIKeyRevoked", ctx, mock.AnythingOfType("*string"), keyID.String(), mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
-	err := service.RevokeForProfile(ctx, profileID, keyID, nil, "admin", "127.0.0.1", "test-correlation")
+	err := service.RevokeForProfile(ctx, profileID, keyID, nil, "system", "127.0.0.1", "test-correlation")
 
 	require.NoError(t, err)
 	mockRepo.AssertExpectations(t)

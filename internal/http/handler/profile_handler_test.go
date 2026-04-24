@@ -305,7 +305,6 @@ func TestProfileHandler_Get_SameProfile(t *testing.T) {
 	}
 	h := NewProfileHandler(mockSvc)
 
-	// Test as admin
 	e.GET("/api/v1/profiles/:profileId", h.Get)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/profiles/"+profileID.String(), nil)
@@ -429,7 +428,7 @@ func TestProfileHandler_Delete_RouteAuthorizationElsewhere(t *testing.T) {
 		}
 	})
 
-	// Admin-only is enforced at route level
+	// Route-level authorization is enforced by router wiring.
 	e.DELETE("/api/v1/profiles/:profileId", h.Delete)
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/profiles/"+uuid.New().String(), nil)

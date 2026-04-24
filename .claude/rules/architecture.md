@@ -68,10 +68,10 @@ flowchart LR
 
 ## Authentication
 
-| Key Type | Purpose | Endpoints |
-|----------|---------|-----------|
-| Standard API Key | Regular operations | `/profiles`, `/knowledge`, `/search`, `/tools` |
-| Admin API Key | Admin operations | `/admin/graph/query` (read-only Cypher) |
+| Access Type | Purpose | Surface |
+|-------------|---------|---------|
+| Standard API Key | Runtime operations | HTTP, MCP, tools |
+| Operator command | Local/container maintenance | Provisioning, key lifecycle, migrations |
 
 ## Request Flow
 

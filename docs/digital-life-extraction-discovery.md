@@ -495,7 +495,7 @@ This is the most important tool to redesign.
 
 Recommended implementation shape:
 - accept `profileId`
-- reject queries lacking a profile scope unless explicitly admin
+- reject queries lacking a profile scope unless explicitly operator-run
 - inject or enforce profile predicates
 - allow only read-only clauses
 - optionally parse/guard query shape to block writes, procedures, schema ops
@@ -660,7 +660,7 @@ This layering is worth reusing directly.
 
 ### Important limitation
 Because `digital-life` is single persona per instance:
-- one admin key can grant access to the whole instance
+- one instance-wide operator credential can grant access to the whole instance
 - there is no profile ownership model to inspect
 
 So there is **no existing multi-profile authorization implementation to extract**.
@@ -1055,7 +1055,7 @@ Mitigations:
 - allowlisted read-only query shapes
 - query builder templates for common retrievals
 - profile predicate injection
-- admin-only raw Cypher endpoint
+- operator-only raw Cypher endpoint
 
 ## 10.4 Queueing gap
 
@@ -1084,14 +1084,14 @@ Need a choice:
 ## 10.6 Auth model redesign
 
 Original model:
-- one admin key
+- one operator credential
 - one persona
 
 Dense-mem needs:
 - multiple API keys
 - profile scoping
 - maybe per-key permissions
-- maybe admin vs standard scopes
+- maybe operator vs runtime scopes
 - maybe session support for browser clients
 
 ## 10.7 Community summaries may be too large for MVP

@@ -123,7 +123,7 @@ func (g *generator) Generate(variant SpecVariant) (map[string]any, error) {
 func routeMatches(r RouteDescriptor, variant SpecVariant) bool {
 	switch variant {
 	case SpecVariantAISafe:
-		return r.AISafe && !r.AdminOnly
+		return r.AISafe
 	case SpecVariantFull:
 		return true
 	default:
@@ -245,8 +245,6 @@ func tagsFor(r RouteDescriptor) []string {
 		return r.Tags
 	}
 	switch {
-	case r.AdminOnly:
-		return []string{"admin"}
 	case strings.Contains(r.Path, "/fragments"):
 		return []string{"fragments"}
 	case strings.Contains(r.Path, "/tools"):

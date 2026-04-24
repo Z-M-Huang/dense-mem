@@ -56,7 +56,7 @@ type CreateAPIKeyResponse struct {
 }
 
 // Create handles POST /api/v1/profiles/:profileId/api-keys.
-// Requires 'write' scope. Admin bypasses scope check.
+// Requires 'write' scope.
 // Returns 201 with the created key and plaintext api_key.
 func (h *APIKeyHandler) Create(c echo.Context) error {
 	ctx := c.Request().Context()
@@ -116,7 +116,7 @@ func (h *APIKeyHandler) Create(c echo.Context) error {
 }
 
 // List handles GET /api/v1/profiles/:profileId/api-keys.
-// Requires 'read' scope. Admin bypasses scope check.
+// Requires 'read' scope.
 // Returns 200 with paginated list of API keys (never includes key_hash or plaintext).
 func (h *APIKeyHandler) List(c echo.Context) error {
 	ctx := c.Request().Context()
@@ -166,7 +166,7 @@ func (h *APIKeyHandler) List(c echo.Context) error {
 }
 
 // Get handles GET /api/v1/profiles/:profileId/api-keys/:keyId.
-// Requires 'read' scope. Admin bypasses scope check.
+// Requires 'read' scope.
 // Returns 200 with the API key data (never includes key_hash or plaintext).
 // Scoped to the profileId in the path — returns NOT_FOUND for cross-profile ids.
 func (h *APIKeyHandler) Get(c echo.Context) error {
@@ -207,7 +207,7 @@ func (h *APIKeyHandler) Get(c echo.Context) error {
 }
 
 // Delete handles DELETE /api/v1/profiles/:profileId/api-keys/:keyId.
-// Requires 'write' scope. Admin bypasses scope check.
+// Requires 'write' scope.
 // Returns 200 with { "status": "revoked" }.
 // Scoped to the profileId in the path — returns NOT_FOUND for cross-profile ids.
 func (h *APIKeyHandler) Delete(c echo.Context) error {

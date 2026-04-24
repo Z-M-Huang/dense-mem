@@ -29,7 +29,7 @@ func TestProfileServiceDelete_CallsStatePurger(t *testing.T) {
 	audit.On("ProfileDeleted", mock.Anything, id.String(), mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
 	svc := NewProfileService(repo, audit, purger)
-	err := svc.Delete(ctx, id, nil, "admin", "127.0.0.1", "corr-1")
+	err := svc.Delete(ctx, id, nil, "system", "127.0.0.1", "corr-1")
 	require.NoError(t, err)
 
 	purger.AssertCalled(t, "PurgeProfileState", ctx, id.String())
@@ -54,7 +54,7 @@ func TestProfileServiceDelete_NilPurgerIsSafe(t *testing.T) {
 
 	// purger is nil — this must not panic
 	svc := NewProfileService(repo, audit, nil)
-	err := svc.Delete(ctx, id, nil, "admin", "127.0.0.1", "corr-2")
+	err := svc.Delete(ctx, id, nil, "system", "127.0.0.1", "corr-2")
 	require.NoError(t, err)
 
 	repo.AssertExpectations(t)

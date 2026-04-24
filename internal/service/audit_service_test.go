@@ -203,8 +203,8 @@ func TestAuditServiceAppend(t *testing.T) {
 	// Create an API key for the actor
 	var keyID string
 	err = sqlDB.QueryRowContext(ctx, `
-		INSERT INTO api_keys (id, profile_id, key_hash, key_prefix, role, scopes)
-		VALUES (gen_random_uuid(), $1, 'testhash123', 'testsvc', 'standard', ARRAY['read'])
+		INSERT INTO api_keys (id, profile_id, key_hash, key_prefix, label, scopes)
+		VALUES (gen_random_uuid(), $1, 'testhash123', 'testsvc', 'service-test', ARRAY['read'])
 		RETURNING id
 	`, profileID).Scan(&keyID)
 	require.NoError(t, err, "should create test api key")
@@ -306,10 +306,10 @@ func TestAuditServiceRedactsSecrets(t *testing.T) {
 			"token":            "bearer-token-abc",
 			"embedding":        []float32{0.1, 0.2, 0.3},
 			"embeddings":       [][]float32{{0.1, 0.2}, {0.3, 0.4}},
-			"profile_id":       profileID, // This should be preserved
+			"profile_id":       profileID,    // This should be preserved
 			"label":            "test-label", // This should be preserved
 		},
-		ActorRole:     "admin",
+		ActorRole:     "system",
 		ClientIP:      "192.168.1.1",
 		CorrelationID: "corr-redact-789",
 	}
@@ -395,8 +395,8 @@ func TestAuditServiceHelperMethods(t *testing.T) {
 
 	var keyID string
 	err = sqlDB.QueryRowContext(ctx, `
-		INSERT INTO api_keys (id, profile_id, key_hash, key_prefix, role, scopes)
-		VALUES (gen_random_uuid(), $1, 'testhash456', 'testhlp', 'standard', ARRAY['read'])
+		INSERT INTO api_keys (id, profile_id, key_hash, key_prefix, label, scopes)
+		VALUES (gen_random_uuid(), $1, 'testhash456', 'testhlp', 'helper-test', ARRAY['read'])
 		RETURNING id
 	`, profileID).Scan(&keyID)
 	require.NoError(t, err, "should create test api key")
@@ -470,19 +470,12 @@ func TestAuditServiceHelperMethods(t *testing.T) {
 	require.NoError(t, err, "RateLimited should succeed")
 	verifyAuditEntry(t, sqlDB, ctx, correlationID, "RATE_LIMITED")
 
-	// Test AdminQuery
-	err = auditService.AdminQuery(ctx, "list_all_profiles",
+	// Test SystemQuery
+	err = auditService.SystemQuery(ctx, "list_all_profiles",
 		map[string]interface{}{"filters": map[string]string{"status": "active"}},
-		&keyID, "admin", clientIP, correlationID)
-	require.NoError(t, err, "AdminQuery should succeed")
-	verifyAuditEntry(t, sqlDB, ctx, "list_all_profiles", "ADMIN_QUERY")
-
-	// Test AdminBypass
-	err = auditService.AdminBypass(ctx, "delete_profile", "emergency_cleanup",
-		map[string]interface{}{"target": profileID},
-		&keyID, "admin", clientIP, correlationID)
-	require.NoError(t, err, "AdminBypass should succeed")
-	verifyAuditEntry(t, sqlDB, ctx, "delete_profile", "ADMIN_BYPASS")
+		&keyID, "system", clientIP, correlationID)
+	require.NoError(t, err, "SystemQuery should succeed")
+	verifyAuditEntry(t, sqlDB, ctx, "list_all_profiles", "SYSTEM_QUERY")
 
 	// Test InvariantViolation
 	err = auditService.InvariantViolation(ctx, "profile", profileID, "profile_count_mismatch",

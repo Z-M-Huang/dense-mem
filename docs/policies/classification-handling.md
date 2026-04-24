@@ -37,7 +37,7 @@ submitting T3 content.
 ## Retention
 
 Knowledge artifacts are retained until explicitly deleted or retracted by the
-profile owner or an admin. There is no automatic expiry.
+profile owner or an operator workflow. There is no automatic expiry.
 
 Retracted fragments remain as soft tombstones in the graph indefinitely to
 preserve lineage. Hard deletion removes the node and all incident edges.

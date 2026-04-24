@@ -126,11 +126,7 @@ func (m *mockAuditService) RateLimited(ctx context.Context, profileID *string, o
 	return nil
 }
 
-func (m *mockAuditService) AdminQuery(ctx context.Context, queryType string, metadata map[string]interface{}, actorKeyID *string, actorRole, clientIP, correlationID string) error {
-	return nil
-}
-
-func (m *mockAuditService) AdminBypass(ctx context.Context, operation string, reason string, metadata map[string]interface{}, actorKeyID *string, actorRole, clientIP, correlationID string) error {
+func (m *mockAuditService) SystemQuery(ctx context.Context, queryType string, metadata map[string]interface{}, actorKeyID *string, actorRole, clientIP, correlationID string) error {
 	return nil
 }
 
@@ -400,7 +396,7 @@ func TestAuthMiddleware_ValidKey_StoresPrincipal(t *testing.T) {
 func TestAuthMiddleware_ProfilelessKeyRejected(t *testing.T) {
 	e := newTestEcho()
 	keyID := uuid.New()
-	rawKey := "adminprefix12345678901234567890"
+	rawKey := "legacykey12345678901234567890"
 	keyHash, err := crypto.HashKey(rawKey)
 	require.NoError(t, err)
 
@@ -410,7 +406,7 @@ func TestAuthMiddleware_ProfilelessKeyRejected(t *testing.T) {
 				ID:        keyID,
 				ProfileID: uuid.Nil,
 				KeyHash:   keyHash,
-				Scopes:    []string{"admin"},
+				Scopes:    []string{"read"},
 				RevokedAt: nil,
 				ExpiresAt: nil,
 			}, nil

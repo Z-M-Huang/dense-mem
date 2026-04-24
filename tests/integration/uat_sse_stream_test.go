@@ -5,10 +5,10 @@ import (
 	"testing"
 )
 
-// TestUATRedisSSEAndAdmin is a UAT test for Redis SSE streaming and admin endpoints.
+// TestUATRedisSSEStream is a UAT test scaffold for Redis-backed SSE streaming.
 // Skipped: depends on testcontainers fixture that is not yet wired (TestEnv.Setup
 // is a placeholder). Tracked separately from the knowledge-pipeline build.
-func TestUATRedisSSEAndAdmin(t *testing.T) {
+func TestUATRedisSSEStream(t *testing.T) {
 	t.Helper()
 	t.Skip("UAT scaffold: TestEnv.Setup is a placeholder; testcontainers wiring pending")
 	ctx := context.Background()

@@ -32,8 +32,8 @@ import (
 // - Migration is safe to rerun (idempotent).
 //
 // Per-profile isolation is NOT required here because migrations are not scoped
-// to individual profiles — they are administered globally by operators with
-// elevated access. The profile-isolation rule (.claude/rules/profile-isolation.md)
+// to individual profiles; they are run globally by operators with elevated
+// access. The profile-isolation rule (.claude/rules/profile-isolation.md)
 // governs data-plane queries; operator-run migrations are intentionally exempt.
 type FragmentStatusMigrationRunner interface {
 	// BackfillFragmentStatus sets status='active' on SourceFragment nodes where

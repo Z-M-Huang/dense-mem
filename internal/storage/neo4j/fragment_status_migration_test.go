@@ -171,7 +171,7 @@ func (c *crossProfileCapturingClient) ExecuteWrite(_ context.Context, _ neo4j.Ma
 // properties of the status backfill migration:
 //
 //  1. status='active' is set on nodes from both profile A and profile B — the migration
-//     has admin (global) scope and must process all profiles in a single sweep.
+//     runs globally and must process all profiles in a single sweep.
 //  2. profile_id is never modified — write rows carry only fragment_id; profile ownership
 //     is preserved on every node after migration.
 //  3. No cross-profile data leakage — the write query only sets sf.status and does not

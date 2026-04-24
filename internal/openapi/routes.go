@@ -5,7 +5,7 @@
 package openapi
 
 // RouteDescriptor is the static metadata for one HTTP route. The generator
-// classifies routes by the AISafe / AdminOnly flags. Routes backed by a
+// classifies routes by the AISafe flag. Routes backed by a
 // registered tool name inherit their request/response schemas from the
 // registry rather than duplicating them here.
 type RouteDescriptor struct {
@@ -16,10 +16,8 @@ type RouteDescriptor struct {
 	// body schema and 200-response schema are pulled directly from the
 	// registry tool's InputSchema / OutputSchema (AC-34 "derived from
 	// registry"). Empty for routes with no tool counterpart.
-	ToolName string
-	AISafe   bool
-	// AdminOnly routes appear in the full variant only.
-	AdminOnly   bool
+	ToolName    string
+	AISafe      bool
 	Description string
 
 	// RequestSchema is an explicit component-schema name for the request body.

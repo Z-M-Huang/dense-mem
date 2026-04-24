@@ -9,9 +9,9 @@ knowledge-pipeline entities (Fragments, Claims, Facts) within dense-mem.
 
 | Principal | Authentication | Capabilities |
 |-----------|---------------|--------------|
-| Profile owner (standard key, write) | `Authorization: Bearer <key>` + `X-Profile-ID` | Create, delete, retract fragments; create, delete, verify, promote claims |
+| Profile owner (standard key, write) | Profile-bound bearer key | Create, delete, retract fragments; create, delete, verify, promote claims |
 | Profile owner (standard key, read) | Same | Read and list fragments, claims, facts; recall |
-| Admin | Admin API key | All profile operations; community detection; admin graph query; invariant scan |
+| Operator command | Local/container command with datastore access | Profile provisioning, key rotation/revocation, maintenance workflows outside the public HTTP surface |
 | Unauthenticated | None | None — deny by default |
 
 ## Deny-by-Default
@@ -22,12 +22,12 @@ authentication.
 
 ## Cross-Profile Access
 
-A standard API key MUST only be used with the `X-Profile-ID` it was issued for.
-Requests where the key's profile does not match the requested profile ID are
+A standard API key MUST only be used for the profile it was issued for.
+Requests where the key's profile does not match the requested profile are
 rejected with 403.
 
-Admin keys may operate on any profile; all admin operations are audit-logged with
-the admin actor's key ID.
+Operator maintenance runs outside the public HTTP surface. When those workflows
+emit audit records, they use the system actor context.
 
 ## Principle of Least Privilege
 

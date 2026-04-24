@@ -247,7 +247,7 @@ curl http://localhost:8080/health
 
 ### Provision A Profile And API Key
 
-There is no UI and there are no public admin HTTP endpoints. Control-plane tasks are handled by local or container commands.
+There is no UI and there are no public control-plane HTTP endpoints. Control-plane tasks are handled by local or container commands.
 
 The image includes `/app/provision-profile`, a helper command that creates:
 

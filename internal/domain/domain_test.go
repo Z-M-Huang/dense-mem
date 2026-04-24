@@ -16,7 +16,7 @@ import (
 func TestKnowledgeContractFieldNames(t *testing.T) {
 	t.Run("SourceFragmentContract has correct field names", func(t *testing.T) {
 		typ := reflect.TypeOf(SourceFragmentContract{})
-		
+
 		expectedFields := map[string]string{
 			"FragmentID":     "fragment_id",
 			"Connector":      "connector",
@@ -25,19 +25,19 @@ func TestKnowledgeContractFieldNames(t *testing.T) {
 			"Embedding":      "embedding",
 			"Classification": "classification",
 		}
-		
+
 		for fieldName, jsonTag := range expectedFields {
 			field, found := typ.FieldByName(fieldName)
 			require.True(t, found, "Field %s not found", fieldName)
-				
+
 			tag := field.Tag.Get("json")
 			assert.Equal(t, jsonTag, tag, "Field %s json tag mismatch", fieldName)
 		}
 	})
-	
+
 	t.Run("ClaimContract has correct field names", func(t *testing.T) {
 		typ := reflect.TypeOf(ClaimContract{})
-		
+
 		expectedFields := map[string]string{
 			"ClaimID":           "claim_id",
 			"Predicate":         "predicate",
@@ -46,19 +46,19 @@ func TestKnowledgeContractFieldNames(t *testing.T) {
 			"EntailmentVerdict": "entailment_verdict",
 			"ExtractConf":       "extract_conf",
 		}
-		
+
 		for fieldName, jsonTag := range expectedFields {
 			field, found := typ.FieldByName(fieldName)
 			require.True(t, found, "Field %s not found", fieldName)
-				
+
 			tag := field.Tag.Get("json")
 			assert.Equal(t, jsonTag, tag, "Field %s json tag mismatch", fieldName)
 		}
 	})
-	
+
 	t.Run("FactContract has correct field names", func(t *testing.T) {
 		typ := reflect.TypeOf(FactContract{})
-		
+
 		expectedFields := map[string]string{
 			"FactID":     "fact_id",
 			"Status":     "status",
@@ -68,11 +68,11 @@ func TestKnowledgeContractFieldNames(t *testing.T) {
 			"RecordedAt": "recorded_at",
 			"RecordedTo": "recorded_to",
 		}
-		
+
 		for fieldName, jsonTag := range expectedFields {
 			field, found := typ.FieldByName(fieldName)
 			require.True(t, found, "Field %s not found", fieldName)
-				
+
 			tag := field.Tag.Get("json")
 			assert.Equal(t, jsonTag, tag, "Field %s json tag mismatch", fieldName)
 		}
@@ -89,7 +89,7 @@ func TestKnowledgeContractRelationshipConstants(t *testing.T) {
 		SUBJECT,
 		OBJECT,
 	}
-	
+
 	expectedValues := []string{
 		"SUPPORTED_BY",
 		"PROMOTES_TO",
@@ -98,7 +98,7 @@ func TestKnowledgeContractRelationshipConstants(t *testing.T) {
 		"SUBJECT",
 		"OBJECT",
 	}
-	
+
 	for i, expected := range expectedValues {
 		assert.Equal(t, expected, expectedConstants[i], "Constant at index %d mismatch", i)
 	}
@@ -113,44 +113,44 @@ func TestDTOValidationProfileCreate(t *testing.T) {
 			Metadata:    map[string]any{"key": "value"},
 			Config:      map[string]any{"setting": true},
 		}
-		
+
 		err := validation.ValidateStruct(&req)
 		assert.NoError(t, err)
 	})
-	
+
 	t.Run("name too short fails validation", func(t *testing.T) {
 		req := dto.CreateProfileRequest{
 			Name: "ab",
 		}
-		
+
 		err := validation.ValidateStruct(&req)
 		assert.Error(t, err)
 	})
-	
+
 	t.Run("name too long fails validation", func(t *testing.T) {
 		req := dto.CreateProfileRequest{
 			Name: string(make([]byte, 101)),
 		}
-		
+
 		err := validation.ValidateStruct(&req)
 		assert.Error(t, err)
 	})
-	
+
 	t.Run("blank name fails validation", func(t *testing.T) {
 		req := dto.CreateProfileRequest{
 			Name: "   ",
 		}
-		
+
 		err := validation.ValidateStruct(&req)
 		assert.Error(t, err)
 	})
-	
+
 	t.Run("description too long fails validation", func(t *testing.T) {
 		req := dto.CreateProfileRequest{
 			Name:        "Test",
 			Description: string(make([]byte, 501)),
 		}
-		
+
 		err := validation.ValidateStruct(&req)
 		assert.Error(t, err)
 	})
@@ -164,34 +164,34 @@ func TestDTOValidationAPIKeyCreate(t *testing.T) {
 			Scopes:    []string{"read", "write"},
 			RateLimit: 100,
 		}
-		
+
 		err := validation.ValidateStruct(&req)
 		assert.NoError(t, err)
 	})
-	
+
 	t.Run("label too short fails validation", func(t *testing.T) {
 		req := dto.CreateAPIKeyRequest{
 			Label: "",
 		}
-		
+
 		err := validation.ValidateStruct(&req)
 		assert.Error(t, err)
 	})
-	
+
 	t.Run("label too long fails validation", func(t *testing.T) {
 		req := dto.CreateAPIKeyRequest{
 			Label: string(make([]byte, 101)),
 		}
-		
+
 		err := validation.ValidateStruct(&req)
 		assert.Error(t, err)
 	})
-	
+
 	t.Run("blank label fails validation", func(t *testing.T) {
 		req := dto.CreateAPIKeyRequest{
 			Label: "   ",
 		}
-		
+
 		err := validation.ValidateStruct(&req)
 		assert.Error(t, err)
 	})
@@ -203,39 +203,39 @@ func TestDTOValidationGraphQuery(t *testing.T) {
 		req := dto.GraphQueryRequest{
 			Query: string(make([]byte, 5001)),
 		}
-		
+
 		err := validation.ValidateStruct(&req)
 		assert.Error(t, err)
 	})
-	
+
 	t.Run("valid graph query passes validation", func(t *testing.T) {
 		req := dto.GraphQueryRequest{
 			Query: "MATCH (n) RETURN n LIMIT 10",
 		}
-		
+
 		err := validation.ValidateStruct(&req)
 		assert.NoError(t, err)
 	})
-	
+
 	t.Run("keyword query too long fails validation", func(t *testing.T) {
 		req := dto.KeywordSearchRequest{
 			Keywords: string(make([]byte, 513)),
 		}
-		
+
 		err := validation.ValidateStruct(&req)
 		assert.Error(t, err)
 	})
-	
+
 	t.Run("valid keyword query passes validation", func(t *testing.T) {
 		req := dto.KeywordSearchRequest{
 			Keywords: "test keywords",
 			Limit:    10,
 		}
-		
+
 		err := validation.ValidateStruct(&req)
 		assert.NoError(t, err)
 	})
-	
+
 	t.Run("semantic search with embedding passes validation", func(t *testing.T) {
 		// Test with default embedding dimensions (1536)
 		dims := 1536
@@ -243,30 +243,30 @@ func TestDTOValidationGraphQuery(t *testing.T) {
 		for i := range embedding {
 			embedding[i] = 0.1
 		}
-		
+
 		req := dto.SemanticSearchRequest{
 			Embedding: embedding,
 			Limit:     10,
 		}
-		
+
 		err := validation.ValidateStruct(&req)
 		assert.NoError(t, err)
 	})
-	
-	t.Run("admin graph query too long fails validation", func(t *testing.T) {
-		req := dto.AdminGraphQueryRequest{
+
+	t.Run("graph query too long fails validation", func(t *testing.T) {
+		req := dto.GraphQueryRequest{
 			Query: string(make([]byte, 5001)),
 		}
-		
+
 		err := validation.ValidateStruct(&req)
 		assert.Error(t, err)
 	})
-	
+
 	t.Run("query stream with blank query fails validation", func(t *testing.T) {
 		req := dto.QueryStreamRequest{
 			Query: "   ",
 		}
-		
+
 		err := validation.ValidateStruct(&req)
 		assert.Error(t, err)
 	})
@@ -289,13 +289,13 @@ func TestNotBlankValidator(t *testing.T) {
 		{"word with spaces", "  hello  ", true},
 		{"normal text", "Hello World", true},
 	}
-	
+
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			req := dto.CreateProfileRequest{
 				Name: tc.input,
 			}
-			
+
 			err := validation.ValidateStruct(&req)
 			if tc.expected {
 				assert.NoError(t, err, "Expected '%s' to pass validation", tc.input)
@@ -310,7 +310,7 @@ func TestNotBlankValidator(t *testing.T) {
 func TestProfileInterface(t *testing.T) {
 	id := uuid.New()
 	now := time.Now()
-	
+
 	profile := &Profile{
 		ID:          id,
 		Name:        "Test",
@@ -320,9 +320,9 @@ func TestProfileInterface(t *testing.T) {
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
-	
+
 	var model ProfileModel = profile
-	
+
 	assert.Equal(t, id, model.GetID())
 	assert.Equal(t, "Test", model.GetName())
 	assert.Equal(t, "Test Description", model.GetDescription())
@@ -335,7 +335,7 @@ func TestAPIKeyInterface(t *testing.T) {
 	id := uuid.New()
 	profileID := uuid.New()
 	now := time.Now()
-	
+
 	apiKey := &APIKey{
 		ID:        id,
 		ProfileID: profileID,
@@ -345,9 +345,9 @@ func TestAPIKeyInterface(t *testing.T) {
 		RateLimit: 100,
 		CreatedAt: now,
 	}
-	
+
 	var model APIKeyModel = apiKey
-	
+
 	assert.Equal(t, id, model.GetID())
 	assert.Equal(t, profileID, model.GetProfileID())
 	assert.Equal(t, "Test Key", model.GetLabel())
@@ -374,7 +374,7 @@ func TestAuditLogEntryInterface(t *testing.T) {
 		BeforePayload: map[string]any{"before": "state"},
 		AfterPayload:  map[string]any{"after": "state"},
 		ActorKeyID:    &actorKeyID,
-		ActorRole:     "admin",
+		ActorRole:     "system",
 		ClientIP:      "127.0.0.1",
 		CorrelationID: "corr-123",
 		Metadata:      map[string]any{"note": "test"},
@@ -389,7 +389,7 @@ func TestAuditLogEntryInterface(t *testing.T) {
 	assert.Equal(t, "profile", model.GetEntityType())
 	assert.Equal(t, profileID.String(), model.GetEntityID())
 	assert.Equal(t, &actorKeyID, model.GetActorKeyID())
-	assert.Equal(t, "admin", model.GetActorRole())
+	assert.Equal(t, "system", model.GetActorRole())
 	assert.Equal(t, "127.0.0.1", model.GetClientIP())
 	assert.Equal(t, "corr-123", model.GetCorrelationID())
 	assert.Equal(t, map[string]any{"before": "state"}, model.GetBeforePayload())

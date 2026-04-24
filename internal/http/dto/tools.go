@@ -50,17 +50,6 @@ type QueryStreamRequest struct {
 	Parameters map[string]any `json:"parameters"`
 }
 
-// AdminGraphQueryRequest represents an admin request to execute arbitrary graph queries.
-// Validation rules:
-//   - Query: max 5000 characters, not blank
-//   - Parameters: optional query parameters
-//   - TimeoutSeconds: optional query timeout (admin override available)
-type AdminGraphQueryRequest struct {
-	Query          string         `json:"query" validate:"required,max=5000,notblank"`
-	Parameters     map[string]any `json:"parameters"`
-	TimeoutSeconds int            `json:"timeout_seconds"`
-}
-
 // SearchResult represents a single search result.
 type SearchResult struct {
 	ID       uuid.UUID      `json:"id"`

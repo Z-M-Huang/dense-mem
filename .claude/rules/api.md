@@ -12,7 +12,7 @@ Rules for API routes and handlers.
 
 - `/api/v1/profiles/:id/...` for profile-scoped operations
 - `/api/v1/tools/...` for agent tools
-- `/admin/...` for admin endpoints (requires admin key)
+- no public control-plane routes; use local/container commands for maintenance
 
 ## Middleware Chain
 

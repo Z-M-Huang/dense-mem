@@ -32,7 +32,7 @@ db.WithContext(ctx).Raw(
 ```
 
 RLS (`SET LOCAL app.current_profile_id = ...` via `set_config`) is enforced
-inside `WithProfileTx` / `WithAdminTx` in `internal/storage/postgres/rls.go`.
+inside `WithProfileTx` / `WithSystemTx` in `internal/storage/postgres/rls.go`.
 All repo calls that cross a trust boundary must run through those helpers.
 
 ## Redis Keys

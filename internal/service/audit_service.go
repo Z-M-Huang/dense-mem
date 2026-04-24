@@ -56,9 +56,8 @@ type AuditService interface {
 	CrossProfileDenied(ctx context.Context, actorProfileID, targetProfileID string, operation string, metadata map[string]interface{}, clientIP, correlationID string) error
 	RateLimited(ctx context.Context, profileID *string, operation string, metadata map[string]interface{}, clientIP, correlationID string) error
 
-	// Admin and system helpers
-	AdminQuery(ctx context.Context, queryType string, metadata map[string]interface{}, actorKeyID *string, actorRole, clientIP, correlationID string) error
-	AdminBypass(ctx context.Context, operation string, reason string, metadata map[string]interface{}, actorKeyID *string, actorRole, clientIP, correlationID string) error
+	// System event helpers
+	SystemQuery(ctx context.Context, queryType string, metadata map[string]interface{}, actorKeyID *string, actorRole, clientIP, correlationID string) error
 	InvariantViolation(ctx context.Context, entityType, entityID string, violation string, metadata map[string]interface{}, clientIP, correlationID string) error
 }
 
@@ -209,7 +208,7 @@ func (s *AuditServiceImpl) Append(ctx context.Context, entry AuditLogEntry) erro
 
 // List retrieves audit log entries for a specific profile with pagination.
 // Entries are returned in descending order by timestamp (most recent first).
-// The profileID parameter ensures profile-scoped listing - admin can only see
+// The profileID parameter ensures profile-scoped listing; callers can only see
 // the requested profile's log on this route.
 func (s *AuditServiceImpl) List(ctx context.Context, profileID string, limit, offset int) ([]AuditLogEntry, int, error) {
 	var entries []AuditLogEntry
@@ -464,38 +463,17 @@ func (s *AuditServiceImpl) RateLimited(ctx context.Context, profileID *string, o
 	return s.Append(ctx, entry)
 }
 
-// AdminQuery logs an admin query event.
-func (s *AuditServiceImpl) AdminQuery(ctx context.Context, queryType string, metadata map[string]interface{}, actorKeyID *string, actorRole, clientIP, correlationID string) error {
+// SystemQuery logs a system-scoped query event.
+func (s *AuditServiceImpl) SystemQuery(ctx context.Context, queryType string, metadata map[string]interface{}, actorKeyID *string, actorRole, clientIP, correlationID string) error {
 	if metadata == nil {
 		metadata = make(map[string]interface{})
 	}
 	metadata["query_type"] = queryType
 
 	entry := AuditLogEntry{
-		Operation:     "ADMIN_QUERY",
-		EntityType:    "admin",
+		Operation:     "SYSTEM_QUERY",
+		EntityType:    "system",
 		EntityID:      queryType,
-		ActorKeyID:    actorKeyID,
-		ActorRole:     actorRole,
-		ClientIP:      clientIP,
-		CorrelationID: correlationID,
-		Metadata:      metadata,
-	}
-	return s.Append(ctx, entry)
-}
-
-// AdminBypass logs an admin bypass event.
-func (s *AuditServiceImpl) AdminBypass(ctx context.Context, operation string, reason string, metadata map[string]interface{}, actorKeyID *string, actorRole, clientIP, correlationID string) error {
-	if metadata == nil {
-		metadata = make(map[string]interface{})
-	}
-	metadata["bypassed_operation"] = operation
-	metadata["bypass_reason"] = reason
-
-	entry := AuditLogEntry{
-		Operation:     "ADMIN_BYPASS",
-		EntityType:    "admin",
-		EntityID:      operation,
 		ActorKeyID:    actorKeyID,
 		ActorRole:     actorRole,
 		ClientIP:      clientIP,

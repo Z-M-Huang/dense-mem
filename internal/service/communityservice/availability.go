@@ -60,7 +60,7 @@ type AvailabilityService interface {
 	//
 	// Profile isolation: callers MUST pass a profile-scoped prefix
 	// (e.g. GraphNamePrefix + profileID + "-") to avoid sweeping graphs that
-	// belong to other profiles. Administrative cleanup may use GraphNamePrefix.
+	// belong to other profiles. Operator cleanup may use GraphNamePrefix.
 	SweepOrphanGraphs(ctx context.Context, prefix string) error
 }
 

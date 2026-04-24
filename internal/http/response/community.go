@@ -38,7 +38,7 @@ func ToListCommunitiesResponse(communities []*domain.Community) *dto.ListCommuni
 	}
 }
 
-// ToCommunityDetectResponse converts a detect result into the admin response DTO.
+// ToCommunityDetectResponse converts a detect result into the public response DTO.
 func ToCommunityDetectResponse(communities []*domain.Community) *dto.CommunityDetectResponse {
 	items := make([]dto.CommunityResponse, 0, len(communities))
 	nodeCount := 0

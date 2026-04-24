@@ -52,7 +52,7 @@ func TestProfileServiceCreate(t *testing.T) {
 	}
 
 	actorKeyID := "test-key-id"
-	profile, err := service.Create(ctx, req, &actorKeyID, "admin", "127.0.0.1", "test-correlation-id")
+	profile, err := service.Create(ctx, req, &actorKeyID, "system", "127.0.0.1", "test-correlation-id")
 
 	require.NoError(t, err, "Create should succeed")
 	assert.NotEqual(t, uuid.Nil, profile.ID, "UUID should be generated server-side")
@@ -100,7 +100,7 @@ func TestProfileServiceCreateDuplicateName(t *testing.T) {
 	}
 
 	actorKeyID := "test-key-id"
-	profile1, err := service.Create(ctx, req1, &actorKeyID, "admin", "127.0.0.1", "test-correlation-id")
+	profile1, err := service.Create(ctx, req1, &actorKeyID, "system", "127.0.0.1", "test-correlation-id")
 	require.NoError(t, err, "First create should succeed")
 
 	req2 := CreateProfileRequest{
@@ -108,7 +108,7 @@ func TestProfileServiceCreateDuplicateName(t *testing.T) {
 		Description: "Second profile",
 	}
 
-	_, err = service.Create(ctx, req2, &actorKeyID, "admin", "127.0.0.1", "test-correlation-id")
+	_, err = service.Create(ctx, req2, &actorKeyID, "system", "127.0.0.1", "test-correlation-id")
 
 	require.Error(t, err, "Duplicate name should fail")
 	apiErr, ok := err.(*httperr.APIError)
@@ -154,7 +154,7 @@ func TestProfileServiceGet(t *testing.T) {
 	}
 
 	actorKeyID := "test-key-id"
-	profile, err := service.Create(ctx, req, &actorKeyID, "admin", "127.0.0.1", "test-correlation-id")
+	profile, err := service.Create(ctx, req, &actorKeyID, "system", "127.0.0.1", "test-correlation-id")
 	require.NoError(t, err, "Create should succeed")
 
 	fetched, err := service.Get(ctx, profile.ID)
@@ -209,7 +209,7 @@ func TestProfileServiceList(t *testing.T) {
 			Name:        uuid.New().String(),
 			Description: "Test description",
 		}
-		profile, err := service.Create(ctx, req, &actorKeyID, "admin", "127.0.0.1", "test-correlation-id")
+		profile, err := service.Create(ctx, req, &actorKeyID, "system", "127.0.0.1", "test-correlation-id")
 		require.NoError(t, err, "Create should succeed")
 		createdIDs = append(createdIDs, profile.ID)
 	}
@@ -270,7 +270,7 @@ func TestProfileServiceUpdate(t *testing.T) {
 	}
 
 	actorKeyID := "test-key-id"
-	profile, err := service.Create(ctx, req, &actorKeyID, "admin", "127.0.0.1", "test-correlation-id")
+	profile, err := service.Create(ctx, req, &actorKeyID, "system", "127.0.0.1", "test-correlation-id")
 	require.NoError(t, err, "Create should succeed")
 
 	newName := "Test Profile Update Modified"
@@ -282,7 +282,7 @@ func TestProfileServiceUpdate(t *testing.T) {
 		Config:      map[string]any{"newSetting": "value"},
 	}
 
-	updated, err := service.Update(ctx, profile.ID, updateReq, &actorKeyID, "admin", "127.0.0.1", "test-correlation-id")
+	updated, err := service.Update(ctx, profile.ID, updateReq, &actorKeyID, "system", "127.0.0.1", "test-correlation-id")
 	require.NoError(t, err, "Update should succeed")
 	assert.Equal(t, newName, updated.Name, "Name should be updated")
 	assert.Equal(t, newDesc, updated.Description, "Description should be updated")
@@ -334,10 +334,10 @@ func TestProfileServiceDelete(t *testing.T) {
 	}
 
 	actorKeyID := "test-key-id"
-	profile, err := service.Create(ctx, req, &actorKeyID, "admin", "127.0.0.1", "test-correlation-id")
+	profile, err := service.Create(ctx, req, &actorKeyID, "system", "127.0.0.1", "test-correlation-id")
 	require.NoError(t, err, "Create should succeed")
 
-	err = service.Delete(ctx, profile.ID, &actorKeyID, "admin", "127.0.0.1", "test-correlation-id")
+	err = service.Delete(ctx, profile.ID, &actorKeyID, "system", "127.0.0.1", "test-correlation-id")
 	require.NoError(t, err, "Delete should succeed")
 
 	_, err = service.Get(ctx, profile.ID)
@@ -394,18 +394,18 @@ func TestProfileServiceDeleteBlockedByActiveKeys(t *testing.T) {
 	}
 
 	actorKeyID := "test-key-id"
-	profile, err := service.Create(ctx, req, &actorKeyID, "admin", "127.0.0.1", "test-correlation-id")
+	profile, err := service.Create(ctx, req, &actorKeyID, "system", "127.0.0.1", "test-correlation-id")
 	require.NoError(t, err, "Create should succeed")
 
 	// Create an active API key for this profile
 	_, err = sqlDB.ExecContext(ctx, `
-		INSERT INTO api_keys (id, profile_id, key_hash, key_prefix, label, role, scopes, expires_at, revoked_at, created_at, updated_at)
-		VALUES (gen_random_uuid(), $1, 'testhash', 'testprefix', 'Test Key', 'standard', ARRAY['read'], NULL, NULL, NOW(), NOW())
+		INSERT INTO api_keys (id, profile_id, key_hash, key_prefix, label, scopes, expires_at, revoked_at, created_at, updated_at)
+		VALUES (gen_random_uuid(), $1, 'testhash', 'testprefix', 'Test Key', ARRAY['read'], NULL, NULL, NOW(), NOW())
 	`, profile.ID)
 	require.NoError(t, err, "Should create API key")
 
 	// Try to delete the profile - should fail with 409
-	err = service.Delete(ctx, profile.ID, &actorKeyID, "admin", "127.0.0.1", "test-correlation-id")
+	err = service.Delete(ctx, profile.ID, &actorKeyID, "system", "127.0.0.1", "test-correlation-id")
 	require.Error(t, err, "Delete should fail when active keys exist")
 	apiErr, ok := err.(*httperr.APIError)
 	require.True(t, ok, "Error should be APIError")

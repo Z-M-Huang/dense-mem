@@ -2,11 +2,11 @@
 
 ## RBAC Matrix
 
-| Role | Fragments | Claims | Facts | Recall | Community | Admin Graph |
+| Actor | Fragments | Claims | Facts | Recall | Community | Maintenance |
 |------|-----------|--------|-------|--------|-----------|-------------|
-| Standard API Key (read scope) | read, list | read, list | read, list | query | — | — |
+| Standard API Key (read scope) | read, list | read, list | read, list | query | list, get | — |
 | Standard API Key (write scope) | create, delete, retract | create, delete, verify, promote | — | — | — | — |
-| Admin API Key | all | all | all | all | detect | query (read-only) |
+| Operator command | — | — | — | — | — | profile lifecycle, key rotation, invariant scans, migrations |
 
 ## Alert Thresholds
 
@@ -35,7 +35,7 @@ Recommended retention:
 
 ### Fragment creation rollback
 Fragments can be soft-tombstoned via `POST /api/v1/fragments/{id}/retract`.
-Hard deletion is available via `DELETE /api/v1/fragments/{id}` (admin).
+Hard deletion is available via `DELETE /api/v1/fragments/{id}` with `write` scope.
 
 ### Claim rollback
 Claims can be hard-deleted via `DELETE /api/v1/claims/{id}`. This is irreversible.

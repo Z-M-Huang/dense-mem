@@ -294,7 +294,7 @@ func TestInvariantScanAuditLog(t *testing.T) {
 
 	// Clean audit log for test
 	sqlDB, _ := db.DB()
-	_, _ = sqlDB.Exec("DELETE FROM audit_log WHERE operation = 'ADMIN_QUERY' AND metadata::text LIKE '%invariant_scan%'")
+	_, _ = sqlDB.Exec("DELETE FROM audit_log WHERE operation = 'SYSTEM_QUERY' AND metadata::text LIKE '%invariant_scan%'")
 
 	auditSvc := NewAuditService(db)
 
@@ -304,7 +304,7 @@ func TestInvariantScanAuditLog(t *testing.T) {
 	// Execute scan with audit
 	actorKeyID := fmt.Sprintf("test-key-%s", uuid.New().String())
 	correlationID := fmt.Sprintf("test-correlation-%s", uuid.New().String())
-	result, err := invariantSvc.ScanWithAudit(ctx, &actorKeyID, "admin", "127.0.0.1", correlationID)
+	result, err := invariantSvc.ScanWithAudit(ctx, &actorKeyID, "system", "127.0.0.1", correlationID)
 
 	require.NoError(t, err, "Scan should succeed")
 	assert.NotNil(t, result, "Result should not be nil")
@@ -316,7 +316,7 @@ func TestInvariantScanAuditLog(t *testing.T) {
 	var auditCount int
 	err = sqlDB.QueryRow(`
 		SELECT COUNT(*) FROM audit_log 
-		WHERE operation = 'ADMIN_QUERY' 
+		WHERE operation = 'SYSTEM_QUERY' 
 		AND entity_id = 'invariant_scan'
 		AND actor_key_id = $1
 		AND correlation_id = $2
@@ -329,7 +329,7 @@ func TestInvariantScanAuditLog(t *testing.T) {
 	var metadataJSON []byte
 	err = sqlDB.QueryRow(`
 		SELECT metadata FROM audit_log 
-		WHERE operation = 'ADMIN_QUERY' 
+		WHERE operation = 'SYSTEM_QUERY' 
 		AND entity_id = 'invariant_scan'
 		AND actor_key_id = $1
 		AND correlation_id = $2

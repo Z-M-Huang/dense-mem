@@ -13,11 +13,11 @@ Security requirements for all code.
 - Keys are hashed before storage
 - Never log API keys
 - Use constant-time comparison
-- Admin key separate from standard key
+- Profile-bound runtime keys separate from operator commands
 
-## Admin Cypher Safeguards
+## Raw Cypher Safeguards
 
-`/admin/graph/query` must enforce:
+Any operator-only raw Cypher entrypoint must enforce:
 - Read-only mode
 - Query timeout (30s default)
 - Result cap (1000 rows)

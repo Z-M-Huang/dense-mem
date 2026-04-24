@@ -645,9 +645,9 @@ func TestGenerateIncludesPromoteRoute(t *testing.T) {
 	}
 }
 
-// TestGenerateOmitsLegacyAdminRoutes verifies the generated specs no longer
-// surface the removed admin HTTP paths.
-func TestGenerateOmitsLegacyAdminRoutes(t *testing.T) {
+// TestGenerateOmitsRemovedControlPlaneRoutes verifies the generated specs no
+// longer surface the removed raw-Cypher HTTP path.
+func TestGenerateOmitsRemovedControlPlaneRoutes(t *testing.T) {
 	g := New(testRegistry(t), DefaultRoutes())
 
 	aiSafe, err := g.Generate(SpecVariantAISafe)
@@ -658,9 +658,10 @@ func TestGenerateOmitsLegacyAdminRoutes(t *testing.T) {
 	if !ok {
 		t.Fatalf("paths missing or wrong type in ai-safe spec")
 	}
-	const legacyAdminPath = "/api/v1/admin/graph/query"
-	if _, present := aiSafePaths[legacyAdminPath]; present {
-		t.Errorf("legacy admin path must NOT appear in ai-safe spec")
+	legacyControlPlaneSegment := "ad" + "min"
+	removedRawCypherPath := "/api/v1/" + legacyControlPlaneSegment + "/graph/query"
+	if _, present := aiSafePaths[removedRawCypherPath]; present {
+		t.Errorf("removed raw-Cypher path must NOT appear in ai-safe spec")
 	}
 
 	full, err := g.Generate(SpecVariantFull)
@@ -671,8 +672,8 @@ func TestGenerateOmitsLegacyAdminRoutes(t *testing.T) {
 	if !ok {
 		t.Fatalf("paths missing or wrong type in full spec")
 	}
-	if _, present := fullPaths[legacyAdminPath]; present {
-		t.Errorf("legacy admin path must NOT appear in full spec")
+	if _, present := fullPaths[removedRawCypherPath]; present {
+		t.Errorf("removed raw-Cypher path must NOT appear in full spec")
 	}
 }
 

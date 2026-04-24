@@ -166,7 +166,7 @@ func (s *invariantScanService) ScanWithAudit(ctx context.Context, actorKeyID *st
 
 	// Log audit event for every scan execution
 	// This is done synchronously to ensure it's recorded
-	auditErr := s.auditSvc.AdminQuery(ctx, "invariant_scan", metadata, actorKeyID, actorRole, clientIP, correlationID)
+	auditErr := s.auditSvc.SystemQuery(ctx, "invariant_scan", metadata, actorKeyID, actorRole, clientIP, correlationID)
 	if auditErr != nil {
 		// Log the audit error but don't fail the operation
 		// In production, this would be logged to the observability system

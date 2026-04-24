@@ -32,8 +32,8 @@ func (m *mockAuditService) List(ctx context.Context, profileID string, limit, of
 	return []service.AuditLogEntry{}, 0, nil
 }
 
-// TestAuditHandler_Get_AdminOrSameProfile tests that admin or same-profile can access audit log.
-func TestAuditHandler_Get_AdminOrSameProfile(t *testing.T) {
+// TestAuditHandler_Get_SameProfile tests that a same-profile principal can access audit log.
+func TestAuditHandler_Get_SameProfile(t *testing.T) {
 	profileID := uuid.New()
 	now := time.Now().UTC()
 
@@ -42,16 +42,6 @@ func TestAuditHandler_Get_AdminOrSameProfile(t *testing.T) {
 		principal      *middleware.Principal
 		expectedStatus int
 	}{
-		{
-			name: "admin can access any profile's audit log",
-			principal: &middleware.Principal{
-				KeyID:     uuid.New(),
-				ProfileID: nil,
-				Role:      "admin",
-				Scopes:    []string{"admin"},
-			},
-			expectedStatus: http.StatusOK,
-		},
 		{
 			name: "same-profile principal can access their audit log",
 			principal: &middleware.Principal{
@@ -80,7 +70,7 @@ func TestAuditHandler_Get_AdminOrSameProfile(t *testing.T) {
 							Operation:     "CREATE",
 							EntityType:    "profile",
 							EntityID:      pid,
-							ActorRole:     "admin",
+							ActorRole:     "system",
 							ClientIP:      "192.168.1.1",
 							CorrelationID: "corr-1",
 						},
@@ -132,15 +122,15 @@ func TestAuditHandler_Get_DefaultPagination(t *testing.T) {
 	}
 	h := NewAuditHandler(mockSvc)
 
-	// Set admin principal using proper context key
+	// Set same-profile principal using proper context key
 	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
 			ctx := c.Request().Context()
 			ctx = middleware.SetPrincipalForTest(ctx, &middleware.Principal{
 				KeyID:     uuid.New(),
-				ProfileID: nil,
-				Role:      "admin",
-				Scopes:    []string{"admin"},
+				ProfileID: &profileID,
+				Role:      "standard",
+				Scopes:    []string{"read"},
 			})
 			c.SetRequest(c.Request().WithContext(ctx))
 			return next(c)
@@ -176,15 +166,15 @@ func TestAuditHandler_Get_MaxLimit(t *testing.T) {
 	}
 	h := NewAuditHandler(mockSvc)
 
-	// Set admin principal using proper context key
+	// Set same-profile principal using proper context key
 	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
 			ctx := c.Request().Context()
 			ctx = middleware.SetPrincipalForTest(ctx, &middleware.Principal{
 				KeyID:     uuid.New(),
-				ProfileID: nil,
-				Role:      "admin",
-				Scopes:    []string{"admin"},
+				ProfileID: &profileID,
+				Role:      "standard",
+				Scopes:    []string{"read"},
 			})
 			c.SetRequest(c.Request().WithContext(ctx))
 			return next(c)
@@ -262,15 +252,15 @@ func TestAuditHandler_NoUpdateDelete(t *testing.T) {
 	mockSvc := &mockAuditService{}
 	h := NewAuditHandler(mockSvc)
 
-	// Set admin principal using proper context key
+	// Set same-profile principal using proper context key
 	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
 			ctx := c.Request().Context()
 			ctx = middleware.SetPrincipalForTest(ctx, &middleware.Principal{
 				KeyID:     uuid.New(),
-				ProfileID: nil,
-				Role:      "admin",
-				Scopes:    []string{"admin"},
+				ProfileID: &profileID,
+				Role:      "standard",
+				Scopes:    []string{"read"},
 			})
 			c.SetRequest(c.Request().WithContext(ctx))
 			return next(c)
