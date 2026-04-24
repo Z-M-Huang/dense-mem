@@ -253,6 +253,19 @@ func RegisterProtectedRoutesWithHandlers(e *echo.Echo, deps ProtectedDeps, handl
 		communityGroup.GET("/:id", handlers.CommunityRead, middleware.RequireScopes("read"))
 	}
 
+	// MCP Streamable HTTP endpoint.
+	mcpGroup := e.Group("/mcp")
+	mcpGroup.Use(middleware.AuthMiddleware(deps.APIKeyRepo, deps.AuditService))
+	mcpGroup.Use(middleware.ProfileResolutionMiddleware(deps.ProfileService))
+	mcpGroup.Use(middleware.AuthorizeProfile(profileAuthzSvc))
+	mcpGroup.Use(middleware.RateLimitMiddleware(deps.RateLimitService, deps.Config, deps.AuditService))
+	if handlers.MCPPost != nil {
+		mcpGroup.POST("", handlers.MCPPost)
+	}
+	if handlers.MCPGet != nil {
+		mcpGroup.GET("", handlers.MCPGet)
+	}
+
 	// Tool routes
 	toolGroup := e.Group("/api/v1/tools")
 	toolGroup.Use(middleware.AuthMiddleware(deps.APIKeyRepo, deps.AuditService))
@@ -322,6 +335,8 @@ type ProtectedHandlers struct {
 	ToolCatalog    echo.HandlerFunc
 	OpenAPIAISafe  echo.HandlerFunc
 	OpenAPIFull    echo.HandlerFunc
+	MCPPost        echo.HandlerFunc
+	MCPGet         echo.HandlerFunc
 	APIKeySvc      handler.APIKeyServiceInterface // Service for API key routes
 	// Claim handlers — knowledge pipeline Phase 2 (AC-16)
 	ClaimCreate echo.HandlerFunc

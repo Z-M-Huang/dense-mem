@@ -1,6 +1,5 @@
 import { APIRequestContext, expect } from '@playwright/test';
 import neo4j, { Driver, Session } from 'neo4j-driver';
-import { ChildProcess, spawn } from 'child_process';
 
 // ---------------------------------------------------------------------------
 // Environment helpers
@@ -77,79 +76,43 @@ export async function closeNeo4j(): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// MCP server helper
+// MCP HTTP helper
 // ---------------------------------------------------------------------------
 
 export interface McpHandle {
-  proc: ChildProcess;
-  stdin: NodeJS.WritableStream;
-  /** Send a JSON-RPC request and wait for the first response line. */
+  /** Send a JSON-RPC request to POST /mcp. */
   call(method: string, params?: unknown): Promise<unknown>;
-  /** Terminate the MCP server process. */
+  /** No-op retained for test cleanup symmetry. */
   close(): Promise<void>;
 }
 
-/**
- * Spawn the dense-mem MCP server binary for MCP UAT tests.
- * The MCP binary is an HTTP-backed facade and requires DENSE_MEM_URL and
- * DENSE_MEM_API_KEY.
- */
+/** Build an MCP Streamable HTTP client for UAT tests. */
 export async function spawnMcp(
   env: Record<string, string> = {},
 ): Promise<McpHandle> {
-  const mcpBin = process.env.MCP_BIN || './cmd/mcp/main.go';
-  const proc = spawn('go', ['run', mcpBin], {
-    env: { ...process.env, ...env },
-    stdio: ['pipe', 'pipe', 'pipe'],
-  });
+  const baseUrl = env.DENSE_MEM_URL || DENSE_MEM_URL;
+  const apiKey = env.DENSE_MEM_API_KEY || DENSE_MEM_API_KEY;
+  let nextId = 0;
 
-  const lines: string[] = [];
-  let resolver: ((line: string) => void) | null = null;
-
-  proc.stdout?.on('data', (chunk: Buffer) => {
-    const text = chunk.toString();
-    for (const line of text.split('\n')) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-      if (resolver) {
-        resolver(trimmed);
-        resolver = null;
-      } else {
-        lines.push(trimmed);
+  return {
+    async call(method: string, params?: unknown): Promise<unknown> {
+      nextId += 1;
+      const response = await fetch(`${baseUrl}/mcp`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ jsonrpc: '2.0', id: nextId, method, params }),
+      });
+      const text = await response.text();
+      if (!response.ok) {
+        throw new Error(`MCP HTTP ${response.status}: ${text}`);
       }
-    }
-  });
-
-  // Wait briefly for the process to start
-  await new Promise<void>((res) => setTimeout(res, 500));
-
-  const handle: McpHandle = {
-    proc,
-    stdin: proc.stdin!,
-    call(method: string, params?: unknown): Promise<unknown> {
-      return new Promise((resolve, reject) => {
-        const msg = JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) + '\n';
-        if (lines.length > 0) {
-          const line = lines.shift()!;
-          try { resolve(JSON.parse(line)); } catch { reject(new Error(`Invalid JSON: ${line}`)); }
-        } else {
-          resolver = (line: string) => {
-            try { resolve(JSON.parse(line)); } catch { reject(new Error(`Invalid JSON: ${line}`)); }
-          };
-        }
-        proc.stdin!.write(msg);
-      });
+      return JSON.parse(text);
     },
-    close(): Promise<void> {
-      return new Promise((res) => {
-        proc.kill();
-        proc.on('exit', () => res());
-        setTimeout(() => { proc.kill('SIGKILL'); res(); }, 3000);
-      });
-    },
+    async close(): Promise<void> {},
   };
-
-  return handle;
 }
 
 // ---------------------------------------------------------------------------

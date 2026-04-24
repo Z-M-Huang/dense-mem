@@ -52,7 +52,7 @@ flowchart TB
     subgraph Clients["Clients"]
         HTTPClient["HTTP clients"]
         SSEClient["SSE consumers"]
-        MCPClient["MCP hosts"]
+        MCPClient["MCP HTTP clients"]
     end
 
     subgraph Surfaces["Public surfaces"]
@@ -60,7 +60,7 @@ flowchart TB
         SSE["SSE query stream"]
         Catalog["Tool catalog"]
         OpenAPI["OpenAPI"]
-        MCP["MCP stdio"]
+        MCP["MCP Streamable HTTP"]
     end
 
     subgraph Service["Dense-Mem service"]
@@ -80,9 +80,6 @@ flowchart TB
     HTTPClient --> HTTP
     SSEClient --> SSE
     MCPClient --> MCP
-    AISDK --> NPMPkg
-
-    NPMPkg --> HTTP
     MCP --> Catalog
     OpenAPI --> Registry
     Catalog --> Registry
@@ -150,7 +147,7 @@ flowchart LR
     Execute --> Search["keyword-search / semantic-search / graph-query"]
     Recall["GET /api/v1/recall"] --> App["High-level memory retrieval"]
     OpenAPI["GET /api/v1/openapi.json"] --> SDK["Codegen / docs / agents"]
-    MCP["./bin/dense-mem-mcp"] --> HTTP["HTTP API"]
+    MCP["POST /mcp"] --> HTTP["HTTP API"]
     SSE["POST /api/v1/profiles/{profileId}/query/stream"] --> Stream["Long-running query streams"]
 ```
 
@@ -411,9 +408,9 @@ Dense-mem exposes three discoverability surfaces backed by one registry:
 |------|------|------|
 | Tool catalog | `GET /api/v1/tools` | Runtime tool discovery |
 | Runtime OpenAPI | `GET /api/v1/openapi.json` | Agents, codegen, integrations |
-| MCP stdio | `./bin/dense-mem-mcp` | MCP hosts that proxy to the HTTP API |
+| MCP Streamable HTTP | `POST /mcp`, `GET /mcp` | MCP clients over the main HTTP service |
 
-The MCP binary is stdio-based today and proxies to the HTTP API.
+MCP is served by the main HTTP service at `/mcp`; `POST /mcp` handles JSON-RPC requests and can return JSON or SSE when requested.
 
 ## Reference Docs
 

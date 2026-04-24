@@ -36,7 +36,6 @@ Playwright end-to-end tests for the dense-mem knowledge pipeline API.
 | `NEO4J_URI` | Neo4j Bolt URI | `bolt://localhost:7687` |
 | `NEO4J_USER` | Neo4j username | `neo4j` |
 | `NEO4J_PASSWORD` | Neo4j password | `password` |
-| `MCP_BIN` | Path to MCP binary or `main.go` | `./cmd/mcp/main.go` |
 
 ## Running Tests
 
@@ -72,7 +71,7 @@ as the test files are syntactically valid — actual test execution requires a r
 |--------|---------|
 | `headers(profileId)` | Standard auth headers for a profile |
 | `neo4jQuery(cypher, params)` | Direct Neo4j query for assertions |
-| `spawnMcp(env)` | Spawn and communicate with the MCP binary |
+| `spawnMcp(env)` | Call the `/mcp` Streamable HTTP endpoint |
 | `seedFragmentForProfile(request, profileId, content, opts)` | Create a fragment via API |
 | `createAndVerifyClaim(request, profileId, opts)` | Create + verify a claim |
 | `createAndPromoteClaim(request, profileId, opts)` | Create + verify + promote a claim |

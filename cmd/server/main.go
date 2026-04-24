@@ -388,6 +388,7 @@ func main() {
 	toolCatalogHandler := handler.NewToolCatalogHandler(toolRegistry)
 	toolReadHandler := handler.NewToolReadHandler(toolRegistry)
 	toolExecuteHandler := handler.NewToolExecuteHandler(toolRegistry)
+	mcpHandler := handler.NewMCPHandler(toolRegistry, logger)
 	openAPIAISafeHandler := handler.NewOpenAPIHandler(openAPIGen, openapi.SpecVariantAISafe)
 	openAPIFullHandler := handler.NewOpenAPIHandler(openAPIGen, openapi.SpecVariantFull)
 
@@ -461,6 +462,8 @@ func main() {
 		ToolCatalog:     toolCatalogHandler.Handle,
 		GetTool:         toolReadHandler.Handle,
 		ExecuteTool:     toolExecuteHandler.Handle,
+		MCPPost:         mcpHandler.HandlePost,
+		MCPGet:          mcpHandler.HandleGet,
 		OpenAPIAISafe:   openAPIAISafeHandler.Handle,
 		OpenAPIFull:     openAPIFullHandler.Handle,
 		Recall:          recallHandler.Handle,

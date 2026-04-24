@@ -3,18 +3,14 @@
 package uat
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"net/http/httptest"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"runtime"
 	"testing"
 	"time"
 
@@ -53,91 +49,46 @@ func (p *fixedEmbeddingProvider) ModelName() string { return p.model }
 func (p *fixedEmbeddingProvider) Dimensions() int   { return p.dims }
 func (p *fixedEmbeddingProvider) IsAvailable() bool { return true }
 
-type mcpProcess struct {
-	cmd    *exec.Cmd
-	stdin  io.WriteCloser
-	stdout *bufio.Reader
-	stderr *bytes.Buffer
-	nextID int
+type mcpHTTPClient struct {
+	baseURL string
+	apiKey  string
+	nextID  int
 }
 
-func startMCPProcess(t *testing.T, baseURL, apiKey string) *mcpProcess {
+func (c *mcpHTTPClient) call(t *testing.T, method string, params any) map[string]any {
 	t.Helper()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	t.Cleanup(cancel)
-
-	cmd := exec.CommandContext(ctx, "go", "run", "./cmd/mcp")
-	cmd.Dir = repoRoot(t)
-	cmd.Env = append(os.Environ(),
-		"DENSE_MEM_URL="+baseURL,
-		"DENSE_MEM_API_KEY="+apiKey,
-	)
-
-	stdin, err := cmd.StdinPipe()
-	require.NoError(t, err)
-
-	stdout, err := cmd.StdoutPipe()
-	require.NoError(t, err)
-
-	stderr, err := cmd.StderrPipe()
-	require.NoError(t, err)
-
-	errBuf := &bytes.Buffer{}
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("start mcp: %v", err)
-	}
-
-	go func() {
-		_, _ = io.Copy(errBuf, stderr)
-	}()
-
-	proc := &mcpProcess{
-		cmd:    cmd,
-		stdin:  stdin,
-		stdout: bufio.NewReader(stdout),
-		stderr: errBuf,
-	}
-
-	t.Cleanup(func() {
-		_ = stdin.Close()
-		if proc.cmd.Process != nil {
-			_ = proc.cmd.Process.Kill()
-		}
-		_ = proc.cmd.Wait()
-	})
-
-	return proc
-}
-
-func (p *mcpProcess) call(t *testing.T, method string, params any) map[string]any {
-	t.Helper()
-
-	p.nextID++
-	req := map[string]any{
+	c.nextID++
+	reqBody := map[string]any{
 		"jsonrpc": "2.0",
-		"id":      p.nextID,
+		"id":      c.nextID,
 		"method":  method,
 	}
 	if params != nil {
-		req["params"] = params
+		reqBody["params"] = params
 	}
 
-	data, err := json.Marshal(req)
-	require.NoError(t, err)
-	_, err = p.stdin.Write(append(data, '\n'))
+	data, err := json.Marshal(reqBody)
 	require.NoError(t, err)
 
-	line, err := p.stdout.ReadBytes('\n')
-	if err != nil {
-		t.Fatalf("read mcp response: %v\nstderr:\n%s", err, p.stderr.String())
-	}
+	req, err := http.NewRequest(http.MethodPost, c.baseURL+"/mcp", bytes.NewReader(data))
+	require.NoError(t, err)
+	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	req.Header.Set("Content-Type", "application/json")
 
-	var resp map[string]any
-	if err := json.Unmarshal(bytes.TrimSpace(line), &resp); err != nil {
-		t.Fatalf("decode mcp response: %v\nline=%s\nstderr:\n%s", err, string(line), p.stderr.String())
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	payload, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+
+	var out map[string]any
+	if err := json.Unmarshal(bytes.TrimSpace(payload), &out); err != nil {
+		t.Fatalf("decode mcp response: %v\nbody=%s", err, string(payload))
 	}
-	return resp
+	return out
 }
 
 func toolResult(t *testing.T, resp map[string]any) map[string]any {
@@ -163,13 +114,6 @@ func toolResult(t *testing.T, resp map[string]any) map[string]any {
 	var payload map[string]any
 	require.NoError(t, json.Unmarshal([]byte(text), &payload))
 	return payload
-}
-
-func repoRoot(t *testing.T) string {
-	t.Helper()
-	_, file, _, ok := runtime.Caller(0)
-	require.True(t, ok)
-	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
 }
 
 func startWritableMemoryServer(t *testing.T, env *TestEnv) (*httptest.Server, fragmentservice.GetFragmentService) {
@@ -236,6 +180,8 @@ func startWritableMemoryServer(t *testing.T, env *TestEnv) (*httptest.Server, fr
 		FragmentRead:   handler.NewFragmentReadHandler(fragmentGetSvc).Handle,
 		FragmentList:   handler.NewFragmentListHandler(fragmentListSvc).Handle,
 		ToolCatalog:    handler.NewToolCatalogHandler(reg).Handle,
+		MCPPost:        handler.NewMCPHandler(reg, logger).HandlePost,
+		MCPGet:         handler.NewMCPHandler(reg, logger).HandleGet,
 	}
 
 	httpserver.RegisterProtectedRoutesWithHandlers(server, deps, handlers)
@@ -273,7 +219,7 @@ func TestUATMCPRuntime_SaveMemoryPersistsAndReadsBack(t *testing.T) {
 
 	profileID, rawAPIKey := createProfileAndKey(t, ctx, env)
 	serverURL, fragmentGetSvc := startWritableMemoryServer(t, env)
-	mcp := startMCPProcess(t, serverURL.URL, rawAPIKey)
+	mcp := &mcpHTTPClient{baseURL: serverURL.URL, apiKey: rawAPIKey}
 
 	initResp := mcp.call(t, "initialize", map[string]any{
 		"protocolVersion": "2024-11-05",

@@ -224,30 +224,23 @@ func TestUAT10_ToolCatalogAndOpenAPI(t *testing.T) {
 		"save_memory must require the write scope")
 }
 
-// UAT-11: MCP stdio server derives profile scope from the API key and reuses
+// UAT-11: MCP Streamable HTTP derives profile scope from the API key and reuses
 // the shared registry (Unit 24).
-// AC trace: AC-33, AC-36, AC-37, AC-50.
-func TestUAT11_MCPStdioDiscovery(t *testing.T) {
-	mcpMain := readFile(t, "cmd/mcp/main.go")
-	assert.NotContains(t, mcpMain, "X_PROFILE_ID is required",
-		"MCP must not require a separate profile env var")
-	assert.Contains(t, mcpMain, "DENSE_MEM_API_KEY",
-		"MCP must read the dense-mem auth key from env")
-	assert.Contains(t, mcpMain, "DENSE_MEM_URL",
-		"MCP must require the dense-mem HTTP base URL")
-	assert.Contains(t, mcpMain, "buildRemoteRegistry",
-		"MCP must bootstrap from the live HTTP tool catalog (AC-37)")
-	// Stdout reserved for JSON-RPC: logs must go to stderr.
-	assert.Contains(t, mcpMain, "os.Stderr",
-		"MCP logs must target stderr; stdout is reserved for JSON-RPC (AC-36)")
+// AC trace: AC-33, AC-37, AC-50.
+func TestUAT11_MCPHTTPDiscovery(t *testing.T) {
+	router := readFile(t, "internal/http/router_protected.go")
+	assert.Contains(t, router, `e.Group("/mcp")`,
+		"MCP must be exposed at /mcp")
+	assert.Contains(t, router, "AuthMiddleware",
+		"MCP must use bearer auth")
+	assert.Contains(t, router, "ProfileResolutionMiddleware",
+		"MCP must derive profile scope through profile resolution")
 
-	remoteRegistry := readFile(t, "cmd/mcp/remote_registry.go")
-	assert.Contains(t, remoteRegistry, "client.ListTools",
-		"MCP bootstrap must fetch the remote tool catalog")
-	assert.Contains(t, remoteRegistry, "requiredMCPTools",
-		"MCP bootstrap must enforce the required memory tool contract")
-	assert.Contains(t, remoteRegistry, "registry.BuildDefault",
-		"MCP must still reuse the shared registry for local invokers (AC-37)")
+	handler := readFile(t, "internal/http/handler/mcp_handler.go")
+	assert.Contains(t, handler, "HandlePost",
+		"MCP must support Streamable HTTP POST")
+	assert.Contains(t, handler, "text/event-stream",
+		"MCP must support SSE responses when requested")
 
 	server := readFile(t, "internal/mcp/server.go")
 	assert.Contains(t, server, "ProtocolVersion",

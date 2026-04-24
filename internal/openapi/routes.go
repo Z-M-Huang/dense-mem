@@ -98,6 +98,10 @@ func DefaultRoutes() []RouteDescriptor {
 		{Method: "POST", Path: "/api/v1/tools/keyword-search", OperationID: "keywordSearchTool", ToolName: "keyword-search", Description: "Advanced: BM25 keyword search."},
 		{Method: "POST", Path: "/api/v1/tools/semantic-search", OperationID: "semanticSearchTool", ToolName: "semantic-search", Description: "Advanced: kNN vector search."},
 
+		// --- MCP Streamable HTTP (full runtime variant) ---
+		{Method: "POST", Path: "/mcp", OperationID: "mcpPost", Description: "MCP Streamable HTTP JSON-RPC endpoint."},
+		{Method: "GET", Path: "/mcp", OperationID: "mcpGet", Description: "MCP Streamable HTTP SSE stream endpoint."},
+
 		// --- Profile routes (full runtime variant) ---
 		{Method: "GET", Path: "/api/v1/profiles/{profileId}", OperationID: "getProfile", Description: "Get a profile."},
 		{Method: "PATCH", Path: "/api/v1/profiles/{profileId}", OperationID: "patchProfile", Description: "Update profile metadata."},

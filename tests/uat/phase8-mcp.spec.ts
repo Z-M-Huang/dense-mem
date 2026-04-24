@@ -1,15 +1,14 @@
 /**
  * UAT-11 — Phase 8: MCP server tool surface.
  *
- * Verifies that the dense-mem MCP binary:
+ * Verifies that the dense-mem MCP HTTP endpoint:
  * - responds to JSON-RPC initialize with a valid tools list
  * - exposes the dense-mem memory contract tools
  * - relies on profile scope derived from the API key
  * - returns structured errors for unknown tools
  *
- * NOTE: These tests spawn the MCP binary via `go run`. The MCP process is
- * an HTTP-backed facade over the live dense-mem server, so it requires
- * DENSE_MEM_URL and DENSE_MEM_API_KEY.
+ * NOTE: These tests call the live dense-mem server's Streamable HTTP /mcp
+ * endpoint, so they require DENSE_MEM_URL and DENSE_MEM_API_KEY.
  */
 
 import { test, expect } from '@playwright/test';
@@ -48,7 +47,7 @@ test('UAT-11a: MCP initialize returns tools list', async () => {
 });
 
 // UAT-11b: MCP server exposes expected tools
-test('UAT-11b: MCP server exposes required memory tools', async () => {
+test('UAT-11b: MCP endpoint exposes required memory tools', async () => {
   const mcp = await spawnMcp(mcpEnv());
 
   try {

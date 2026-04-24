@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/dense-mem/dense-mem/internal/observability"
 	"github.com/dense-mem/dense-mem/internal/tools/registry"
@@ -91,85 +90,7 @@ func TestSanitizeToolError(t *testing.T) {
 	}
 }
 
-// TestDeprecatedEnvAliases verifies that LookupEnv ignores legacy profile envs,
-// accepts DENSE_MEM_AUTH_KEY as a fallback, and writes deprecation warnings.
-func TestDeprecatedEnvAliases(t *testing.T) {
-	t.Run("canonical names take priority", func(t *testing.T) {
-		env := map[string]string{
-			"DENSE_MEM_PROFILE_ID": "canonical-profile",
-			"DENSE_MEM_API_KEY":    "canonical-key",
-			"X_PROFILE_ID":         "old-profile",
-			"DENSE_MEM_AUTH_KEY":   "old-key",
-		}
-		var warn bytes.Buffer
-		profileID, apiKey := LookupEnv(func(k string) string { return env[k] }, &warn)
-		if profileID != "" {
-			t.Errorf("profileID = %q; want empty", profileID)
-		}
-		if apiKey != "canonical-key" {
-			t.Errorf("apiKey = %q; want canonical-key", apiKey)
-		}
-		if !strings.Contains(warn.String(), "DENSE_MEM_PROFILE_ID is ignored") {
-			t.Errorf("missing ignored profile warning: %q", warn.String())
-		}
-	})
-
-	t.Run("deprecated aliases accepted with warning", func(t *testing.T) {
-		env := map[string]string{
-			"X_PROFILE_ID":       "old-profile",
-			"DENSE_MEM_AUTH_KEY": "old-key",
-		}
-		var warn bytes.Buffer
-		profileID, apiKey := LookupEnv(func(k string) string { return env[k] }, &warn)
-		if profileID != "" {
-			t.Errorf("profileID = %q; want empty", profileID)
-		}
-		if apiKey != "old-key" {
-			t.Errorf("apiKey = %q; want old-key", apiKey)
-		}
-		// Both deprecated aliases must produce warnings.
-		warnStr := warn.String()
-		if !strings.Contains(warnStr, "X_PROFILE_ID is ignored") {
-			t.Errorf("missing ignored profile warning for X_PROFILE_ID; got: %q", warnStr)
-		}
-		if !strings.Contains(warnStr, "DENSE_MEM_AUTH_KEY") {
-			t.Errorf("missing deprecation warning for DENSE_MEM_AUTH_KEY; got: %q", warnStr)
-		}
-	})
-
-	t.Run("empty when nothing set", func(t *testing.T) {
-		var warn bytes.Buffer
-		profileID, apiKey := LookupEnv(func(string) string { return "" }, &warn)
-		if profileID != "" || apiKey != "" {
-			t.Errorf("expected empty; got profileID=%q apiKey=%q", profileID, apiKey)
-		}
-	})
-}
-
-func TestLookupRuntimeEnv_IncludesBaseURL(t *testing.T) {
-	env := map[string]string{
-		"DENSE_MEM_PROFILE_ID": "profile-1",
-		"DENSE_MEM_API_KEY":    "key-1",
-		"DENSE_MEM_URL":        "http://dense-mem.test",
-	}
-	var warn bytes.Buffer
-	profileID, apiKey, baseURL := LookupRuntimeEnv(func(k string) string { return env[k] }, &warn)
-	if profileID != "" {
-		t.Errorf("profileID = %q; want empty", profileID)
-	}
-	if apiKey != "key-1" {
-		t.Errorf("apiKey = %q; want key-1", apiKey)
-	}
-	if baseURL != "http://dense-mem.test" {
-		t.Errorf("baseURL = %q; want http://dense-mem.test", baseURL)
-	}
-	if !strings.Contains(warn.String(), "DENSE_MEM_PROFILE_ID is ignored") {
-		t.Errorf("missing ignored profile warning: %q", warn.String())
-	}
-}
-
-// testLogger returns a LogProvider that writes to a bytes.Buffer so tests can
-// assert the server never writes diagnostics to the stdout writer.
+// testLogger returns a LogProvider that writes to a bytes.Buffer.
 func testLogger(t *testing.T) (observability.LogProvider, *bytes.Buffer) {
 	t.Helper()
 	buf := &bytes.Buffer{}
@@ -177,17 +98,10 @@ func testLogger(t *testing.T) (observability.LogProvider, *bytes.Buffer) {
 	return observability.NewWithHandler(h), buf
 }
 
-// runRPC feeds one request line through Serve and returns the written response.
+// runRPC feeds one request payload through the MCP JSON-RPC dispatcher.
 func runRPC(t *testing.T, s *Server, request string) string {
 	t.Helper()
-	in := strings.NewReader(request + "\n")
-	out := &bytes.Buffer{}
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
-	defer cancel()
-	if err := s.Serve(ctx, in, out); err != nil {
-		t.Fatalf("Serve: %v", err)
-	}
-	return out.String()
+	return string(s.HandlePayload(context.Background(), []byte(request)))
 }
 
 type rpcResp struct {
@@ -422,10 +336,7 @@ func TestMCP_UnknownMethodReturnsError(t *testing.T) {
 	}
 }
 
-func TestMCP_ProtocolStdoutClean(t *testing.T) {
-	// When a request is well-formed, stdout must contain only valid JSON-RPC
-	// responses — never free-text diagnostics. The logger writer must absorb
-	// all log output.
+func TestMCP_HandlePayloadProducesOnlyJSONRPC(t *testing.T) {
 	logger, logBuf := testLogger(t)
 	reg := registry.New()
 	_ = reg.Register(registry.Tool{
@@ -438,49 +349,21 @@ func TestMCP_ProtocolStdoutClean(t *testing.T) {
 	})
 	s := NewServer(reg, "pA", logger)
 
-	in := strings.NewReader(
-		`{"jsonrpc":"2.0","id":1,"method":"initialize"}` + "\n" +
-			`{"jsonrpc":"2.0","id":2,"method":"tools/list"}` + "\n" +
-			`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"noop","arguments":{}}}` + "\n",
-	)
-	out := &bytes.Buffer{}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	if err := s.Serve(ctx, in, out); err != nil {
-		t.Fatalf("Serve: %v", err)
+	requests := []string{
+		`{"jsonrpc":"2.0","id":1,"method":"initialize"}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/list"}`,
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"noop","arguments":{}}}`,
 	}
-
-	// Every non-empty line on stdout must parse as a JSON-RPC response.
-	for _, line := range strings.Split(strings.TrimRight(out.String(), "\n"), "\n") {
-		if line == "" {
-			continue
-		}
+	for _, request := range requests {
+		out := runRPC(t, s, request)
 		var probe rpcResp
-		if err := json.Unmarshal([]byte(line), &probe); err != nil {
-			t.Fatalf("stdout line is not valid JSON-RPC: %q — %v", line, err)
+		if err := json.Unmarshal([]byte(out), &probe); err != nil {
+			t.Fatalf("response is not valid JSON-RPC: %q — %v", out, err)
 		}
 		if probe.JSONRPC != "2.0" {
 			t.Errorf("jsonrpc = %q; want 2.0", probe.JSONRPC)
 		}
 	}
 
-	// Log output is unrelated to stdout; we merely assert the logger absorbed
-	// something when invoked (it should not have been invoked here).
 	_ = logBuf
-}
-
-func TestMCP_ServeExitsOnEmptyInput(t *testing.T) {
-	logger, _ := testLogger(t)
-	reg := registry.New()
-	s := NewServer(reg, "pA", logger)
-
-	out := &bytes.Buffer{}
-	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
-	defer cancel()
-	if err := s.Serve(ctx, strings.NewReader(""), out); err != nil {
-		t.Fatalf("Serve: %v", err)
-	}
-	if out.Len() != 0 {
-		t.Errorf("expected empty stdout on empty input; got %q", out.String())
-	}
 }
