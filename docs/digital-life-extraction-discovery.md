@@ -740,8 +740,8 @@ A good extraction pattern is:
 
 ### Route styles
 Use both:
-- path-scoped routes: `/api/v1/profiles/:id/...`
-- optional `X-Profile-ID` only for tool endpoints or internal clients
+- path-scoped routes: `/api/v1/profiles/:id/...` for profile-management APIs
+- auth-scoped tool/data routes that derive profile from the profile-bound API key
 
 ### Why prefer path-scoped routes
 They are safer because:
@@ -750,7 +750,7 @@ They are safer because:
 - easier to reason about in Hono middleware
 
 Recommended exception:
-- tool endpoints can support `X-Profile-ID` when used by agent runtimes that treat profile as invocation context
+- legacy clients may send `X-Profile-ID`, but current clients should rely on the API key profile binding
 
 ---
 

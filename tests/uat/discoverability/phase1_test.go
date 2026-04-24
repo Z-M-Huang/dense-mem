@@ -224,13 +224,13 @@ func TestUAT10_ToolCatalogAndOpenAPI(t *testing.T) {
 		"save_memory must require the write scope")
 }
 
-// UAT-11: MCP stdio server binds to a single profile and reuses the shared
-// registry (Unit 24).
+// UAT-11: MCP stdio server derives profile scope from the API key and reuses
+// the shared registry (Unit 24).
 // AC trace: AC-33, AC-36, AC-37, AC-50.
 func TestUAT11_MCPStdioDiscovery(t *testing.T) {
 	mcpMain := readFile(t, "cmd/mcp/main.go")
-	assert.Contains(t, mcpMain, "X_PROFILE_ID",
-		"MCP must fail fast when X_PROFILE_ID is missing (single-profile instance)")
+	assert.NotContains(t, mcpMain, "X_PROFILE_ID is required",
+		"MCP must not require a separate profile env var")
 	assert.Contains(t, mcpMain, "DENSE_MEM_API_KEY",
 		"MCP must read the dense-mem auth key from env")
 	assert.Contains(t, mcpMain, "DENSE_MEM_URL",

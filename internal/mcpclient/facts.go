@@ -26,8 +26,8 @@ var _ factservice.PromoteClaimService = (*claimPromoteAdapter)(nil)
 // Calls POST /api/v1/claims/:id/promote (no request body). Returns the newly
 // created Fact on success (201 Created).
 //
-// Security invariant: profile_id is always taken from the profileID parameter;
-// the server enforces scope via X-Profile-ID header.
+// Security invariant: profile_id is not accepted from tool input; the server
+// derives scope from the profile-bound API key.
 func NewClaimPromote(c *Client) factservice.PromoteClaimService {
 	return &claimPromoteAdapter{c: c}
 }

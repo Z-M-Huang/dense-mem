@@ -4,19 +4,18 @@
  * Verifies that the dense-mem MCP binary:
  * - responds to JSON-RPC initialize with a valid tools list
  * - exposes the dense-mem memory contract tools
- * - enforces profile isolation through the MCP layer
+ * - relies on profile scope derived from the API key
  * - returns structured errors for unknown tools
  *
  * NOTE: These tests spawn the MCP binary via `go run`. The MCP process is
  * an HTTP-backed facade over the live dense-mem server, so it requires
- * DENSE_MEM_URL, DENSE_MEM_API_KEY, and DENSE_MEM_PROFILE_ID.
+ * DENSE_MEM_URL and DENSE_MEM_API_KEY.
  */
 
 import { test, expect } from '@playwright/test';
 import {
   spawnMcp,
   DENSE_MEM_API_KEY,
-  DENSE_MEM_PROFILE_ID,
   DENSE_MEM_URL,
 } from './helpers';
 
@@ -24,7 +23,6 @@ function mcpEnv(): Record<string, string> {
   return {
     DENSE_MEM_URL,
     DENSE_MEM_API_KEY,
-    DENSE_MEM_PROFILE_ID,
   };
 }
 

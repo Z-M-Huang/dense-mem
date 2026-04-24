@@ -113,7 +113,7 @@ func (g *generator) Generate(variant SpecVariant) (map[string]any, error) {
 			"schemas":         schemas,
 		},
 		"security": []map[string]any{
-			{"BearerAuth": []any{}, "ProfileHeader": []any{}},
+			{"BearerAuth": []any{}},
 		},
 		"paths": paths,
 	}
@@ -269,11 +269,6 @@ func securitySchemes() map[string]any {
 			"type":         "http",
 			"scheme":       "bearer",
 			"bearerFormat": "API key",
-		},
-		"ProfileHeader": map[string]any{
-			"type": "apiKey",
-			"in":   "header",
-			"name": "X-Profile-ID",
 		},
 	}
 }

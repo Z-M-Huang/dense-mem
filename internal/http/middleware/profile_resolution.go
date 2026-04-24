@@ -24,7 +24,7 @@ type ProfileResolutionServiceInterface interface {
 // Using a typed context key prevents accidental overwrites from other packages.
 type ResolvedProfileKey struct{}
 
-// ProfileIDHeader is the HTTP header for profile ID (used by tool routes).
+// ProfileIDHeader is the legacy HTTP header for profile ID overrides.
 const ProfileIDHeader = "X-Profile-ID"
 
 func isHeaderScopedProfileRoute(path string) bool {
@@ -47,10 +47,12 @@ func isHeaderScopedProfileRoute(path string) bool {
 }
 
 // ProfileResolutionMiddleware creates a middleware that resolves and validates
-// profile IDs from either path parameters or headers.
+// profile IDs from path parameters, legacy headers, or the authenticated key.
 //
 // For profile-scoped routes (/api/v1/profiles/:profileId/*): reads :profileId param
-// For tool routes (/api/v1/tools/*): reads X-Profile-ID header
+// For header-scoped routes (/api/v1/tools/*, /api/v1/fragments, etc.): prefers
+// the authenticated principal's profile ID, falling back to X-Profile-ID for
+// legacy clients.
 //
 // The middleware:
 // - Validates that a profile ID is provided (returns 400 PROFILE_ID_REQUIRED if missing)
@@ -72,9 +74,13 @@ func ProfileResolutionMiddleware(svc ProfileResolutionServiceInterface) echo.Mid
 			path := c.Request().URL.Path
 
 			if isHeaderScopedProfileRoute(path) {
-				// Canonical profile-scoped routes read from X-Profile-ID header.
+				// Canonical profile-scoped routes use the profile-bound API key.
 				isToolRoute = true
-				profileIDStr = c.Request().Header.Get(ProfileIDHeader)
+				if principal != nil && principal.ProfileID != nil {
+					profileIDStr = principal.ProfileID.String()
+				} else {
+					profileIDStr = c.Request().Header.Get(ProfileIDHeader)
+				}
 			} else if strings.HasPrefix(path, "/api/v1/profiles/") {
 				// Profile route: read from :profileId path param
 				isToolRoute = false

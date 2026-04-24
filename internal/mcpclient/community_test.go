@@ -20,7 +20,7 @@ func TestCommunityAdapters(t *testing.T) {
 	t.Run("GetCommunitySummary", func(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			require.Equal(t, "Bearer "+authToken, r.Header.Get("Authorization"))
-			require.Equal(t, profileID, r.Header.Get("X-Profile-ID"))
+			require.Empty(t, r.Header.Get("X-Profile-ID"))
 			require.Equal(t, http.MethodGet, r.Method)
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"community_id":"42","profile_id":"profile-A","level":0,"summary":"s","summary_version":"community-deterministic-v1","member_count":3,"top_entities":["alice"],"top_predicates":["knows"],"last_summarized_at":"2026-04-22T12:00:00Z"}`))
@@ -49,7 +49,7 @@ func TestCommunityAdapters(t *testing.T) {
 	t.Run("ListCommunities", func(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			require.Equal(t, "Bearer "+authToken, r.Header.Get("Authorization"))
-			require.Equal(t, profileID, r.Header.Get("X-Profile-ID"))
+			require.Empty(t, r.Header.Get("X-Profile-ID"))
 			require.Equal(t, http.MethodGet, r.Method)
 			require.Equal(t, "5", r.URL.Query().Get("limit"))
 			w.Header().Set("Content-Type", "application/json")

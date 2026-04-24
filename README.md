@@ -224,7 +224,6 @@ import { createDenseMemTools } from '@dense-mem/ai-sdk-tools';
 const tools = await createDenseMemTools({
   baseUrl: process.env.DENSE_MEM_URL,
   apiKey: process.env.DENSE_MEM_API_KEY,
-  profileId: process.env.DENSE_MEM_PROFILE_ID,
 });
 
 const result = await generateText({
@@ -341,42 +340,41 @@ docker compose exec server /app/list-profiles
 
 ```bash
 docker compose exec server /app/list-keys \
-  --profile-id "$DENSE_MEM_PROFILE_ID"
+  --profile-id "<profile-id>"
 ```
 
 ```bash
 docker compose exec server /app/rotate-key \
-  --profile-id "$DENSE_MEM_PROFILE_ID" \
+  --profile-id "<profile-id>" \
   --key-id "<existing-key-id>"
 ```
 
 ```bash
 docker compose exec server /app/revoke-key \
-  --profile-id "$DENSE_MEM_PROFILE_ID" \
+  --profile-id "<profile-id>" \
   --key-id "<existing-key-id>"
 ```
 
 ```bash
 docker compose exec server /app/delete-profile \
-  --profile-id "$DENSE_MEM_PROFILE_ID"
+  --profile-id "<profile-id>"
 ```
 
 `delete-profile` only succeeds after all active keys for that profile have been revoked or expired.
 
 ### Use The Returned Credentials
 
-Export the returned values:
+Export the returned API key:
 
 ```bash
-export DENSE_MEM_PROFILE_ID="11111111-2222-3333-4444-555555555555"
 export DENSE_MEM_API_KEY="dm_live_..."
 ```
 
 Current HTTP auth rules:
 
 - Always send `Authorization: Bearer $DENSE_MEM_API_KEY`
-- Header-scoped routes also require `X-Profile-ID: $DENSE_MEM_PROFILE_ID`
-- Path-scoped routes use `/api/v1/profiles/{profileId}` in the URL instead of the header
+- Header-scoped routes derive the profile from the profile-bound API key; do not send `X-Profile-ID`
+- Path-scoped profile-management routes still use `/api/v1/profiles/{profileId}` in the URL
 
 Header-scoped routes today include:
 
@@ -391,18 +389,16 @@ Example requests:
 
 ```bash
 curl http://localhost:8080/api/v1/tools \
-  -H "Authorization: Bearer $DENSE_MEM_API_KEY" \
-  -H "X-Profile-ID: $DENSE_MEM_PROFILE_ID"
+  -H "Authorization: Bearer $DENSE_MEM_API_KEY"
 ```
 
 ```bash
 curl http://localhost:8080/api/v1/recall?q=trip \
-  -H "Authorization: Bearer $DENSE_MEM_API_KEY" \
-  -H "X-Profile-ID: $DENSE_MEM_PROFILE_ID"
+  -H "Authorization: Bearer $DENSE_MEM_API_KEY"
 ```
 
 ```bash
-curl http://localhost:8080/api/v1/profiles/$DENSE_MEM_PROFILE_ID \
+curl http://localhost:8080/api/v1/profiles/<profile-id> \
   -H "Authorization: Bearer $DENSE_MEM_API_KEY"
 ```
 

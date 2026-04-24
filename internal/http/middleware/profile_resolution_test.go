@@ -182,6 +182,92 @@ func TestProfileResolution_HeaderScopedCanonicalRoutes(t *testing.T) {
 	}
 }
 
+func TestProfileResolution_HeaderScoped_UsesPrincipalProfile(t *testing.T) {
+	e := echo.New()
+	e.HTTPErrorHandler = httperr.ErrorHandler
+
+	profileID := uuid.New()
+	profile := &domain.Profile{
+		ID:        profileID,
+		Name:      "test-profile",
+		CreatedAt: time.Now().UTC(),
+		UpdatedAt: time.Now().UTC(),
+	}
+
+	mockSvc := &mockProfileResolutionService{
+		getFunc: func(ctx context.Context, id uuid.UUID) (*domain.Profile, error) {
+			assert.Equal(t, profileID, id)
+			return profile, nil
+		},
+	}
+
+	var capturedProfileID uuid.UUID
+	e.POST("/api/v1/tools/some-tool", func(c echo.Context) error {
+		id, ok := GetResolvedProfileID(c.Request().Context())
+		require.True(t, ok, "profile ID should be in context")
+		capturedProfileID = id
+		return c.String(http.StatusOK, "ok")
+	}, func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			principal := &Principal{ProfileID: &profileID}
+			ctx := context.WithValue(c.Request().Context(), principalContextKey{}, principal)
+			c.SetRequest(c.Request().WithContext(ctx))
+			return next(c)
+		}
+	}, ProfileResolutionMiddleware(mockSvc))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/tools/some-tool", nil)
+	rec := httptest.NewRecorder()
+
+	e.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, profileID, capturedProfileID)
+}
+
+func TestProfileResolution_HeaderScoped_PrincipalOverridesLegacyHeader(t *testing.T) {
+	e := echo.New()
+	e.HTTPErrorHandler = httperr.ErrorHandler
+
+	principalProfileID := uuid.New()
+	legacyHeaderProfileID := uuid.New()
+	profile := &domain.Profile{
+		ID:        principalProfileID,
+		Name:      "test-profile",
+		CreatedAt: time.Now().UTC(),
+		UpdatedAt: time.Now().UTC(),
+	}
+
+	mockSvc := &mockProfileResolutionService{
+		getFunc: func(ctx context.Context, id uuid.UUID) (*domain.Profile, error) {
+			assert.Equal(t, principalProfileID, id)
+			return profile, nil
+		},
+	}
+
+	e.POST("/api/v1/tools/some-tool", func(c echo.Context) error {
+		id, ok := GetResolvedProfileID(c.Request().Context())
+		require.True(t, ok, "profile ID should be in context")
+		assert.Equal(t, principalProfileID, id)
+		return c.String(http.StatusOK, "ok")
+	}, func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			principal := &Principal{ProfileID: &principalProfileID}
+			ctx := context.WithValue(c.Request().Context(), principalContextKey{}, principal)
+			c.SetRequest(c.Request().WithContext(ctx))
+			return next(c)
+		}
+	}, ProfileResolutionMiddleware(mockSvc))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/tools/some-tool", nil)
+	req.Header.Set(ProfileIDHeader, legacyHeaderProfileID.String())
+	rec := httptest.NewRecorder()
+
+	e.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+}
+
 // TestProfileResolution_Header_Missing tests that a missing X-Profile-ID header
 // on tool routes returns a 400 PROFILE_ID_REQUIRED error.
 func TestProfileResolution_Header_Missing(t *testing.T) {

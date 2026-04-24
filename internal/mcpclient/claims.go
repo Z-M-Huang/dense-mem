@@ -25,9 +25,8 @@ var _ claimservice.CreateClaimService = (*claimCreateAdapter)(nil)
 // Calls POST /api/v1/claims. Returns Duplicate=true when the server responds
 // with the X-Idempotent-Replay header.
 //
-// Security invariant: profile_id is always taken from the profileID parameter;
-// any profile_id field in the domain.Claim is sent as part of the body mapping
-// but the server enforces scope via X-Profile-ID header.
+// Security invariant: profile_id is not accepted from tool input; the server
+// derives scope from the profile-bound API key.
 func NewClaimCreate(c *Client) claimservice.CreateClaimService {
 	return &claimCreateAdapter{c: c}
 }
@@ -35,7 +34,7 @@ func NewClaimCreate(c *Client) claimservice.CreateClaimService {
 func (a *claimCreateAdapter) Create(ctx context.Context, profileID string, claim *domain.Claim) (*claimservice.CreateResult, error) {
 	// Map domain.Claim → CreateClaimRequest DTO.
 	// profile_id is not included in the request body — the server derives it from
-	// the X-Profile-ID header (process-bound profile invariant).
+	// the profile-bound API key.
 	body := httpDto.CreateClaimRequest{
 		SupportedBy:    claim.SupportedBy,
 		Subject:        claim.Subject,

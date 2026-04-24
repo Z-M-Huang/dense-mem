@@ -15,7 +15,6 @@ export interface DenseMemToolCatalogResponse {
 export interface DenseMemToolOptions {
   baseUrl: string;
   apiKey: string;
-  profileId: string;
   fetch?: typeof globalThis.fetch;
   headers?: HeadersInit;
   includeRecallTool?: boolean;

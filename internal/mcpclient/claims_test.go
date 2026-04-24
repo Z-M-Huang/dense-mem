@@ -49,7 +49,7 @@ func TestKnowledgeToolAdapters(t *testing.T) {
 		}
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			require.Equal(t, "Bearer "+testAuthToken, r.Header.Get("Authorization"), "Authorization bearer token must be set")
-			require.Equal(t, profileA, r.Header.Get("X-Profile-ID"), "X-Profile-ID must match caller")
+			require.Empty(t, r.Header.Get("X-Profile-ID"), "X-Profile-ID should not be sent")
 			require.Equal(t, http.MethodPost, r.Method)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusCreated)
@@ -111,7 +111,7 @@ func TestKnowledgeToolAdapters(t *testing.T) {
 		}
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			require.Equal(t, "Bearer "+testAuthToken, r.Header.Get("Authorization"))
-			require.Equal(t, profileA, r.Header.Get("X-Profile-ID"))
+			require.Empty(t, r.Header.Get("X-Profile-ID"))
 			require.Equal(t, http.MethodGet, r.Method)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
@@ -158,7 +158,7 @@ func TestKnowledgeToolAdapters(t *testing.T) {
 		}
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			require.Equal(t, "Bearer "+testAuthToken, r.Header.Get("Authorization"))
-			require.Equal(t, profileA, r.Header.Get("X-Profile-ID"))
+			require.Empty(t, r.Header.Get("X-Profile-ID"))
 			require.Equal(t, http.MethodGet, r.Method)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
@@ -218,7 +218,7 @@ func TestKnowledgeToolAdapters(t *testing.T) {
 		}
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			require.Equal(t, "Bearer "+testAuthToken, r.Header.Get("Authorization"))
-			require.Equal(t, profileA, r.Header.Get("X-Profile-ID"))
+			require.Empty(t, r.Header.Get("X-Profile-ID"))
 			require.Equal(t, http.MethodPost, r.Method)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
@@ -268,7 +268,7 @@ func TestKnowledgeToolAdapters(t *testing.T) {
 		}
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			require.Equal(t, "Bearer "+testAuthToken, r.Header.Get("Authorization"))
-			require.Equal(t, profileA, r.Header.Get("X-Profile-ID"))
+			require.Empty(t, r.Header.Get("X-Profile-ID"))
 			require.Equal(t, http.MethodPost, r.Method)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusCreated)
@@ -303,7 +303,7 @@ func TestKnowledgeToolAdapters(t *testing.T) {
 		}
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			require.Equal(t, "Bearer "+testAuthToken, r.Header.Get("Authorization"))
-			require.Equal(t, profileA, r.Header.Get("X-Profile-ID"))
+			require.Empty(t, r.Header.Get("X-Profile-ID"))
 			require.Equal(t, http.MethodGet, r.Method)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
@@ -349,7 +349,7 @@ func TestKnowledgeToolAdapters(t *testing.T) {
 		}
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			require.Equal(t, "Bearer "+testAuthToken, r.Header.Get("Authorization"))
-			require.Equal(t, profileA, r.Header.Get("X-Profile-ID"))
+			require.Empty(t, r.Header.Get("X-Profile-ID"))
 			require.Equal(t, http.MethodGet, r.Method)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
@@ -404,7 +404,7 @@ func TestKnowledgeToolAdapters(t *testing.T) {
 	t.Run("RetractFragment_sends_correct_headers_and_succeeds", func(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			require.Equal(t, "Bearer "+testAuthToken, r.Header.Get("Authorization"))
-			require.Equal(t, profileA, r.Header.Get("X-Profile-ID"))
+			require.Empty(t, r.Header.Get("X-Profile-ID"))
 			require.Equal(t, http.MethodPost, r.Method)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
@@ -439,7 +439,7 @@ func TestKnowledgeToolAdapters(t *testing.T) {
 	t.Run("DetectCommunity_sends_correct_headers_and_succeeds", func(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			require.Equal(t, "Bearer "+testAuthToken, r.Header.Get("Authorization"))
-			require.Equal(t, profileA, r.Header.Get("X-Profile-ID"))
+			require.Empty(t, r.Header.Get("X-Profile-ID"))
 			require.Equal(t, http.MethodPost, r.Method)
 			require.Equal(t, "application/json", r.Header.Get("Content-Type"))
 			var body map[string]any
@@ -516,14 +516,8 @@ func TestKnowledgeToolAdapters(t *testing.T) {
 		NewClaimGet(clientB).Get(ctx, profileB, "claim-x") //nolint:errcheck
 
 		require.Len(t, capturedProfiles, 2)
-		require.Equal(t, profileA, capturedProfiles[0],
-			"client A must send its own profile ID in X-Profile-ID")
-		require.Equal(t, profileB, capturedProfiles[1],
-			"client B must send its own profile ID in X-Profile-ID")
-		require.NotEqual(t, capturedProfiles[0], profileB,
-			"profile-A request must not carry profile-B's ID")
-		require.NotEqual(t, capturedProfiles[1], profileA,
-			"profile-B request must not carry profile-A's ID")
+		require.Equal(t, []string{"", ""}, capturedProfiles,
+			"clients must not send legacy profile headers")
 	})
 }
 

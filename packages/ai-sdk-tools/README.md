@@ -29,7 +29,6 @@ import { createDenseMemTools } from '@dense-mem/ai-sdk-tools';
 const tools = await createDenseMemTools({
   baseUrl: process.env.DENSE_MEM_URL!,
   apiKey: process.env.DENSE_MEM_API_KEY!,
-  profileId: process.env.DENSE_MEM_PROFILE_ID!,
 });
 
 const result = await generateText({
@@ -45,7 +44,6 @@ const result = await generateText({
 
 - `baseUrl`: dense-mem base URL, for example `https://dense-mem.example.com`
 - `apiKey`: dense-mem bearer token
-- `profileId`: profile scope for all tool calls
 - `fetch`: optional custom `fetch` implementation
 - `headers`: optional extra headers added to every request
 - `includeRecallTool`: disable the default `recall_knowledge` tool when set to `false`

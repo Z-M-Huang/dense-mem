@@ -91,9 +91,8 @@ func TestSanitizeToolError(t *testing.T) {
 	}
 }
 
-// TestDeprecatedEnvAliases verifies that LookupEnv accepts X_PROFILE_ID and
-// DENSE_MEM_AUTH_KEY as fallbacks when canonical names are unset, and that a
-// deprecation warning is written to the provided writer (AC-60 / R4).
+// TestDeprecatedEnvAliases verifies that LookupEnv ignores legacy profile envs,
+// accepts DENSE_MEM_AUTH_KEY as a fallback, and writes deprecation warnings.
 func TestDeprecatedEnvAliases(t *testing.T) {
 	t.Run("canonical names take priority", func(t *testing.T) {
 		env := map[string]string{
@@ -104,15 +103,14 @@ func TestDeprecatedEnvAliases(t *testing.T) {
 		}
 		var warn bytes.Buffer
 		profileID, apiKey := LookupEnv(func(k string) string { return env[k] }, &warn)
-		if profileID != "canonical-profile" {
-			t.Errorf("profileID = %q; want canonical-profile", profileID)
+		if profileID != "" {
+			t.Errorf("profileID = %q; want empty", profileID)
 		}
 		if apiKey != "canonical-key" {
 			t.Errorf("apiKey = %q; want canonical-key", apiKey)
 		}
-		// No deprecation warnings when canonical names are set.
-		if warn.Len() != 0 {
-			t.Errorf("unexpected deprecation warning: %q", warn.String())
+		if !strings.Contains(warn.String(), "DENSE_MEM_PROFILE_ID is ignored") {
+			t.Errorf("missing ignored profile warning: %q", warn.String())
 		}
 	})
 
@@ -123,16 +121,16 @@ func TestDeprecatedEnvAliases(t *testing.T) {
 		}
 		var warn bytes.Buffer
 		profileID, apiKey := LookupEnv(func(k string) string { return env[k] }, &warn)
-		if profileID != "old-profile" {
-			t.Errorf("profileID = %q; want old-profile", profileID)
+		if profileID != "" {
+			t.Errorf("profileID = %q; want empty", profileID)
 		}
 		if apiKey != "old-key" {
 			t.Errorf("apiKey = %q; want old-key", apiKey)
 		}
 		// Both deprecated aliases must produce warnings.
 		warnStr := warn.String()
-		if !strings.Contains(warnStr, "X_PROFILE_ID") {
-			t.Errorf("missing deprecation warning for X_PROFILE_ID; got: %q", warnStr)
+		if !strings.Contains(warnStr, "X_PROFILE_ID is ignored") {
+			t.Errorf("missing ignored profile warning for X_PROFILE_ID; got: %q", warnStr)
 		}
 		if !strings.Contains(warnStr, "DENSE_MEM_AUTH_KEY") {
 			t.Errorf("missing deprecation warning for DENSE_MEM_AUTH_KEY; got: %q", warnStr)
@@ -156,8 +154,8 @@ func TestLookupRuntimeEnv_IncludesBaseURL(t *testing.T) {
 	}
 	var warn bytes.Buffer
 	profileID, apiKey, baseURL := LookupRuntimeEnv(func(k string) string { return env[k] }, &warn)
-	if profileID != "profile-1" {
-		t.Errorf("profileID = %q; want profile-1", profileID)
+	if profileID != "" {
+		t.Errorf("profileID = %q; want empty", profileID)
 	}
 	if apiKey != "key-1" {
 		t.Errorf("apiKey = %q; want key-1", apiKey)
@@ -165,8 +163,8 @@ func TestLookupRuntimeEnv_IncludesBaseURL(t *testing.T) {
 	if baseURL != "http://dense-mem.test" {
 		t.Errorf("baseURL = %q; want http://dense-mem.test", baseURL)
 	}
-	if warn.Len() != 0 {
-		t.Errorf("unexpected warnings: %q", warn.String())
+	if !strings.Contains(warn.String(), "DENSE_MEM_PROFILE_ID is ignored") {
+		t.Errorf("missing ignored profile warning: %q", warn.String())
 	}
 }
 

@@ -127,7 +127,7 @@ async function requestJson({ options, method, path, body, signal }) {
 
   const response = await fetchImpl(`${normalizeBaseUrl(options.baseUrl)}${path}`, {
     method,
-    headers: buildHeaders(options.headers, options.apiKey, options.profileId, body !== undefined),
+    headers: buildHeaders(options.headers, options.apiKey, body !== undefined),
     body: body === undefined ? undefined : JSON.stringify(body),
     signal
   });
@@ -146,10 +146,9 @@ async function requestJson({ options, method, path, body, signal }) {
   return response.json();
 }
 
-function buildHeaders(extraHeaders, apiKey, profileId, hasJsonBody) {
+function buildHeaders(extraHeaders, apiKey, hasJsonBody) {
   const headers = new Headers(extraHeaders || {});
   headers.set('Authorization', `Bearer ${apiKey}`);
-  headers.set('X-Profile-ID', profileId);
 
   if (hasJsonBody) {
     headers.set('Content-Type', 'application/json');
@@ -167,9 +166,6 @@ function assertBaseOptions(options) {
   }
   if (!options.apiKey) {
     throw new Error('dense-mem ai-sdk-tools: apiKey is required');
-  }
-  if (!options.profileId) {
-    throw new Error('dense-mem ai-sdk-tools: profileId is required');
   }
 }
 

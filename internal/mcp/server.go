@@ -6,9 +6,8 @@
 //     registry.Registry — no business logic lives here. (AC-37)
 //   - stdout carries ONLY JSON-RPC responses; all diagnostics go to the
 //     injected logger (stderr in production). (AC-36)
-//   - The server is bound to a single profile for its lifetime. Callers cannot
-//     switch profiles mid-session; that is the "single-profile MCP instance"
-//     decision from the plan key decisions.
+//   - The HTTP API derives the profile from the profile-bound API key. Callers
+//     cannot switch profiles by injecting profile_id into tool arguments.
 package mcp
 
 import (
@@ -41,7 +40,7 @@ const (
 	errCodeToolFailure    = -32000
 )
 
-// Server is a single-profile MCP server bound to a shared tool registry.
+// Server is an MCP server bound to a shared tool registry.
 type Server struct {
 	registry  registry.Registry
 	profileID string
@@ -62,19 +61,17 @@ func NewServer(reg registry.Registry, profileID string, logger observability.Log
 
 // LookupEnv resolves the MCP startup environment, preferring canonical names
 // and falling back to deprecated aliases. A deprecation warning is written to
-// w whenever a deprecated alias is used and the canonical name is unset.
+// w whenever a deprecated or ignored profile alias is used.
 //
-// Canonical names: DENSE_MEM_PROFILE_ID, DENSE_MEM_API_KEY
-// Deprecated aliases: X_PROFILE_ID → DENSE_MEM_PROFILE_ID
+// Canonical names: DENSE_MEM_API_KEY
+// Deprecated/ignored aliases: DENSE_MEM_PROFILE_ID, X_PROFILE_ID
 //
 //	DENSE_MEM_AUTH_KEY → DENSE_MEM_API_KEY
 func LookupEnv(getenv func(string) string, w io.Writer) (profileID, apiKey string) {
-	profileID = getenv("DENSE_MEM_PROFILE_ID")
-	if profileID == "" {
-		if alias := getenv("X_PROFILE_ID"); alias != "" {
-			profileID = alias
-			fmt.Fprintln(w, "warning: X_PROFILE_ID is deprecated; use DENSE_MEM_PROFILE_ID")
-		}
+	if getenv("DENSE_MEM_PROFILE_ID") != "" {
+		fmt.Fprintln(w, "warning: DENSE_MEM_PROFILE_ID is ignored; profile is derived from DENSE_MEM_API_KEY")
+	} else if getenv("X_PROFILE_ID") != "" {
+		fmt.Fprintln(w, "warning: X_PROFILE_ID is ignored; profile is derived from DENSE_MEM_API_KEY")
 	}
 	apiKey = getenv("DENSE_MEM_API_KEY")
 	if apiKey == "" {
@@ -237,7 +234,8 @@ func (s *Server) handleToolsCall(ctx context.Context, raw json.RawMessage) (map[
 		args = map[string]any{}
 	}
 	// Strip profile_id to prevent callers from overriding the fixed server
-	// profile. The server is single-profile; profileID is bound at construction.
+	// profile. The HTTP API derives scope from the profile-bound API key; local
+	// registries may still receive a construction-time profile for tests.
 	delete(args, "profile_id")
 	result, err := tool.Invoke(ctx, s.profileID, args)
 	if err != nil {

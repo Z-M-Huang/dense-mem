@@ -1,9 +1,9 @@
 // Package mcpclient provides HTTP adapters that implement the 7 core service
 // interfaces by forwarding calls to the dense-mem HTTP API.
 //
-// A Client is bound to a single (baseURL, apiKey, profileID) triple — matching
-// the "single-profile MCP instance" design decision. Every outgoing request
-// carries Authorization: Bearer <key> and X-Profile-ID automatically.
+// A Client is bound to a single (baseURL, apiKey) pair. Every outgoing request
+// carries Authorization: Bearer <key>; the HTTP API derives profile scope from
+// the profile-bound key.
 package mcpclient
 
 import (
@@ -15,27 +15,19 @@ import (
 	"net/http"
 )
 
-// Client is an HTTP client bound to a single dense-mem base URL, API key, and
-// profile ID. Adapter methods send Authorization and X-Profile-ID on every request.
-//
-// Security invariant: one Client instance maps to exactly one profile (the
-// "single-profile MCP instance" plan key decision). The profileID stored at
-// construction time is the identity of this process/instance; it must match
-// the profileID passed to every service-method call.
+// Client is an HTTP client bound to a single dense-mem base URL and API key.
 type Client struct {
 	baseURL    string
 	apiKey     string
-	profileID  string
 	httpClient *http.Client
 }
 
-// NewClient constructs a Client bound to baseURL, apiKey and profileID.
+// NewClient constructs a Client bound to baseURL and apiKey.
 // baseURL must not have a trailing slash (e.g. "http://localhost:8080").
-func NewClient(baseURL, apiKey, profileID string) *Client {
+func NewClient(baseURL, apiKey string, legacyProfileID ...string) *Client {
 	return &Client{
 		baseURL:    baseURL,
 		apiKey:     apiKey,
-		profileID:  profileID,
 		httpClient: &http.Client{},
 	}
 }
@@ -70,9 +62,8 @@ func (c *Client) do(req *http.Request) (*httpResult, error) {
 }
 
 // newRequest builds a context-bound, authenticated HTTP request.
-// The profileID parameter is taken from the service-method caller so that each
-// HTTP call is scoped to the correct profile (profile-isolation invariant: never
-// substitute or cache a foreign profileID).
+// The profileID parameter is retained for service-interface compatibility; HTTP
+// scope is derived from the authenticated API key.
 func (c *Client) newRequest(ctx context.Context, method, path, profileID string, body any) (*http.Request, error) {
 	var bodyReader io.Reader
 	if body != nil {
@@ -88,10 +79,9 @@ func (c *Client) newRequest(ctx context.Context, method, path, profileID string,
 		return nil, fmt.Errorf("mcpclient: new request: %w", err)
 	}
 
-	// Security invariant: Authorization authenticates the client and
-	// X-Profile-ID scopes the operation.
+	// Security invariant: Authorization authenticates the client and the server
+	// derives profile scope from the profile-bound API key.
 	req.Header.Set("Authorization", "Bearer "+c.apiKey)
-	req.Header.Set("X-Profile-ID", profileID)
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}

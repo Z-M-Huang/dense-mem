@@ -70,7 +70,7 @@ Returns a ranked list of knowledge hits spanning all pipeline tiers.
 
 | Code | Body | Trigger |
 |------|------|---------|
-| 400 | `{"error": "profile ID is required"}` | Missing or unresolvable `X-Profile-ID` header |
+| 400 | `{"error": "profile ID is required"}` | Missing authenticated profile context |
 | 400 | `{"error": "query is required"}` | Missing or invalid `query` |
 | 503 | `{"error": "embedding provider unavailable"}` | AI embedding service down |
 | 503 | `{"error": "keyword search unavailable"}` | BM25 index unavailable |
@@ -121,5 +121,6 @@ Returns a ranked list of knowledge hits spanning all pipeline tiers.
    their authority-oriented tier scores. Tier `2` scores are RRF values. Present all scores
    as relative ranking hints, not calibrated probabilities.
 
-5. **Cross-profile isolation**: The `X-Profile-ID` header MUST match the authenticated
-   API key's profile. Any attempt to query another profile's data returns 403.
+5. **Cross-profile isolation**: Header-scoped routes derive profile scope from the
+   authenticated API key. Clients should not send `X-Profile-ID`; attempts to access
+   another profile through path-scoped routes return 403.

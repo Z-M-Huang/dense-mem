@@ -28,7 +28,7 @@ type mcpE2EProcess struct {
 	nextID int
 }
 
-func startMCPE2EProcess(t *testing.T, baseURL, apiKey, profileID string) *mcpE2EProcess {
+func startMCPE2EProcess(t *testing.T, baseURL, apiKey string) *mcpE2EProcess {
 	t.Helper()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -39,7 +39,6 @@ func startMCPE2EProcess(t *testing.T, baseURL, apiKey, profileID string) *mcpE2E
 	cmd.Env = append(os.Environ(),
 		"DENSE_MEM_URL="+baseURL,
 		"DENSE_MEM_API_KEY="+apiKey,
-		"DENSE_MEM_PROFILE_ID="+profileID,
 	)
 
 	stdin, err := cmd.StdinPipe()
@@ -189,11 +188,6 @@ func (b *memoryBackend) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing auth", http.StatusUnauthorized)
 		return
 	}
-	if got := r.Header.Get("X-Profile-ID"); got != b.profileID {
-		http.Error(w, "wrong profile", http.StatusForbidden)
-		return
-	}
-
 	switch {
 	case r.Method == http.MethodGet && r.URL.Path == "/api/v1/tools":
 		b.handleTools(w)
@@ -330,7 +324,7 @@ func TestMCP_EndToEndAgainstHTTPBackend(t *testing.T) {
 	srv := httptest.NewServer(backend)
 	defer srv.Close()
 
-	mcp := startMCPE2EProcess(t, srv.URL, apiKey, profileID)
+	mcp := startMCPE2EProcess(t, srv.URL, apiKey)
 
 	initResp := mcp.call(t, "initialize", map[string]any{
 		"protocolVersion": "2024-11-05",

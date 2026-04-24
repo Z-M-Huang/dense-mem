@@ -61,7 +61,7 @@ type mcpProcess struct {
 	nextID int
 }
 
-func startMCPProcess(t *testing.T, baseURL, apiKey, profileID string) *mcpProcess {
+func startMCPProcess(t *testing.T, baseURL, apiKey string) *mcpProcess {
 	t.Helper()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
@@ -72,7 +72,6 @@ func startMCPProcess(t *testing.T, baseURL, apiKey, profileID string) *mcpProces
 	cmd.Env = append(os.Environ(),
 		"DENSE_MEM_URL="+baseURL,
 		"DENSE_MEM_API_KEY="+apiKey,
-		"DENSE_MEM_PROFILE_ID="+profileID,
 	)
 
 	stdin, err := cmd.StdinPipe()
@@ -274,7 +273,7 @@ func TestUATMCPRuntime_SaveMemoryPersistsAndReadsBack(t *testing.T) {
 
 	profileID, rawAPIKey := createProfileAndKey(t, ctx, env)
 	serverURL, fragmentGetSvc := startWritableMemoryServer(t, env)
-	mcp := startMCPProcess(t, serverURL.URL, rawAPIKey, profileID)
+	mcp := startMCPProcess(t, serverURL.URL, rawAPIKey)
 
 	initResp := mcp.call(t, "initialize", map[string]any{
 		"protocolVersion": "2024-11-05",

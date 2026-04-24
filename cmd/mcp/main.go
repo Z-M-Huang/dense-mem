@@ -25,10 +25,6 @@ func main() {
 	// aliases. Deprecation warnings are printed to stderr so they appear in
 	// operator logs but never pollute the JSON-RPC stdout channel.
 	profileID, apiKey, baseURL := mcp.LookupRuntimeEnv(os.Getenv, os.Stderr)
-	if profileID == "" {
-		fmt.Fprintln(os.Stderr, "DENSE_MEM_PROFILE_ID (or deprecated X_PROFILE_ID) is required")
-		os.Exit(2)
-	}
 	if apiKey == "" {
 		fmt.Fprintln(os.Stderr, "DENSE_MEM_API_KEY (or deprecated DENSE_MEM_AUTH_KEY) is required")
 		os.Exit(2)
@@ -46,7 +42,7 @@ func main() {
 	}
 	logger := observability.NewWithHandler(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
 
-	httpClient := mcpclient.NewClient(baseURL, apiKey, profileID)
+	httpClient := mcpclient.NewClient(baseURL, apiKey)
 	bootstrapCtx, bootstrapCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer bootstrapCancel()
 

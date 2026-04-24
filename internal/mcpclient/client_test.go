@@ -26,7 +26,7 @@ const (
 
 // TestExistingToolAdapters verifies all 7 HTTP adapter constructors against
 // AC-55 (adapters implement service interfaces), AC-59 (correct headers sent),
-// and R4 (cross-profile isolation: X-Profile-ID is never mixed between profiles).
+// and the API-key-derived profile scope contract.
 func TestExistingToolAdapters(t *testing.T) {
 	ctx := context.Background()
 
@@ -40,7 +40,7 @@ func TestExistingToolAdapters(t *testing.T) {
 		}
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			require.Equal(t, "Bearer "+testAuthToken, r.Header.Get("Authorization"), "Authorization bearer token must be set")
-			require.Equal(t, testProfileA, r.Header.Get("X-Profile-ID"), "X-Profile-ID must match caller")
+			require.Empty(t, r.Header.Get("X-Profile-ID"), "X-Profile-ID should not be sent")
 			require.Equal(t, http.MethodPost, r.Method)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusCreated)
@@ -89,7 +89,7 @@ func TestExistingToolAdapters(t *testing.T) {
 		}
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			require.Equal(t, "Bearer "+testAuthToken, r.Header.Get("Authorization"))
-			require.Equal(t, testProfileA, r.Header.Get("X-Profile-ID"))
+			require.Empty(t, r.Header.Get("X-Profile-ID"))
 			require.Equal(t, http.MethodGet, r.Method)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
@@ -133,7 +133,7 @@ func TestExistingToolAdapters(t *testing.T) {
 		}
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			require.Equal(t, "Bearer "+testAuthToken, r.Header.Get("Authorization"))
-			require.Equal(t, testProfileA, r.Header.Get("X-Profile-ID"))
+			require.Empty(t, r.Header.Get("X-Profile-ID"))
 			require.Equal(t, http.MethodGet, r.Method)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
@@ -162,7 +162,7 @@ func TestExistingToolAdapters(t *testing.T) {
 		}
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			require.Equal(t, "Bearer "+testAuthToken, r.Header.Get("Authorization"))
-			require.Equal(t, testProfileA, r.Header.Get("X-Profile-ID"))
+			require.Empty(t, r.Header.Get("X-Profile-ID"))
 			require.Equal(t, http.MethodGet, r.Method)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
@@ -190,7 +190,7 @@ func TestExistingToolAdapters(t *testing.T) {
 		}
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			require.Equal(t, "Bearer "+testAuthToken, r.Header.Get("Authorization"))
-			require.Equal(t, testProfileA, r.Header.Get("X-Profile-ID"))
+			require.Empty(t, r.Header.Get("X-Profile-ID"))
 			require.Equal(t, http.MethodPost, r.Method)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
@@ -216,7 +216,7 @@ func TestExistingToolAdapters(t *testing.T) {
 		}
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			require.Equal(t, "Bearer "+testAuthToken, r.Header.Get("Authorization"))
-			require.Equal(t, testProfileA, r.Header.Get("X-Profile-ID"))
+			require.Empty(t, r.Header.Get("X-Profile-ID"))
 			require.Equal(t, http.MethodPost, r.Method)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
@@ -247,7 +247,7 @@ func TestExistingToolAdapters(t *testing.T) {
 
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			require.Equal(t, "Bearer "+testAuthToken, r.Header.Get("Authorization"))
-			require.Equal(t, testProfileA, r.Header.Get("X-Profile-ID"))
+			require.Empty(t, r.Header.Get("X-Profile-ID"))
 			require.Equal(t, http.MethodPost, r.Method)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
@@ -287,14 +287,8 @@ func TestExistingToolAdapters(t *testing.T) {
 		NewFragmentGet(clientB).GetByID(ctx, profileB, "frag-x")     //nolint:errcheck
 
 		require.Len(t, capturedProfiles, 2)
-		require.Equal(t, testProfileA, capturedProfiles[0],
-			"client A must send its own profile ID in X-Profile-ID")
-		require.Equal(t, profileB, capturedProfiles[1],
-			"client B must send its own profile ID in X-Profile-ID")
-		require.NotEqual(t, capturedProfiles[0], profileB,
-			"profile-A request must not carry profile-B's ID")
-		require.NotEqual(t, capturedProfiles[1], testProfileA,
-			"profile-B request must not carry profile-A's ID")
+		require.Equal(t, []string{"", ""}, capturedProfiles,
+			"clients must not send legacy profile headers")
 	})
 }
 

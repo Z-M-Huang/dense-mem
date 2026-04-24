@@ -84,8 +84,8 @@ func TestGenerator_SecuritySchemesPresent(t *testing.T) {
 	if bearer["type"] != "http" || bearer["scheme"] != "bearer" {
 		t.Errorf("BearerAuth = %#v; want http bearer scheme", bearer)
 	}
-	if _, has := ss["ProfileHeader"]; !has {
-		t.Errorf("ProfileHeader scheme missing")
+	if _, has := ss["ProfileHeader"]; has {
+		t.Errorf("ProfileHeader scheme should not be present")
 	}
 }
 
