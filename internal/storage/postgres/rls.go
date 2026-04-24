@@ -57,6 +57,9 @@ func (r *RLS) WithSystemTx(ctx context.Context, db *gorm.DB, fn func(tx *gorm.DB
 		if err := tx.Exec("SELECT set_config('app.tx_mode', 'system', true)").Error; err != nil {
 			return fmt.Errorf("failed to set app.tx_mode: %w", err)
 		}
+		if err := tx.Exec("SELECT set_config('app.role', 'admin', true)").Error; err != nil {
+			return fmt.Errorf("failed to set app.role: %w", err)
+		}
 		return fn(tx)
 	})
 }

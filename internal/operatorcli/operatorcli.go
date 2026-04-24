@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	DefaultClientIP  = "local-cli"
+	DefaultClientIP  = "127.0.0.1"
 	DefaultActorRole = "system"
 )
 

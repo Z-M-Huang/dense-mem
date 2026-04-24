@@ -29,6 +29,7 @@ const ProfileIDHeader = "X-Profile-ID"
 
 func isHeaderScopedProfileRoute(path string) bool {
 	headerScopedPrefixes := []string{
+		"/mcp",
 		"/api/v1/tools",
 		"/api/v1/fragments",
 		"/api/v1/claims",
