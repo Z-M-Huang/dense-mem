@@ -89,6 +89,16 @@ func isUnsupportedRelationshipConstraintError(err error) bool {
 func (s *SchemaBootstrapper) EnsureSchema(ctx context.Context) error {
 	s.logger.Info("Ensuring Neo4j schema exists")
 
+	edition, err := DetectEdition(ctx, s.client)
+	if err != nil {
+		s.logger.Warn("Neo4j edition probe failed; continuing with community-safe schema bootstrap",
+			observability.String("error", err.Error()),
+		)
+		edition = EditionUnknown
+	} else {
+		s.logger.Info("Detected Neo4j edition", observability.String("edition", string(edition)))
+	}
+
 	// Create unique constraints
 	constraints := []string{
 		"CREATE CONSTRAINT sourcefragment_fragment_id_unique IF NOT EXISTS FOR (sf:SourceFragment) REQUIRE sf.fragment_id IS UNIQUE",
@@ -110,45 +120,51 @@ func (s *SchemaBootstrapper) EnsureSchema(ctx context.Context) error {
 	// Create relationship profile_id existence constraints (Unit 13, AC-X1).
 	// profile_id is required on all pipeline edges so that no relationship can
 	// escape profile isolation if a node-level filter is accidentally omitted.
-	relationshipConstraints := []struct {
-		cypher string
-		name   string
-	}{
-		{
-			"CREATE CONSTRAINT supported_by_profile_id_exists IF NOT EXISTS FOR ()-[r:SUPPORTED_BY]-() REQUIRE r.profile_id IS NOT NULL",
-			ConstraintSupportedByProfileIDExists,
-		},
-		{
-			"CREATE CONSTRAINT promotes_to_profile_id_exists IF NOT EXISTS FOR ()-[r:PROMOTES_TO]-() REQUIRE r.profile_id IS NOT NULL",
-			ConstraintPromotesToProfileIDExists,
-		},
-		{
-			"CREATE CONSTRAINT superseded_by_profile_id_exists IF NOT EXISTS FOR ()-[r:SUPERSEDED_BY]-() REQUIRE r.profile_id IS NOT NULL",
-			ConstraintSupersededByProfileIDExists,
-		},
-		{
-			"CREATE CONSTRAINT contradicts_profile_id_exists IF NOT EXISTS FOR ()-[r:CONTRADICTS]-() REQUIRE r.profile_id IS NOT NULL",
-			ConstraintContradictsProfileIDExists,
-		},
-	}
-
-	for _, rc := range relationshipConstraints {
-		_, err := s.client.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (interface{}, error) {
-			_, err := tx.Run(ctx, rc.cypher, nil)
-			return nil, err
-		})
-		if err != nil {
-			if isUnsupportedRelationshipConstraintError(err) {
-				s.logger.Warn(
-					"skipping relationship profile_id constraint; unsupported by connected Neo4j edition",
-					observability.String("name", rc.name),
-					observability.String("error", err.Error()),
-				)
-				continue
-			}
-			return fmt.Errorf("failed to create relationship constraint %s: %w", rc.name, err)
+	if edition == EditionEnterprise {
+		relationshipConstraints := []struct {
+			cypher string
+			name   string
+		}{
+			{
+				"CREATE CONSTRAINT supported_by_profile_id_exists IF NOT EXISTS FOR ()-[r:SUPPORTED_BY]-() REQUIRE r.profile_id IS NOT NULL",
+				ConstraintSupportedByProfileIDExists,
+			},
+			{
+				"CREATE CONSTRAINT promotes_to_profile_id_exists IF NOT EXISTS FOR ()-[r:PROMOTES_TO]-() REQUIRE r.profile_id IS NOT NULL",
+				ConstraintPromotesToProfileIDExists,
+			},
+			{
+				"CREATE CONSTRAINT superseded_by_profile_id_exists IF NOT EXISTS FOR ()-[r:SUPERSEDED_BY]-() REQUIRE r.profile_id IS NOT NULL",
+				ConstraintSupersededByProfileIDExists,
+			},
+			{
+				"CREATE CONSTRAINT contradicts_profile_id_exists IF NOT EXISTS FOR ()-[r:CONTRADICTS]-() REQUIRE r.profile_id IS NOT NULL",
+				ConstraintContradictsProfileIDExists,
+			},
 		}
-		s.logger.Debug("Created relationship constraint", observability.String("name", rc.name))
+
+		for _, rc := range relationshipConstraints {
+			_, err := s.client.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (interface{}, error) {
+				_, err := tx.Run(ctx, rc.cypher, nil)
+				return nil, err
+			})
+			if err != nil {
+				if isUnsupportedRelationshipConstraintError(err) {
+					s.logger.Warn(
+						"skipping relationship profile_id constraint; unsupported by connected Neo4j deployment",
+						observability.String("name", rc.name),
+						observability.String("error", err.Error()),
+					)
+					continue
+				}
+				return fmt.Errorf("failed to create relationship constraint %s: %w", rc.name, err)
+			}
+			s.logger.Debug("Created relationship constraint", observability.String("name", rc.name))
+		}
+	} else {
+		s.logger.Info("Skipping enterprise-only relationship constraints",
+			observability.String("edition", string(edition)),
+		)
 	}
 
 	// Create profile_id indexes
@@ -235,7 +251,7 @@ func (s *SchemaBootstrapper) EnsureSchema(ctx context.Context) error {
 		s.embeddingDimensions,
 	)
 
-	_, err := s.client.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (interface{}, error) {
+	_, err = s.client.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (interface{}, error) {
 		_, err := tx.Run(ctx, vectorIndex, nil)
 		return nil, err
 	})

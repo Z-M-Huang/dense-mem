@@ -238,6 +238,10 @@ const result = await generateText({
 
 ### Docker Compose
 
+The default compose stack provisions `neo4j:5.26-community` with the Neo4j Graph Data Science plugin enabled, so community detection works out of the box in local/dev.
+
+`dense-mem` also supports Neo4j Enterprise + GDS, but that is not bundled in this repository's default setup. If you want Enterprise, bring your own Neo4j image/license/config and keep the same application config.
+
 ```bash
 cp docker-compose.example.yml docker-compose.yml
 cp .env.example .env

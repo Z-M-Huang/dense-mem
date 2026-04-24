@@ -26,15 +26,22 @@ import (
 // recordingClient records every Cypher string passed to ExecuteWrite/ExecuteRead.
 // It satisfies Neo4jClientInterface without requiring a live driver.
 type recordingClient struct {
-	queries   []string
-	writeErr  error // if non-nil, ExecuteWrite returns this error
-	runErrFor func(cypher string) error
+	queries          []string
+	writeErr         error // if non-nil, ExecuteWrite returns this error
+	runErrFor        func(cypher string) error
+	resultRecordsFor func(cypher string) []*neo4j.Record
+	edition          string
 }
 
 func (c *recordingClient) Verify(_ context.Context) error { return nil }
 
 func (c *recordingClient) ExecuteRead(ctx context.Context, fn neo4j.ManagedTransactionWork) (any, error) {
-	tx := &recordingTx{queries: &c.queries, runErrFor: c.runErrFor}
+	tx := &recordingTx{
+		queries:          &c.queries,
+		runErrFor:        c.runErrFor,
+		resultRecordsFor: c.resultRecordsFor,
+		edition:          c.edition,
+	}
 	return fn(tx)
 }
 
@@ -42,7 +49,12 @@ func (c *recordingClient) ExecuteWrite(ctx context.Context, fn neo4j.ManagedTran
 	if c.writeErr != nil {
 		return nil, c.writeErr
 	}
-	tx := &recordingTx{queries: &c.queries, runErrFor: c.runErrFor}
+	tx := &recordingTx{
+		queries:          &c.queries,
+		runErrFor:        c.runErrFor,
+		resultRecordsFor: c.resultRecordsFor,
+		edition:          c.edition,
+	}
 	return fn(tx)
 }
 
@@ -54,6 +66,8 @@ type recordingTx struct {
 	neo4j.ManagedTransaction // embedded nil satisfies legacy() at compile time
 	queries                  *[]string
 	runErrFor                func(cypher string) error
+	resultRecordsFor         func(cypher string) []*neo4j.Record
+	edition                  string
 }
 
 func (r *recordingTx) Run(_ context.Context, cypher string, _ map[string]any) (neo4j.ResultWithContext, error) {
@@ -63,14 +77,133 @@ func (r *recordingTx) Run(_ context.Context, cypher string, _ map[string]any) (n
 			return nil, err
 		}
 	}
-	return &stubResultWithContext{}, nil
+	return &stubResultWithContext{
+		records: r.recordsFor(cypher),
+		open:    true,
+	}, nil
+}
+
+func (r *recordingTx) recordsFor(cypher string) []*neo4j.Record {
+	if r.resultRecordsFor != nil {
+		if records := r.resultRecordsFor(cypher); records != nil {
+			return records
+		}
+	}
+	if strings.Contains(strings.ToLower(cypher), "dbms.components()") {
+		edition := r.edition
+		if edition == "" {
+			edition = string(EditionEnterprise)
+		}
+		return []*neo4j.Record{
+			{
+				Keys:   []string{"edition"},
+				Values: []any{edition},
+			},
+		}
+	}
+	return nil
 }
 
 // stubResultWithContext satisfies neo4j.ResultWithContext without a live connection.
-// The result value is always discarded by EnsureSchema (assigned to _), so no
-// methods other than the interface's unexported legacy() are ever called.
+// It supports the small subset of iteration APIs used by schema bootstrap.
 type stubResultWithContext struct {
 	neo4j.ResultWithContext // embedded nil satisfies legacy() at compile time
+	records                 []*neo4j.Record
+	index                   int
+	current                 *neo4j.Record
+	err                     error
+	open                    bool
+}
+
+func (s *stubResultWithContext) Keys() ([]string, error) {
+	if len(s.records) == 0 {
+		return nil, nil
+	}
+	return s.records[0].Keys, nil
+}
+
+func (s *stubResultWithContext) NextRecord(ctx context.Context, record **neo4j.Record) bool {
+	ok := s.Next(ctx)
+	if ok && record != nil {
+		*record = s.current
+	}
+	return ok
+}
+
+func (s *stubResultWithContext) Next(_ context.Context) bool {
+	if s.index >= len(s.records) {
+		s.current = nil
+		return false
+	}
+	s.current = s.records[s.index]
+	s.index++
+	return true
+}
+
+func (s *stubResultWithContext) PeekRecord(_ context.Context, record **neo4j.Record) bool {
+	if s.index >= len(s.records) {
+		return false
+	}
+	if record != nil {
+		*record = s.records[s.index]
+	}
+	return true
+}
+
+func (s *stubResultWithContext) Peek(_ context.Context) bool {
+	return s.index < len(s.records)
+}
+
+func (s *stubResultWithContext) Err() error {
+	return s.err
+}
+
+func (s *stubResultWithContext) Record() *neo4j.Record {
+	return s.current
+}
+
+func (s *stubResultWithContext) Collect(_ context.Context) ([]*neo4j.Record, error) {
+	if s.index >= len(s.records) {
+		return nil, s.err
+	}
+	remaining := s.records[s.index:]
+	s.index = len(s.records)
+	return remaining, s.err
+}
+
+func (s *stubResultWithContext) Records(ctx context.Context) func(yield func(*neo4j.Record, error) bool) {
+	return func(yield func(*neo4j.Record, error) bool) {
+		for s.Next(ctx) {
+			if !yield(s.Record(), nil) {
+				return
+			}
+		}
+		if s.err != nil {
+			yield(nil, s.err)
+		}
+	}
+}
+
+func (s *stubResultWithContext) Single(ctx context.Context) (*neo4j.Record, error) {
+	records, err := s.Collect(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if len(records) != 1 {
+		return nil, fmt.Errorf("expected exactly one record, got %d", len(records))
+	}
+	s.current = records[0]
+	return records[0], nil
+}
+
+func (s *stubResultWithContext) Consume(_ context.Context) (neo4j.ResultSummary, error) {
+	s.index = len(s.records)
+	s.open = false
+	return nil, s.err
+}
+
+func (s *stubResultWithContext) IsOpen() bool {
+	return s.open
 }
 
 // hasQuery returns true when any recorded query contains the substr.
@@ -808,6 +941,22 @@ func TestEnsureSchema_RelationshipConstraintsUnsupportedDoesNotFail(t *testing.T
 	require.NoError(t, err)
 	assert.True(t, hasQuery(client.queries, IndexCommunityProfileCommunityID),
 		"EnsureSchema must continue creating later indexes when relationship constraints are unsupported")
+}
+
+func TestEnsureSchema_CommunityEditionSkipsRelationshipConstraints(t *testing.T) {
+	ctx := context.Background()
+	client := &recordingClient{edition: string(EditionCommunity)}
+	bs := NewSchemaBootstrapper(client, 1536, unitLogger())
+
+	err := bs.EnsureSchema(ctx)
+	require.NoError(t, err)
+
+	assert.False(t, hasQuery(client.queries, ConstraintSupportedByProfileIDExists))
+	assert.False(t, hasQuery(client.queries, ConstraintPromotesToProfileIDExists))
+	assert.False(t, hasQuery(client.queries, ConstraintSupersededByProfileIDExists))
+	assert.False(t, hasQuery(client.queries, ConstraintContradictsProfileIDExists))
+	assert.True(t, hasQuery(client.queries, IndexCommunityProfileCommunityID),
+		"EnsureSchema must continue creating supported indexes on community edition")
 }
 
 func TestEnsureSchema_RelationshipConstraintUnexpectedFailureReturnsError(t *testing.T) {

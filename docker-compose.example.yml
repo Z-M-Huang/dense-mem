@@ -41,15 +41,19 @@ services:
     restart: unless-stopped
 
   neo4j:
+    # Default local/dev setup: Neo4j Community with the Graph Data Science plugin.
+    # Enterprise + GDS is supported by dense-mem, but is not bundled here.
     image: neo4j:5.26-community
     environment:
       NEO4J_AUTH: ${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:?NEO4J_PASSWORD must be set in .env}
+      NEO4J_PLUGINS: '["graph-data-science"]'
       NEO4J_server_memory_heap_initial__size: 512m
       NEO4J_server_memory_heap_max__size: 1g
       NEO4J_server_memory_pagecache_size: 512m
     volumes:
       - neo4j-data:/data
       - neo4j-logs:/logs
+      - neo4j-plugins:/plugins
     healthcheck:
       test:
         - "CMD-SHELL"
@@ -60,7 +64,7 @@ services:
       interval: 10s
       timeout: 10s
       retries: 20
-      start_period: 30s
+      start_period: 60s
     restart: unless-stopped
 
   redis:
@@ -116,4 +120,5 @@ volumes:
   postgres-data:
   neo4j-data:
   neo4j-logs:
+  neo4j-plugins:
   redis-data:
