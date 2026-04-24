@@ -11,7 +11,7 @@ Redis is optional for single-node deployments and required for multi-instance de
 - Tracking time with `valid_at` and `known_at` semantics where they matter
 - Exposing structured write primitives such as fragment ingest, claim creation, verify, promote, and retract
 - Providing retrieval surfaces for high-level recall, keyword search, semantic search, and graph queries
-- Publishing a discoverable tool surface over HTTP, OpenAPI, MCP, and an npm AI SDK package
+- Publishing a discoverable tool surface over HTTP, OpenAPI, and MCP
 
 ## Responsibility Boundary
 
@@ -53,7 +53,6 @@ flowchart TB
         HTTPClient["HTTP clients"]
         SSEClient["SSE consumers"]
         MCPClient["MCP hosts"]
-        AISDK["AI SDK apps"]
     end
 
     subgraph Surfaces["Public surfaces"]
@@ -62,7 +61,6 @@ flowchart TB
         Catalog["Tool catalog"]
         OpenAPI["OpenAPI"]
         MCP["MCP stdio"]
-        NPMPkg["@dense-mem/ai-sdk-tools"]
     end
 
     subgraph Service["Dense-Mem service"]
@@ -153,7 +151,6 @@ flowchart LR
     Recall["GET /api/v1/recall"] --> App["High-level memory retrieval"]
     OpenAPI["GET /api/v1/openapi.json"] --> SDK["Codegen / docs / agents"]
     MCP["./bin/dense-mem-mcp"] --> HTTP["HTTP API"]
-    NPM["@dense-mem/ai-sdk-tools"] --> HTTP
     SSE["POST /api/v1/profiles/{profileId}/query/stream"] --> Stream["Long-running query streams"]
 ```
 
@@ -204,34 +201,6 @@ flowchart TB
 | Profiles | `GET /api/v1/profiles/{profileId}`, `PATCH /api/v1/profiles/{profileId}`, `GET /api/v1/profiles/{profileId}/audit-log` |
 | Streaming | `POST /api/v1/profiles/{profileId}/query/stream` |
 | Communities | `GET /api/v1/communities`, `GET /api/v1/communities/{id}` |
-
-## npm Package
-
-The repo now includes [`packages/ai-sdk-tools`](packages/ai-sdk-tools/README.md), the tools-only package intended to publish as `@dense-mem/ai-sdk-tools` for Vercel AI SDK consumers.
-
-It does two things:
-
-- Loads the live HTTP tool catalog from `GET /api/v1/tools`
-- Adds an explicit `recall_knowledge` tool over `GET /api/v1/recall`
-
-Example:
-
-```ts
-import { generateText } from 'ai';
-import { openai } from '@ai-sdk/openai';
-import { createDenseMemTools } from '@dense-mem/ai-sdk-tools';
-
-const tools = await createDenseMemTools({
-  baseUrl: process.env.DENSE_MEM_URL,
-  apiKey: process.env.DENSE_MEM_API_KEY,
-});
-
-const result = await generateText({
-  model: openai('gpt-5.4'),
-  tools,
-  prompt: 'Recall the most relevant memory about my next trip.',
-});
-```
 
 ## Quick Start
 
@@ -444,14 +413,13 @@ Dense-mem exposes three discoverability surfaces backed by one registry:
 | Runtime OpenAPI | `GET /api/v1/openapi.json` | Agents, codegen, integrations |
 | MCP stdio | `./bin/dense-mem-mcp` | MCP hosts that proxy to the HTTP API |
 
-The MCP binary is stdio-based today. The AI SDK package is HTTP-based today.
+The MCP binary is stdio-based today and proxies to the HTTP API.
 
 ## Reference Docs
 
 - [knowledge-pipeline contracts](docs/knowledge-pipeline-contracts.md)
 - [knowledge-pipeline client contracts](docs/knowledge-pipeline-client-contracts.md)
 - [knowledge-pipeline operability](docs/knowledge-pipeline-operability.md)
-- [package README](packages/ai-sdk-tools/README.md)
 
 ## License
 

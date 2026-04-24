@@ -459,7 +459,7 @@ Important note:
 ## 5.1 Common tool pattern
 
 Documented pattern:
-- Vercel AI SDK `tool()`
+- Generic tool wrapper
 - Zod input schemas
 - `execute` function performs the operation
 - tools are registered per-agent
