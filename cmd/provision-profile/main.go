@@ -15,29 +15,20 @@ import (
 	"github.com/dense-mem/dense-mem/internal/service"
 )
 
-const (
-	defaultScopesCSV = "read,write"
-	defaultKeyLabel  = "default"
-)
-
 type cliConfig struct {
 	name         string
 	description  string
 	metadataJSON string
 	configJSON   string
-	keyLabel     string
-	scopesCSV    string
 	rateLimit    int
 	expiresAt    string
 }
 
 type provisionOutput struct {
-	ProfileID   string   `json:"profile_id"`
-	ProfileName string   `json:"profile_name"`
-	APIKey      string   `json:"api_key"`
-	KeyLabel    string   `json:"key_label"`
-	Scopes      []string `json:"scopes"`
-	ExpiresAt   *string  `json:"expires_at,omitempty"`
+	ProfileID   string  `json:"profile_id"`
+	ProfileName string  `json:"profile_name"`
+	APIKey      string  `json:"api_key"`
+	ExpiresAt   *string `json:"expires_at,omitempty"`
 }
 
 func main() {
@@ -60,10 +51,6 @@ func run(args []string, stdout, stderr io.Writer) error {
 	configMap, err := parseOptionalJSONObject(cfg.configJSON)
 	if err != nil {
 		return fmt.Errorf("invalid --config-json: %w", err)
-	}
-	scopes := parseScopes(cfg.scopesCSV)
-	if len(scopes) == 0 {
-		return errors.New("--scopes must contain at least one scope")
 	}
 
 	var expiresAt *time.Time
@@ -103,8 +90,6 @@ func run(args []string, stdout, stderr io.Writer) error {
 	}
 
 	_, rawKey, err := services.APIKeyService.CreateStandardKey(ctx, profile.ID, service.CreateAPIKeyRequest{
-		Label:     cfg.keyLabel,
-		Scopes:    scopes,
 		RateLimit: cfg.rateLimit,
 		ExpiresAt: expiresAt,
 	}, nil, operatorcli.DefaultActorRole, operatorcli.DefaultClientIP, correlationID)
@@ -128,8 +113,6 @@ func run(args []string, stdout, stderr io.Writer) error {
 		ProfileID:   profile.ID.String(),
 		ProfileName: profile.Name,
 		APIKey:      rawKey,
-		KeyLabel:    cfg.keyLabel,
-		Scopes:      scopes,
 		ExpiresAt:   expiresAtStr,
 	})
 }
@@ -144,8 +127,6 @@ func parseCLI(args []string, stderr io.Writer) (cliConfig, error) {
 	fs.StringVar(&cfg.description, "description", "", "Profile description")
 	fs.StringVar(&cfg.metadataJSON, "metadata-json", "", "Optional profile metadata JSON object")
 	fs.StringVar(&cfg.configJSON, "config-json", "", "Optional profile config JSON object")
-	fs.StringVar(&cfg.keyLabel, "key-label", defaultKeyLabel, "API key label")
-	fs.StringVar(&cfg.scopesCSV, "scopes", defaultScopesCSV, "Comma-separated scopes for the generated key")
 	fs.IntVar(&cfg.rateLimit, "rate-limit", 0, "Per-key rate limit override")
 	fs.StringVar(&cfg.expiresAt, "expires-at", "", "Optional RFC3339 expiration for the generated key")
 
@@ -155,17 +136,12 @@ func parseCLI(args []string, stderr io.Writer) (cliConfig, error) {
 
 	cfg.name = strings.TrimSpace(cfg.name)
 	cfg.description = strings.TrimSpace(cfg.description)
-	cfg.keyLabel = strings.TrimSpace(cfg.keyLabel)
-	cfg.scopesCSV = strings.TrimSpace(cfg.scopesCSV)
 	cfg.metadataJSON = strings.TrimSpace(cfg.metadataJSON)
 	cfg.configJSON = strings.TrimSpace(cfg.configJSON)
 	cfg.expiresAt = strings.TrimSpace(cfg.expiresAt)
 
 	if cfg.name == "" {
 		return cliConfig{}, errors.New("--name is required")
-	}
-	if cfg.keyLabel == "" {
-		cfg.keyLabel = defaultKeyLabel
 	}
 
 	return cfg, nil
@@ -184,24 +160,6 @@ func parseOptionalJSONObject(raw string) (map[string]any, error) {
 		return nil, errors.New("must be a JSON object")
 	}
 	return parsed, nil
-}
-
-func parseScopes(raw string) []string {
-	parts := strings.Split(raw, ",")
-	scopes := make([]string, 0, len(parts))
-	seen := make(map[string]struct{}, len(parts))
-	for _, part := range parts {
-		scope := strings.TrimSpace(part)
-		if scope == "" {
-			continue
-		}
-		if _, ok := seen[scope]; ok {
-			continue
-		}
-		seen[scope] = struct{}{}
-		scopes = append(scopes, scope)
-	}
-	return scopes
 }
 
 func resolvePostgresDSN(getenv func(string) string) (string, error) {

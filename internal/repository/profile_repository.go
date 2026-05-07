@@ -24,6 +24,7 @@ type ProfileRepository interface {
 	Count(ctx context.Context) (int64, error)
 	Update(ctx context.Context, profile *domain.Profile) error
 	SoftDelete(ctx context.Context, id uuid.UUID) error
+	HardDelete(ctx context.Context, id uuid.UUID) error
 	CountActiveKeys(ctx context.Context, profileID uuid.UUID) (int64, error)
 	NameExists(ctx context.Context, name string) (bool, error)
 }
@@ -213,6 +214,30 @@ func (r *ProfileRepositoryImpl) SoftDelete(ctx context.Context, id uuid.UUID) er
 
 	if err != nil {
 		return fmt.Errorf("failed to soft delete profile: %w", err)
+	}
+
+	return nil
+}
+
+// HardDelete removes a profile row and its Postgres-owned child rows.
+// audit_log is intentionally not deleted: it is append-only and no longer has
+// live FKs to profiles/api_keys, so historical audit entries remain immutable.
+func (r *ProfileRepositoryImpl) HardDelete(ctx context.Context, id uuid.UUID) error {
+	err := r.rls.WithProfileTx(ctx, r.db, id.String(), func(tx *gorm.DB) error {
+		if err := tx.Exec(`
+			DELETE FROM api_keys
+			WHERE profile_id = $1
+		`, id).Error; err != nil {
+			return err
+		}
+		return tx.Exec(`
+			DELETE FROM profiles
+			WHERE id = $1 AND deleted_at IS NULL
+		`, id).Error
+	})
+
+	if err != nil {
+		return fmt.Errorf("failed to hard delete profile: %w", err)
 	}
 
 	return nil

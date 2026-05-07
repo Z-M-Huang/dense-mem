@@ -28,13 +28,19 @@ func clearEnv() {
 		"AI_API_EMBEDDING_DIMENSIONS",
 		"AI_API_EMBEDDING_TIMEOUT_SECONDS",
 		// Knowledge-pipeline knobs
+		"AI_VERIFIER_API_URL",
+		"AI_VERIFIER_API_KEY",
 		"AI_VERIFIER_MODEL",
+		"AI_VERIFIER_TIMEOUT_SECONDS",
 		"AI_VERIFIER_MAX_CONCURRENCY",
 		"CLAIM_WRITE_RATE_LIMIT",
 		"CLAIM_READ_RATE_LIMIT",
 		"RECALL_VALIDATED_CLAIM_WEIGHT",
 		"PROMOTE_TX_TIMEOUT_SECONDS",
 		"AI_COMMUNITY_MAX_NODES",
+		"CONTROL_PORTAL_ENABLED",
+		"CONTROL_HTTP_ADDR",
+		"CONTROL_PORTAL_TOKEN",
 	}
 	for _, v := range envVars {
 		os.Unsetenv(v)
@@ -90,6 +96,12 @@ func TestLoadDefaults(t *testing.T) {
 	// Test other defaults
 	if cfg.RedisDB != 0 {
 		t.Errorf("RedisDB default = %d, want %d", cfg.RedisDB, 0)
+	}
+	if cfg.ControlPortalEnabled {
+		t.Errorf("ControlPortalEnabled default = true, want false")
+	}
+	if cfg.ControlHTTPAddr != "127.0.0.1:8090" {
+		t.Errorf("ControlHTTPAddr default = %q, want %q", cfg.ControlHTTPAddr, "127.0.0.1:8090")
 	}
 }
 
@@ -244,6 +256,9 @@ func TestLoadOverrides(t *testing.T) {
 	os.Setenv("SSE_MAX_DURATION_SECONDS", "600")
 	os.Setenv("SSE_MAX_CONCURRENT_STREAMS", "20")
 	os.Setenv("EMBEDDING_DIMENSIONS", "768")
+	os.Setenv("CONTROL_PORTAL_ENABLED", "true")
+	os.Setenv("CONTROL_HTTP_ADDR", "localhost:9091")
+	os.Setenv("CONTROL_PORTAL_TOKEN", "control-secret")
 
 	cfg, err := Load()
 	if err != nil {
@@ -280,6 +295,15 @@ func TestLoadOverrides(t *testing.T) {
 	if cfg.EmbeddingDimensions != 768 {
 		t.Errorf("EmbeddingDimensions = %d, want %d", cfg.EmbeddingDimensions, 768)
 	}
+	if !cfg.ControlPortalEnabled {
+		t.Errorf("ControlPortalEnabled = false, want true")
+	}
+	if cfg.ControlHTTPAddr != "localhost:9091" {
+		t.Errorf("ControlHTTPAddr = %q, want %q", cfg.ControlHTTPAddr, "localhost:9091")
+	}
+	if cfg.ControlPortalToken != "control-secret" {
+		t.Errorf("ControlPortalToken = %q, want control-secret", cfg.ControlPortalToken)
+	}
 }
 
 func TestConfigProviderInterface(t *testing.T) {
@@ -315,6 +339,14 @@ func TestConfigProviderInterface(t *testing.T) {
 	_ = provider.GetAIEmbeddingDimensions()
 	_ = provider.GetAIEmbeddingTimeoutSeconds()
 	_ = provider.IsEmbeddingConfigured()
+	_ = provider.GetAIVerifierAPIURL()
+	_ = provider.GetAIVerifierAPIKey()
+	_ = provider.GetAIVerifierModel()
+	_ = provider.GetAIVerifierTimeoutSeconds()
+	_ = provider.GetAIVerifierMaxConcurrency()
+	_ = provider.GetControlPortalEnabled()
+	_ = provider.GetControlHTTPAddr()
+	_ = provider.GetControlPortalToken()
 }
 
 func TestValidationError_Error(t *testing.T) {
@@ -402,8 +434,122 @@ func TestLoad_EmbeddingConfig_Complete(t *testing.T) {
 	if cfg.GetAIEmbeddingDimensions() != 1536 {
 		t.Errorf("GetAIEmbeddingDimensions() = %d, want %d", cfg.GetAIEmbeddingDimensions(), 1536)
 	}
+	if cfg.GetEmbeddingDimensions() != 1536 {
+		t.Errorf("GetEmbeddingDimensions() = %d, want %d", cfg.GetEmbeddingDimensions(), 1536)
+	}
 	if cfg.GetAIEmbeddingTimeoutSeconds() != 30 {
 		t.Errorf("GetAIEmbeddingTimeoutSeconds() = %d, want %d", cfg.GetAIEmbeddingTimeoutSeconds(), 30)
+	}
+}
+
+func TestLoadEmbeddingDimensions_DefaultsToAIEmbeddingDimensions(t *testing.T) {
+	clearEnv()
+	setRequiredEnv()
+	os.Setenv("AI_API_URL", "https://example.com/v1")
+	os.Setenv("AI_API_KEY", "sk-test")
+	os.Setenv("AI_API_EMBEDDING_MODEL", "text-embedding-nomic-embed-text-v2-moe")
+	os.Setenv("AI_API_EMBEDDING_DIMENSIONS", "1024")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() returned unexpected error: %v", err)
+	}
+	if got := cfg.GetEmbeddingDimensions(); got != 1024 {
+		t.Errorf("GetEmbeddingDimensions() = %d, want 1024", got)
+	}
+}
+
+func TestLoadEmbeddingDimensions_RejectsMismatch(t *testing.T) {
+	clearEnv()
+	setRequiredEnv()
+	os.Setenv("EMBEDDING_DIMENSIONS", "1536")
+	os.Setenv("AI_API_URL", "https://example.com/v1")
+	os.Setenv("AI_API_KEY", "sk-test")
+	os.Setenv("AI_API_EMBEDDING_MODEL", "text-embedding-nomic-embed-text-v2-moe")
+	os.Setenv("AI_API_EMBEDDING_DIMENSIONS", "1024")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("Load() expected error for mismatched embedding dimensions, got nil")
+	}
+	validationErr, ok := err.(*ValidationError)
+	if !ok {
+		t.Fatalf("expected *ValidationError, got %T", err)
+	}
+	if validationErr.Field != "EMBEDDING_DIMENSIONS" {
+		t.Errorf("ValidationError.Field = %q, want EMBEDDING_DIMENSIONS", validationErr.Field)
+	}
+}
+
+func TestLoadVerifierConfig_DefaultsToSharedAIConfig(t *testing.T) {
+	clearEnv()
+	setRequiredEnv()
+	setRequiredEmbeddingEnv()
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() returned unexpected error: %v", err)
+	}
+
+	if got := cfg.GetAIVerifierAPIURL(); got != "https://example.com/v1" {
+		t.Errorf("GetAIVerifierAPIURL() = %q, want %q", got, "https://example.com/v1")
+	}
+	if got := cfg.GetAIVerifierAPIKey(); got != "sk-test" {
+		t.Errorf("GetAIVerifierAPIKey() = %q, want %q", got, "sk-test")
+	}
+	if got := cfg.GetAIVerifierTimeoutSeconds(); got != 60 {
+		t.Errorf("GetAIVerifierTimeoutSeconds() = %d, want %d", got, 60)
+	}
+}
+
+func TestLoadVerifierConfig_SeparateEndpoint(t *testing.T) {
+	clearEnv()
+	setRequiredEnv()
+	setRequiredEmbeddingEnv()
+	os.Setenv("AI_VERIFIER_API_URL", "https://verifier.example.com/v1")
+	os.Setenv("AI_VERIFIER_API_KEY", "verifier-key")
+	os.Setenv("AI_VERIFIER_MODEL", "local-verifier")
+	os.Setenv("AI_VERIFIER_TIMEOUT_SECONDS", "45")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() returned unexpected error: %v", err)
+	}
+
+	if got := cfg.GetAIAPIURL(); got != "https://example.com/v1" {
+		t.Errorf("GetAIAPIURL() = %q, want %q", got, "https://example.com/v1")
+	}
+	if got := cfg.GetAIVerifierAPIURL(); got != "https://verifier.example.com/v1" {
+		t.Errorf("GetAIVerifierAPIURL() = %q, want %q", got, "https://verifier.example.com/v1")
+	}
+	if got := cfg.GetAIVerifierAPIKey(); got != "verifier-key" {
+		t.Errorf("GetAIVerifierAPIKey() = %q, want %q", got, "verifier-key")
+	}
+	if got := cfg.GetAIVerifierModel(); got != "local-verifier" {
+		t.Errorf("GetAIVerifierModel() = %q, want %q", got, "local-verifier")
+	}
+	if got := cfg.GetAIVerifierTimeoutSeconds(); got != 45 {
+		t.Errorf("GetAIVerifierTimeoutSeconds() = %d, want %d", got, 45)
+	}
+}
+
+func TestLoadVerifierConfig_SeparateURLRequiresSeparateKey(t *testing.T) {
+	clearEnv()
+	setRequiredEnv()
+	setRequiredEmbeddingEnv()
+	os.Setenv("AI_VERIFIER_API_URL", "https://verifier.example.com/v1")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("Load() expected error for verifier URL without verifier key, got nil")
+	}
+
+	validationErr, ok := err.(*ValidationError)
+	if !ok {
+		t.Fatalf("expected *ValidationError, got %T", err)
+	}
+	if validationErr.Field != "AI_VERIFIER_API_KEY" {
+		t.Errorf("ValidationError.Field = %q, want %q", validationErr.Field, "AI_VERIFIER_API_KEY")
 	}
 }
 
@@ -477,4 +623,45 @@ func TestLoadKnowledgeConfigDefaults(t *testing.T) {
 	if got := cfg.GetAICommunityMaxNodes(); got != 500000 {
 		t.Errorf("GetAICommunityMaxNodes() = %d, want %d", got, 500000)
 	}
+}
+
+func TestLoadControlPortalValidation(t *testing.T) {
+	t.Run("enabled requires token", func(t *testing.T) {
+		clearEnv()
+		setRequiredEnv()
+		os.Setenv("CONTROL_PORTAL_ENABLED", "true")
+		os.Setenv("CONTROL_HTTP_ADDR", "127.0.0.1:8090")
+
+		_, err := Load()
+		if err == nil {
+			t.Fatal("Load() expected error for missing control token, got nil")
+		}
+		validationErr, ok := err.(*ValidationError)
+		if !ok {
+			t.Fatalf("expected *ValidationError, got %T", err)
+		}
+		if validationErr.Field != "CONTROL_PORTAL_TOKEN" {
+			t.Errorf("ValidationError.Field = %q, want CONTROL_PORTAL_TOKEN", validationErr.Field)
+		}
+	})
+
+	t.Run("enabled requires loopback bind", func(t *testing.T) {
+		clearEnv()
+		setRequiredEnv()
+		os.Setenv("CONTROL_PORTAL_ENABLED", "true")
+		os.Setenv("CONTROL_HTTP_ADDR", "0.0.0.0:8090")
+		os.Setenv("CONTROL_PORTAL_TOKEN", "secret")
+
+		_, err := Load()
+		if err == nil {
+			t.Fatal("Load() expected error for non-loopback control addr, got nil")
+		}
+		validationErr, ok := err.(*ValidationError)
+		if !ok {
+			t.Fatalf("expected *ValidationError, got %T", err)
+		}
+		if validationErr.Field != "CONTROL_HTTP_ADDR" {
+			t.Errorf("ValidationError.Field = %q, want CONTROL_HTTP_ADDR", validationErr.Field)
+		}
+	})
 }

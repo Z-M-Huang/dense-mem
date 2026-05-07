@@ -88,9 +88,15 @@ func (unavailableCommunityDetectService) Detect(context.Context, string, communi
 	return communityservice.ErrCommunityUnavailable
 }
 
+type unavailableConfirmMemoryService struct{}
+
+func (unavailableConfirmMemoryService) ConfirmMemory(context.Context, string, factservice.ConfirmMemoryRequest) (*factservice.ConfirmMemoryResult, error) {
+	return nil, factservice.ErrClaimNotValidated
+}
+
 func verifierConfigured(cfg config.ConfigProvider) bool {
-	return strings.TrimSpace(cfg.GetAIAPIURL()) != "" &&
-		strings.TrimSpace(cfg.GetAIAPIKey()) != "" &&
+	return strings.TrimSpace(cfg.GetAIVerifierAPIURL()) != "" &&
+		strings.TrimSpace(cfg.GetAIVerifierAPIKey()) != "" &&
 		strings.TrimSpace(cfg.GetAIVerifierModel()) != ""
 }
 

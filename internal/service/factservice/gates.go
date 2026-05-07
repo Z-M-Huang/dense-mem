@@ -77,11 +77,27 @@ type PromotionGate struct {
 //	likes      | multi_valued  |  0.70   |  0.60   |   false   |   true   |   1    |  0.00
 //	knows      | multi_valued  |  0.75   |  0.60   |   true    |   true   |   1    |  0.00
 //	has_skill  | multi_valued  |  0.80   |  0.60   |   true    |   true   |   1    |  0.00
+//	prefers    | multi_valued  |  0.70   |  0.60   |   false   |   true   |   1    |  0.00
+//	identity_is| single_current|  0.85   |  0.75   |   true    |   true   |   1    |  0.95
+//	profile_fact|single_current|  0.85   |  0.75   |   true    |   true   |   1    |  0.95
+//	works_on   | multi_valued  |  0.75   |  0.65   |   true    |   true   |   1    |  0.00
+//	has_goal   | multi_valued  |  0.75   |  0.65   |   true    |   true   |   1    |  0.00
+//	corrected  | append_only   |  0.80   |  0.70   |   true    |   true   |   1    |  0.00
+//	relationship_to|multi_valued|0.75   |  0.65   |   true    |   true   |   1    |  0.00
+//	uses       | multi_valued  |  0.70   |  0.60   |   false   |   true   |   1    |  0.00
 var DefaultPromotionGates = map[string]PromotionGate{
-	"born_on":   {SingleCurrent, 0.9, 0.8, true, true, 1, 0.95},
-	"died_on":   {SingleCurrent, 0.9, 0.8, true, true, 1, 0.95},
-	"works_at":  {SingleCurrent, 0.85, 0.75, true, true, 2, 0.95},
-	"likes":     {MultiValued, 0.7, 0.6, false, true, 1, 0.0},
-	"knows":     {MultiValued, 0.75, 0.6, true, true, 1, 0.0},
-	"has_skill": {MultiValued, 0.8, 0.6, true, true, 1, 0.0},
+	"born_on":         {SingleCurrent, 0.9, 0.8, true, true, 1, 0.95},
+	"died_on":         {SingleCurrent, 0.9, 0.8, true, true, 1, 0.95},
+	"works_at":        {SingleCurrent, 0.85, 0.75, true, true, 2, 0.95},
+	"likes":           {MultiValued, 0.7, 0.6, false, true, 1, 0.0},
+	"knows":           {MultiValued, 0.75, 0.6, true, true, 1, 0.0},
+	"has_skill":       {MultiValued, 0.8, 0.6, true, true, 1, 0.0},
+	"prefers":         {MultiValued, 0.7, 0.6, false, true, 1, 0.0},
+	"identity_is":     {SingleCurrent, 0.85, 0.75, true, true, 1, 0.95},
+	"profile_fact":    {SingleCurrent, 0.85, 0.75, true, true, 1, 0.95},
+	"works_on":        {MultiValued, 0.75, 0.65, true, true, 1, 0.0},
+	"has_goal":        {MultiValued, 0.75, 0.65, true, true, 1, 0.0},
+	"corrected":       {AppendOnly, 0.8, 0.7, true, true, 1, 0.0},
+	"relationship_to": {MultiValued, 0.75, 0.65, true, true, 1, 0.0},
+	"uses":            {MultiValued, 0.7, 0.6, false, true, 1, 0.0},
 }

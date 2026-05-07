@@ -6,13 +6,23 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestDefaultPromotionGates verifies AC-34: the gate map contains exactly the
-// shipping predicates with the binding thresholds from requirements rev.2, and
-// that unknown predicates are absent (deny-by-default).
+// TestDefaultPromotionGates verifies AC-34 plus the standalone MCP memory
+// server predicate set: the original knowledge-pipeline predicates keep their
+// binding thresholds, personal-memory predicates are explicitly curated, and
+// unknown predicates are absent (deny-by-default).
 func TestDefaultPromotionGates(t *testing.T) {
-	t.Run("contains exactly six shipping predicates", func(t *testing.T) {
-		require.Len(t, DefaultPromotionGates, 6,
-			"gate map must contain exactly the 6 shipping predicates")
+	t.Run("contains original shipping predicates and curated personal predicates", func(t *testing.T) {
+		required := []string{
+			"born_on", "died_on", "works_at", "likes", "knows", "has_skill",
+			"prefers", "identity_is", "profile_fact", "works_on", "has_goal",
+			"corrected", "relationship_to", "uses",
+		}
+		require.Len(t, DefaultPromotionGates, len(required),
+			"gate map must contain only the curated predicate set")
+		for _, predicate := range required {
+			_, ok := DefaultPromotionGates[predicate]
+			require.True(t, ok, "missing predicate %q", predicate)
+		}
 	})
 
 	t.Run("born_on exact thresholds", func(t *testing.T) {

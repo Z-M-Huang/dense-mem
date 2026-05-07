@@ -51,7 +51,7 @@ func TestProfileServiceCreate(t *testing.T) {
 		Config:      map[string]any{"setting": true},
 	}
 
-	actorKeyID := "test-key-id"
+	actorKeyID := uuid.NewString()
 	profile, err := service.Create(ctx, req, &actorKeyID, "system", "127.0.0.1", "test-correlation-id")
 
 	require.NoError(t, err, "Create should succeed")
@@ -99,7 +99,7 @@ func TestProfileServiceCreateDuplicateName(t *testing.T) {
 		Description: "First profile",
 	}
 
-	actorKeyID := "test-key-id"
+	actorKeyID := uuid.NewString()
 	profile1, err := service.Create(ctx, req1, &actorKeyID, "system", "127.0.0.1", "test-correlation-id")
 	require.NoError(t, err, "First create should succeed")
 
@@ -153,7 +153,7 @@ func TestProfileServiceGet(t *testing.T) {
 		Description: "Test description",
 	}
 
-	actorKeyID := "test-key-id"
+	actorKeyID := uuid.NewString()
 	profile, err := service.Create(ctx, req, &actorKeyID, "system", "127.0.0.1", "test-correlation-id")
 	require.NoError(t, err, "Create should succeed")
 
@@ -202,7 +202,7 @@ func TestProfileServiceList(t *testing.T) {
 	auditService := NewAuditService(db)
 	service := NewProfileService(repo, auditService, nil)
 
-	actorKeyID := "test-key-id"
+	actorKeyID := uuid.NewString()
 	var createdIDs []uuid.UUID
 	for i := 0; i < 5; i++ {
 		req := CreateProfileRequest{
@@ -269,7 +269,7 @@ func TestProfileServiceUpdate(t *testing.T) {
 		Description: "Original description",
 	}
 
-	actorKeyID := "test-key-id"
+	actorKeyID := uuid.NewString()
 	profile, err := service.Create(ctx, req, &actorKeyID, "system", "127.0.0.1", "test-correlation-id")
 	require.NoError(t, err, "Create should succeed")
 
@@ -299,7 +299,7 @@ func TestProfileServiceUpdate(t *testing.T) {
 	sqlDB.Exec("DELETE FROM profiles WHERE id = $1", profile.ID.String())
 }
 
-// TestProfileServiceDelete verifies soft delete, deleted_at set, status='deleted'.
+// TestProfileServiceDelete verifies hard delete and audit emission.
 func TestProfileServiceDelete(t *testing.T) {
 	ctx := context.Background()
 
@@ -333,7 +333,7 @@ func TestProfileServiceDelete(t *testing.T) {
 		Description: "Test description",
 	}
 
-	actorKeyID := "test-key-id"
+	actorKeyID := uuid.NewString()
 	profile, err := service.Create(ctx, req, &actorKeyID, "system", "127.0.0.1", "test-correlation-id")
 	require.NoError(t, err, "Create should succeed")
 
@@ -358,8 +358,9 @@ func TestProfileServiceDelete(t *testing.T) {
 	sqlDB.Exec("DELETE FROM profiles WHERE id = $1", profile.ID.String())
 }
 
-// TestProfileServiceDeleteBlockedByActiveKeys verifies 409 PROFILE_HAS_ACTIVE_KEYS when keys remain.
-func TestProfileServiceDeleteBlockedByActiveKeys(t *testing.T) {
+// TestProfileServiceDeleteRemovesActiveKeys verifies profile deletion removes
+// profile-bound API keys instead of requiring a separate revoke step.
+func TestProfileServiceDeleteRemovesActiveKeys(t *testing.T) {
 	ctx := context.Background()
 
 	dsn, cleanup := skipIfNoPostgres(t, ctx)
@@ -393,7 +394,7 @@ func TestProfileServiceDeleteBlockedByActiveKeys(t *testing.T) {
 		Description: "Test description",
 	}
 
-	actorKeyID := "test-key-id"
+	actorKeyID := uuid.NewString()
 	profile, err := service.Create(ctx, req, &actorKeyID, "system", "127.0.0.1", "test-correlation-id")
 	require.NoError(t, err, "Create should succeed")
 
@@ -404,23 +405,27 @@ func TestProfileServiceDeleteBlockedByActiveKeys(t *testing.T) {
 	`, profile.ID)
 	require.NoError(t, err, "Should create API key")
 
-	// Try to delete the profile - should fail with 409
 	err = service.Delete(ctx, profile.ID, &actorKeyID, "system", "127.0.0.1", "test-correlation-id")
-	require.Error(t, err, "Delete should fail when active keys exist")
-	apiErr, ok := err.(*httperr.APIError)
-	require.True(t, ok, "Error should be APIError")
-	assert.Equal(t, httperr.CONFLICT, apiErr.Code, "Error code should be CONFLICT")
+	require.NoError(t, err, "Delete should remove active keys and profile")
 
-	// Verify audit log entry was created for blocked deletion
-	var auditCount int
+	var keyCount int
 	err = sqlDB.QueryRowContext(ctx, `
-		SELECT COUNT(*) FROM audit_log 
-		WHERE entity_id = $1 AND operation = 'DELETE_BLOCKED'
-	`, profile.ID.String()).Scan(&auditCount)
-	require.NoError(t, err, "Should query audit log")
-	assert.GreaterOrEqual(t, auditCount, 1, "Audit log should have DELETE_BLOCKED entry")
+		SELECT COUNT(*)
+		FROM api_keys
+		WHERE profile_id = $1
+	`, profile.ID).Scan(&keyCount)
+	require.NoError(t, err, "Should query API keys")
+	assert.Equal(t, 0, keyCount, "profile API keys should be deleted")
 
-	// Clean up the API key first
+	var profileCount int
+	err = sqlDB.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM profiles
+		WHERE id = $1
+	`, profile.ID).Scan(&profileCount)
+	require.NoError(t, err, "Should query profiles")
+	assert.Equal(t, 0, profileCount, "profile row should be deleted")
+
 	sqlDB.Exec("DELETE FROM api_keys WHERE profile_id = $1", profile.ID)
 	sqlDB.Exec("DELETE FROM audit_log WHERE entity_id = $1", profile.ID.String())
 	sqlDB.Exec("DELETE FROM profiles WHERE id = $1", profile.ID.String())

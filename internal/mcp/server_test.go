@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/dense-mem/dense-mem/internal/observability"
+	"github.com/dense-mem/dense-mem/internal/service/memoryservice"
 	"github.com/dense-mem/dense-mem/internal/tools/registry"
 )
 
@@ -231,6 +232,68 @@ func TestMCP_ToolsCallInvokesRegistry(t *testing.T) {
 	if !strings.Contains(text, `"id":"abc"`) || !strings.Contains(text, `"status":"created"`) {
 		t.Errorf("text payload missing fields: %s", text)
 	}
+}
+
+func TestMCP_MemoryToolsScopeProfileAndClarifications(t *testing.T) {
+	logger, _ := testLogger(t)
+	mem := &mcpMemoryStub{}
+	reg, err := registry.BuildDefault(registry.Dependencies{Memory: mem})
+	if err != nil {
+		t.Fatalf("BuildDefault: %v", err)
+	}
+
+	readOnly := NewServerWithScopes(reg, "profileA", []string{"read"}, logger)
+	listOut := runRPC(t, readOnly, `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`)
+	if !strings.Contains(listOut, `"reflect_memories"`) {
+		t.Fatalf("read-scoped list missing reflect_memories: %s", listOut)
+	}
+	if strings.Contains(listOut, `"remember"`) || strings.Contains(listOut, `"confirm_memory"`) {
+		t.Fatalf("read-scoped list exposed write tools: %s", listOut)
+	}
+
+	readWrite := NewServerWithScopes(reg, "profileA", []string{"read", "write"}, logger)
+	callOut := runRPC(t, readWrite, `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"remember","arguments":{"profile_id":"profileB","content":"remember this"}}}`)
+	if mem.lastProfile != "profileA" {
+		t.Fatalf("memory tool profile = %q; want profileA", mem.lastProfile)
+	}
+	if strings.Contains(callOut, "profileB") {
+		t.Fatalf("caller-supplied profile_id leaked into MCP result: %s", callOut)
+	}
+	if !strings.Contains(callOut, `\"clarifications\"`) || !strings.Contains(callOut, `\"memory_conflict\"`) {
+		t.Fatalf("clarification payload missing from MCP result: %s", callOut)
+	}
+}
+
+type mcpMemoryStub struct {
+	lastProfile string
+}
+
+func (s *mcpMemoryStub) Remember(ctx context.Context, profileID string, req memoryservice.RememberRequest) (*memoryservice.RememberResult, error) {
+	s.lastProfile = profileID
+	return &memoryservice.RememberResult{
+		Fragment: memoryservice.FragmentOutcome{ID: "fragment-1", Status: "created"},
+		Clarifications: []memoryservice.Clarification{{
+			ID:       "clarify:claim-1",
+			Type:     "memory_conflict",
+			Question: "Which memory should Dense-Mem keep?",
+			ClaimID:  "claim-1",
+		}},
+	}, nil
+}
+
+func (s *mcpMemoryStub) ImportMemories(ctx context.Context, profileID string, req memoryservice.ImportRequest) (*memoryservice.RememberResult, error) {
+	s.lastProfile = profileID
+	return &memoryservice.RememberResult{Fragment: memoryservice.FragmentOutcome{ID: "fragment-import", Status: "created"}}, nil
+}
+
+func (s *mcpMemoryStub) Reflect(ctx context.Context, profileID string, req memoryservice.ReflectRequest) (*memoryservice.ReflectResult, error) {
+	s.lastProfile = profileID
+	return &memoryservice.ReflectResult{}, nil
+}
+
+func (s *mcpMemoryStub) ConfirmMemory(ctx context.Context, profileID string, req memoryservice.ConfirmRequest) (*memoryservice.ConfirmResult, error) {
+	s.lastProfile = profileID
+	return &memoryservice.ConfirmResult{ClaimID: req.ClaimID, Decision: req.Decision, Status: "accepted"}, nil
 }
 
 func TestMCP_ToolsCallUnknownToolReturnsError(t *testing.T) {

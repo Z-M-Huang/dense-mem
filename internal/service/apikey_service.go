@@ -14,13 +14,19 @@ import (
 	"github.com/dense-mem/dense-mem/internal/repository"
 )
 
-// CreateAPIKeyRequest represents a request to create a new API key.
-// This is imported from dto package but redeclared here for convenience.
+// CreateAPIKeyRequest represents a request to create a standard API key.
+// Label and scopes are intentionally not caller-controlled: every standard key
+// belongs to one profile and receives the fixed read/write scope set.
 type CreateAPIKeyRequest struct {
-	Label     string     `json:"label" validate:"required,min=1,max=100,notblank"`
-	Scopes    []string   `json:"scopes"`
 	RateLimit int        `json:"rate_limit"`
 	ExpiresAt *time.Time `json:"expires_at"`
+}
+
+var standardAPIKeyScopes = []string{"read", "write"}
+
+// StandardAPIKeyScopes returns the fixed scope set for all standard API keys.
+func StandardAPIKeyScopes() []string {
+	return append([]string(nil), standardAPIKeyScopes...)
 }
 
 // KeySessionInvalidator is an interface for invalidating key sessions.
@@ -45,6 +51,8 @@ type APIKeyService interface {
 	GetByIDForProfile(ctx context.Context, profileID, id uuid.UUID) (*domain.APIKey, error)
 	// RevokeForProfile revokes the key only when it belongs to profileID; NOT_FOUND otherwise.
 	RevokeForProfile(ctx context.Context, profileID, id uuid.UUID, actorKeyID *string, actorRole, clientIP, correlationID string) error
+	// DeleteForProfile hard-deletes the key only when it belongs to profileID; NOT_FOUND otherwise.
+	DeleteForProfile(ctx context.Context, profileID, id uuid.UUID, actorKeyID *string, actorRole, clientIP, correlationID string) error
 }
 
 // APIKeyServiceImpl implements the APIKeyService interface.
@@ -134,10 +142,11 @@ func (s *APIKeyServiceImpl) CreateStandardKey(ctx context.Context, profileID uui
 	// Create the key record
 	key := &domain.APIKey{
 		ProfileID: profileID,
-		Label:     req.Label,
+		Label:     "",
 		KeyHash:   keyHash,
 		KeyPrefix: crypto.GetKeyPrefix(rawKey),
-		Scopes:    req.Scopes,
+		KeySuffix: crypto.GetKeySuffix(rawKey),
+		Scopes:    StandardAPIKeyScopes(),
 		RateLimit: req.RateLimit,
 		ExpiresAt: req.ExpiresAt,
 	}
@@ -150,8 +159,6 @@ func (s *APIKeyServiceImpl) CreateStandardKey(ctx context.Context, profileID uui
 	afterPayload := map[string]interface{}{
 		"id":         key.ID.String(),
 		"profile_id": key.ProfileID.String(),
-		"label":      key.Label,
-		"scopes":     key.Scopes,
 		"rate_limit": key.RateLimit,
 		"role":       "standard",
 	}
@@ -237,6 +244,60 @@ func (s *APIKeyServiceImpl) RevokeForProfile(ctx context.Context, profileID, id 
 	profileIDStr := profileID.String()
 	if err := s.auditService.APIKeyRevoked(ctx, &profileIDStr, key.ID.String(), beforePayload, actorKeyID, actorRole, clientIP, correlationID); err != nil {
 		s.logAuditError(err, "REVOKE", key.ID.String(), correlationID)
+	}
+
+	return nil
+}
+
+// DeleteForProfile hard-deletes an API key scoped to the caller's profile.
+// Returns NOT_FOUND when the id/profile combination does not match.
+// Invalidates active sessions and writes an append-only audit event.
+func (s *APIKeyServiceImpl) DeleteForProfile(ctx context.Context, profileID, id uuid.UUID, actorKeyID *string, actorRole, clientIP, correlationID string) error {
+	key, err := s.repo.GetByIDForProfile(ctx, profileID, id)
+	if err != nil {
+		return fmt.Errorf("failed to get api key for profile: %w", err)
+	}
+	if key == nil {
+		return httperr.New(httperr.NOT_FOUND, fmt.Sprintf("api key with id '%s' not found", id.String()))
+	}
+
+	beforePayload := map[string]interface{}{
+		"id":           key.ID.String(),
+		"profile_id":   key.ProfileID.String(),
+		"rate_limit":   key.RateLimit,
+		"last_used_at": key.LastUsedAt,
+		"expires_at":   key.ExpiresAt,
+		"created_at":   key.CreatedAt,
+		"revoked_at":   key.RevokedAt,
+	}
+
+	rows, err := s.repo.DeleteForProfile(ctx, profileID, id)
+	if err != nil {
+		return fmt.Errorf("failed to delete api key for profile: %w", err)
+	}
+	if rows == 0 {
+		return httperr.New(httperr.NOT_FOUND, fmt.Sprintf("api key with id '%s' not found", id.String()))
+	}
+
+	if s.sessionInvalidator != nil {
+		if err := s.sessionInvalidator.InvalidateKeySessions(ctx, profileID.String(), id.String()); err != nil {
+			s.logger.Warn("session_invalidation_failed", slog.String("error", err.Error()), slog.String("key_id", id.String()))
+		}
+	}
+
+	profileIDStr := profileID.String()
+	if err := s.auditService.Append(ctx, AuditLogEntry{
+		ProfileID:     &profileIDStr,
+		Operation:     "DELETE",
+		EntityType:    "api_key",
+		EntityID:      key.ID.String(),
+		BeforePayload: beforePayload,
+		ActorKeyID:    actorKeyID,
+		ActorRole:     actorRole,
+		ClientIP:      clientIP,
+		CorrelationID: correlationID,
+	}); err != nil {
+		s.logAuditError(err, "DELETE", key.ID.String(), correlationID)
 	}
 
 	return nil

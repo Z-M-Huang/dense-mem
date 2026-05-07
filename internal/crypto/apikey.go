@@ -12,13 +12,14 @@ import (
 
 // Argon2id parameters
 const (
-	argon2Memory      = 65536 // 64 MB
-	argon2Time        = 3
-	argon2Threads     = 4
-	argon2SaltLength  = 16
-	argon2KeyLength   = 32
-	keyPrefix         = "dm_live_"
-	keyPrefixLength   = 12 // first 12 chars of the raw key (including prefix)
+	argon2Memory     = 65536 // 64 MB
+	argon2Time       = 3
+	argon2Threads    = 4
+	argon2SaltLength = 16
+	argon2KeyLength  = 32
+	keyPrefix        = "dm_live_"
+	keyPrefixLength  = 12 // first 12 chars of the raw key (including prefix)
+	keySuffixLength  = 6
 )
 
 // GenerateRawKey generates a new raw API key.
@@ -46,6 +47,14 @@ func GetKeyPrefix(rawKey string) string {
 		return rawKey
 	}
 	return rawKey[:keyPrefixLength]
+}
+
+// GetKeySuffix extracts the last 6 characters of the raw key for display.
+func GetKeySuffix(rawKey string) string {
+	if len(rawKey) < keySuffixLength {
+		return rawKey
+	}
+	return rawKey[len(rawKey)-keySuffixLength:]
 }
 
 // HashKey hashes a raw API key using Argon2id and returns a PHC string.

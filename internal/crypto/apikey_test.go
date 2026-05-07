@@ -23,6 +23,10 @@ func TestGenerateAPIKeyFormat(t *testing.T) {
 		assert.Equal(t, 12, len(prefix), "Prefix should be 12 characters")
 		assert.Equal(t, key[:12], prefix, "Prefix should be first 12 characters of key")
 
+		suffix := GetKeySuffix(key)
+		assert.Equal(t, 6, len(suffix), "Suffix should be 6 characters")
+		assert.Equal(t, key[len(key)-6:], suffix, "Suffix should be last 6 characters of key")
+
 		// Check that it's valid base64url after the prefix
 		encodedPart := strings.TrimPrefix(key, "dm_live_")
 		assert.NotEmpty(t, encodedPart, "Encoded part should not be empty")
@@ -30,6 +34,10 @@ func TestGenerateAPIKeyFormat(t *testing.T) {
 		// Verify no padding characters (base64url uses no padding)
 		assert.NotContains(t, encodedPart, "=", "Base64url should not contain padding")
 	}
+}
+
+func TestGetKeySuffixShortKey(t *testing.T) {
+	assert.Equal(t, "short", GetKeySuffix("short"))
 }
 
 // TestVerifyAPIKeyCorrect verifies that a valid key passes verification

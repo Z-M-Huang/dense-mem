@@ -634,10 +634,16 @@ func (c *testConfig) GetAIEmbeddingTimeoutSeconds() int { return c.aiEmbeddingTi
 func (c *testConfig) IsEmbeddingConfigured() bool {
 	return c.aiAPIURL != "" && c.aiAPIKey != "" && c.aiEmbeddingModel != "" && c.aiEmbeddingDimensions > 0
 }
+func (c *testConfig) GetAIVerifierAPIURL() string            { return c.aiAPIURL }
+func (c *testConfig) GetAIVerifierAPIKey() string            { return c.aiAPIKey }
 func (c *testConfig) GetAIVerifierModel() string             { return "gpt-4o-mini" }
+func (c *testConfig) GetAIVerifierTimeoutSeconds() int       { return 60 }
 func (c *testConfig) GetAIVerifierMaxConcurrency() int       { return 5 }
 func (c *testConfig) GetClaimWriteRateLimit() int            { return 60 }
 func (c *testConfig) GetClaimReadRateLimit() int             { return 300 }
 func (c *testConfig) GetRecallValidatedClaimWeight() float64 { return 0.5 }
 func (c *testConfig) GetPromoteTxTimeoutSeconds() int        { return 10 }
 func (c *testConfig) GetAICommunityMaxNodes() int            { return 500000 }
+func (c *testConfig) GetControlPortalEnabled() bool          { return false }
+func (c *testConfig) GetControlHTTPAddr() string             { return "127.0.0.1:0" }
+func (c *testConfig) GetControlPortalToken() string          { return "" }

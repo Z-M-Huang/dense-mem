@@ -14,6 +14,7 @@ type APIKeyModel interface {
 	GetLabel() string
 	GetKeyHash() string
 	GetKeyPrefix() string
+	GetKeySuffix() string
 	GetScopes() []string
 	GetRateLimit() int
 	GetLastUsedAt() *time.Time
@@ -29,6 +30,7 @@ type APIKey struct {
 	Label      string
 	KeyHash    string
 	KeyPrefix  string
+	KeySuffix  string
 	Scopes     []string
 	RateLimit  int
 	LastUsedAt *time.Time
@@ -41,13 +43,14 @@ type APIKey struct {
 var _ APIKeyModel = (*APIKey)(nil)
 
 // Getters for APIKeyModel interface
-func (k *APIKey) GetID() uuid.UUID         { return k.ID }
-func (k *APIKey) GetProfileID() uuid.UUID  { return k.ProfileID }
-func (k *APIKey) GetLabel() string         { return k.Label }
-func (k *APIKey) GetKeyHash() string       { return k.KeyHash }
-func (k *APIKey) GetKeyPrefix() string     { return k.KeyPrefix }
-func (k *APIKey) GetScopes() []string      { return k.Scopes }
-func (k *APIKey) GetRateLimit() int        { return k.RateLimit }
+func (k *APIKey) GetID() uuid.UUID          { return k.ID }
+func (k *APIKey) GetProfileID() uuid.UUID   { return k.ProfileID }
+func (k *APIKey) GetLabel() string          { return k.Label }
+func (k *APIKey) GetKeyHash() string        { return k.KeyHash }
+func (k *APIKey) GetKeyPrefix() string      { return k.KeyPrefix }
+func (k *APIKey) GetKeySuffix() string      { return k.KeySuffix }
+func (k *APIKey) GetScopes() []string       { return k.Scopes }
+func (k *APIKey) GetRateLimit() int         { return k.RateLimit }
 func (k *APIKey) GetLastUsedAt() *time.Time { return k.LastUsedAt }
 func (k *APIKey) GetExpiresAt() *time.Time  { return k.ExpiresAt }
 func (k *APIKey) GetCreatedAt() time.Time   { return k.CreatedAt }

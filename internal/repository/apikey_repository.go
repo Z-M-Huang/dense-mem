@@ -21,11 +21,13 @@ type APIKeyRepository interface {
 	CountByProfile(ctx context.Context, profileID uuid.UUID) (int64, error)
 	// GetByIDForProfile returns an API key only when it belongs to profileID. Returns nil on mismatch.
 	GetByIDForProfile(ctx context.Context, profileID, id uuid.UUID) (*domain.APIKey, error)
-	GetActiveByPrefix(ctx context.Context, prefix string) (*domain.APIKey, error)
-	// RevokeForProfile marks a key revoked only when it belongs to profileID. Returns number of rows affected.
-	RevokeForProfile(ctx context.Context, profileID, id uuid.UUID) (int64, error)
-	TouchLastUsed(ctx context.Context, id uuid.UUID) error
-}
+		GetActiveByPrefix(ctx context.Context, prefix string) (*domain.APIKey, error)
+		// RevokeForProfile marks a key revoked only when it belongs to profileID. Returns number of rows affected.
+		RevokeForProfile(ctx context.Context, profileID, id uuid.UUID) (int64, error)
+		// DeleteForProfile hard-deletes a key only when it belongs to profileID. Returns number of rows affected.
+		DeleteForProfile(ctx context.Context, profileID, id uuid.UUID) (int64, error)
+		TouchLastUsed(ctx context.Context, id uuid.UUID) error
+	}
 
 // APIKeyRepositoryImpl implements the APIKeyRepository interface.
 // Every query runs inside an RLS-aware transaction so Postgres FORCE RLS
@@ -62,6 +64,7 @@ func (r *APIKeyRepositoryImpl) CreateStandardKey(ctx context.Context, key *domai
 		// Fallback: derive from hash (incorrect but legacy support)
 		keyPrefix = GetKeyPrefixFromHash(key.KeyHash)
 	}
+	keySuffix := key.KeySuffix
 
 	// INSERT must satisfy api_keys_self_access (profile_id = app.current_profile_id);
 	// set the session to the owning profile so the RLS WITH CHECK passes.
@@ -70,9 +73,9 @@ func (r *APIKeyRepositoryImpl) CreateStandardKey(ctx context.Context, key *domai
 	// authorization layer later sees an empty scope set.
 	err := r.rls.WithProfileTx(ctx, r.db, key.ProfileID.String(), func(tx *gorm.DB) error {
 		return tx.Exec(`
-			INSERT INTO api_keys (id, profile_id, key_hash, key_prefix, label, scopes, rate_limit, expires_at, revoked_at, last_used_at, created_at, updated_at)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULL, NULL, $9, $9)
-		`, key.ID, key.ProfileID, key.KeyHash, keyPrefix, key.Label, pq.Array(key.Scopes), key.RateLimit, key.ExpiresAt, now).Error
+			INSERT INTO api_keys (id, profile_id, key_hash, key_prefix, key_suffix, label, scopes, rate_limit, expires_at, revoked_at, last_used_at, created_at, updated_at)
+			VALUES ($1, $2, $3, $4, NULLIF($5, ''), $6, $7, $8, $9, NULL, NULL, $10, $10)
+		`, key.ID, key.ProfileID, key.KeyHash, keyPrefix, keySuffix, key.Label, pq.Array(key.Scopes), key.RateLimit, key.ExpiresAt, now).Error
 	})
 
 	if err != nil {
@@ -110,7 +113,7 @@ func (r *APIKeyRepositoryImpl) ListByProfile(ctx context.Context, profileID uuid
 	keys := make([]*domain.APIKey, 0)
 	err := r.rls.WithProfileTx(ctx, r.db, profileID.String(), func(tx *gorm.DB) error {
 		rows, rerr := tx.Raw(`
-			SELECT id, profile_id, label, scopes, rate_limit, last_used_at, expires_at, created_at, revoked_at
+			SELECT id, profile_id, COALESCE(key_suffix, ''), label, scopes, rate_limit, last_used_at, expires_at, created_at, revoked_at
 			FROM api_keys
 			WHERE profile_id = $1
 			ORDER BY created_at DESC, id ASC
@@ -126,6 +129,7 @@ func (r *APIKeyRepositoryImpl) ListByProfile(ctx context.Context, profileID uuid
 			if serr := rows.Scan(
 				&k.ID,
 				&k.ProfileID,
+				&k.KeySuffix,
 				&k.Label,
 				pq.Array(&k.Scopes),
 				&k.RateLimit,
@@ -162,7 +166,7 @@ func (r *APIKeyRepositoryImpl) GetActiveByPrefix(ctx context.Context, prefix str
 
 	err := r.rls.WithSystemTx(ctx, r.db, func(tx *gorm.DB) error {
 		rows, rerr := tx.Raw(`
-			SELECT id, profile_id, key_hash, label, scopes, rate_limit, last_used_at, expires_at, created_at, revoked_at
+			SELECT id, profile_id, key_hash, COALESCE(key_suffix, ''), label, scopes, rate_limit, last_used_at, expires_at, created_at, revoked_at
 			FROM api_keys
 			WHERE key_prefix = $1
 				AND revoked_at IS NULL
@@ -179,6 +183,7 @@ func (r *APIKeyRepositoryImpl) GetActiveByPrefix(ctx context.Context, prefix str
 				&key.ID,
 				&profileID,
 				&key.KeyHash,
+				&key.KeySuffix,
 				&key.Label,
 				pq.Array(&key.Scopes),
 				&key.RateLimit,
@@ -230,6 +235,28 @@ func (r *APIKeyRepositoryImpl) RevokeForProfile(ctx context.Context, profileID, 
 	return rowsAffected, nil
 }
 
+// DeleteForProfile hard-deletes an API key only when it belongs to profileID.
+func (r *APIKeyRepositoryImpl) DeleteForProfile(ctx context.Context, profileID, id uuid.UUID) (int64, error) {
+	var rowsAffected int64
+	err := r.rls.WithProfileTx(ctx, r.db, profileID.String(), func(tx *gorm.DB) error {
+		res := tx.Exec(`
+			DELETE FROM api_keys
+			WHERE id = $1 AND profile_id = $2
+		`, id, profileID)
+		if res.Error != nil {
+			return res.Error
+		}
+		rowsAffected = res.RowsAffected
+		return nil
+	})
+
+	if err != nil {
+		return 0, fmt.Errorf("failed to delete api key for profile: %w", err)
+	}
+
+	return rowsAffected, nil
+}
+
 // GetByIDForProfile retrieves an API key by ID only when it belongs to profileID.
 // Returns nil when the id/profile combination does not match (prevents existence oracle).
 // Excludes the key_hash field from results.
@@ -242,7 +269,7 @@ func (r *APIKeyRepositoryImpl) GetByIDForProfile(ctx context.Context, profileID,
 
 	err := r.rls.WithProfileTx(ctx, r.db, profileID.String(), func(tx *gorm.DB) error {
 		rows, rerr := tx.Raw(`
-			SELECT id, profile_id, label, scopes, rate_limit, last_used_at, expires_at, created_at, revoked_at
+			SELECT id, profile_id, COALESCE(key_suffix, ''), label, scopes, rate_limit, last_used_at, expires_at, created_at, revoked_at
 			FROM api_keys
 			WHERE id = $1 AND profile_id = $2
 		`, id, profileID).Rows()
@@ -256,6 +283,7 @@ func (r *APIKeyRepositoryImpl) GetByIDForProfile(ctx context.Context, profileID,
 			return rows.Scan(
 				&key.ID,
 				&rowProfileID,
+				&key.KeySuffix,
 				&key.Label,
 				pq.Array(&key.Scopes),
 				&key.RateLimit,

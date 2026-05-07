@@ -47,6 +47,10 @@ func (m *mockAPIKeyRepository) RevokeForProfile(ctx context.Context, profileID, 
 	return 0, nil
 }
 
+func (m *mockAPIKeyRepository) DeleteForProfile(ctx context.Context, profileID, id uuid.UUID) (int64, error) {
+	return 0, nil
+}
+
 func (m *mockAPIKeyRepository) GetByIDForProfile(ctx context.Context, profileID, id uuid.UUID) (*domain.APIKey, error) {
 	return nil, nil
 }

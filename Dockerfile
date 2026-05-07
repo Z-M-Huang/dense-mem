@@ -1,6 +1,19 @@
 # syntax=docker/dockerfile:1.7
 
 # ============================================================================
+# Web portal build stage
+# ============================================================================
+FROM node:22-alpine AS web-builder
+
+WORKDIR /web
+
+COPY web/package.json web/package-lock.json ./
+RUN npm ci
+
+COPY web/ ./
+RUN npm run build
+
+# ============================================================================
 # Build stage
 # ============================================================================
 FROM golang:1.26-alpine AS builder
@@ -34,7 +47,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     CGO_ENABLED=0 GOOS=linux \
     go build -trimpath -ldflags="-s -w" -o /out/list-keys ./cmd/list-keys && \
     CGO_ENABLED=0 GOOS=linux \
-    go build -trimpath -ldflags="-s -w" -o /out/revoke-key ./cmd/revoke-key && \
+    go build -trimpath -ldflags="-s -w" -o /out/delete-key ./cmd/delete-key && \
     CGO_ENABLED=0 GOOS=linux \
     go build -trimpath -ldflags="-s -w" -o /out/rotate-key ./cmd/rotate-key
 
@@ -57,12 +70,14 @@ COPY --from=builder /out/provision-profile /app/provision-profile
 COPY --from=builder /out/list-profiles /app/list-profiles
 COPY --from=builder /out/delete-profile /app/delete-profile
 COPY --from=builder /out/list-keys /app/list-keys
-COPY --from=builder /out/revoke-key /app/revoke-key
+COPY --from=builder /out/delete-key /app/delete-key
 COPY --from=builder /out/rotate-key /app/rotate-key
 
 # migrator.go discovers migrations via cwd-relative walk; WORKDIR=/app plus
 # this copy satisfies Strategy 1 in getMigrationsDir().
 COPY --chown=densemem:densemem migrations /app/migrations
+
+COPY --from=web-builder --chown=densemem:densemem /web/dist /app/web/dist
 
 # Entrypoint wrapper assembles POSTGRES_DSN from component env vars if the
 # DSN is not supplied directly. Keeps the full credentialed URL literal out
@@ -77,7 +92,7 @@ EXPOSE 8080
 # /health is a liveness probe (process up); /ready flips to 503 on transient
 # dependency blips which would force Docker to restart a healthy container.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-    CMD wget --quiet --spider http://127.0.0.1:8080/health || exit 1
+    CMD wget --quiet -O /dev/null http://127.0.0.1:8080/health || exit 1
 
 ENTRYPOINT ["/app/docker-entrypoint.sh"]
 CMD ["/app/server"]

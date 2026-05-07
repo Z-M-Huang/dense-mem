@@ -23,7 +23,7 @@ type APIKeyServiceInterface interface {
 	ListByProfile(ctx context.Context, profileID uuid.UUID, limit, offset int) ([]*domain.APIKey, error)
 	CountByProfile(ctx context.Context, profileID uuid.UUID) (int64, error)
 	GetByIDForProfile(ctx context.Context, profileID, id uuid.UUID) (*domain.APIKey, error)
-	RevokeForProfile(ctx context.Context, profileID, id uuid.UUID, actorKeyID *string, actorRole, clientIP, correlationID string) error
+	DeleteForProfile(ctx context.Context, profileID, id uuid.UUID, actorKeyID *string, actorRole, clientIP, correlationID string) error
 }
 
 // APIKeyHandler handles HTTP requests for API key operations.
@@ -82,8 +82,6 @@ func (h *APIKeyHandler) Create(c echo.Context) error {
 
 	// Build service request
 	req := service.CreateAPIKeyRequest{
-		Label:     body.Label,
-		Scopes:    body.Scopes,
 		RateLimit: body.RateLimit,
 	}
 	if body.ExpiresAt != nil {
@@ -208,7 +206,7 @@ func (h *APIKeyHandler) Get(c echo.Context) error {
 
 // Delete handles DELETE /api/v1/profiles/:profileId/api-keys/:keyId.
 // Requires 'write' scope.
-// Returns 200 with { "status": "revoked" }.
+// Returns 200 with { "status": "deleted" }.
 // Scoped to the profileId in the path — returns NOT_FOUND for cross-profile ids.
 func (h *APIKeyHandler) Delete(c echo.Context) error {
 	ctx := c.Request().Context()
@@ -247,14 +245,13 @@ func (h *APIKeyHandler) Delete(c echo.Context) error {
 		actorRole = principal.Role
 	}
 
-	// Revoke the key scoped to profile — NOT_FOUND on cross-profile id.
-	err = h.svc.RevokeForProfile(ctx, profileID, keyID, actorKeyID, actorRole, c.RealIP(), middleware.GetCorrelationID(ctx))
+	// Delete the key scoped to profile — NOT_FOUND on cross-profile id.
+	err = h.svc.DeleteForProfile(ctx, profileID, keyID, actorKeyID, actorRole, c.RealIP(), middleware.GetCorrelationID(ctx))
 	if err != nil {
 		return err
 	}
 
-	// Return 200 with status revoked
-	return response.SuccessOK(c, map[string]string{"status": "revoked"})
+	return response.SuccessOK(c, map[string]string{"status": "deleted"})
 }
 
 // toAPIKeyResponse converts a domain.APIKey to dto.APIKeyResponse.
@@ -272,22 +269,14 @@ func toAPIKeyResponse(k *domain.APIKey) dto.APIKeyResponse {
 		expiresAt = &formatted
 	}
 
-	var revokedAt *string
-	if k.RevokedAt != nil {
-		formatted := k.RevokedAt.Format("2006-01-02T15:04:05Z")
-		revokedAt = &formatted
-	}
-
 	return dto.APIKeyResponse{
 		ID:         k.ID,
 		ProfileID:  k.ProfileID,
-		Label:      k.Label,
-		Scopes:     k.Scopes,
+		KeySuffix:  k.KeySuffix,
 		RateLimit:  k.RateLimit,
 		LastUsedAt: lastUsedAt,
 		ExpiresAt:  expiresAt,
 		CreatedAt:  k.CreatedAt.Format("2006-01-02T15:04:05Z"),
-		RevokedAt:  revokedAt,
 	}
 }
 
@@ -306,20 +295,12 @@ func toAPIKeyListItem(k *domain.APIKey) dto.APIKeyListItem {
 		expiresAt = &formatted
 	}
 
-	var revokedAt *string
-	if k.RevokedAt != nil {
-		formatted := k.RevokedAt.Format("2006-01-02T15:04:05Z")
-		revokedAt = &formatted
-	}
-
 	return dto.APIKeyListItem{
 		ID:         k.ID,
-		Label:      k.Label,
-		Scopes:     k.Scopes,
+		KeySuffix:  k.KeySuffix,
 		RateLimit:  k.RateLimit,
 		LastUsedAt: lastUsedAt,
 		ExpiresAt:  expiresAt,
 		CreatedAt:  k.CreatedAt.Format("2006-01-02T15:04:05Z"),
-		RevokedAt:  revokedAt,
 	}
 }

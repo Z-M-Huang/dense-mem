@@ -47,7 +47,10 @@ func (c *testRateLimitConfig) GetAIEmbeddingModel() string       { return "" }
 func (c *testRateLimitConfig) GetAIEmbeddingDimensions() int     { return 0 }
 func (c *testRateLimitConfig) GetAIEmbeddingTimeoutSeconds() int { return 30 }
 func (c *testRateLimitConfig) IsEmbeddingConfigured() bool       { return false }
+func (c *testRateLimitConfig) GetAIVerifierAPIURL() string       { return "" }
+func (c *testRateLimitConfig) GetAIVerifierAPIKey() string       { return "" }
 func (c *testRateLimitConfig) GetAIVerifierModel() string        { return "gpt-4o-mini" }
+func (c *testRateLimitConfig) GetAIVerifierTimeoutSeconds() int  { return 60 }
 func (c *testRateLimitConfig) GetAIVerifierMaxConcurrency() int  { return 5 }
 func (c *testRateLimitConfig) GetClaimWriteRateLimit() int {
 	if c.claimWriteRateLimit != 0 {
@@ -64,6 +67,9 @@ func (c *testRateLimitConfig) GetClaimReadRateLimit() int {
 func (c *testRateLimitConfig) GetRecallValidatedClaimWeight() float64 { return 0.5 }
 func (c *testRateLimitConfig) GetPromoteTxTimeoutSeconds() int        { return 10 }
 func (c *testRateLimitConfig) GetAICommunityMaxNodes() int            { return 500000 }
+func (c *testRateLimitConfig) GetControlPortalEnabled() bool          { return false }
+func (c *testRateLimitConfig) GetControlHTTPAddr() string             { return "127.0.0.1:8090" }
+func (c *testRateLimitConfig) GetControlPortalToken() string          { return "" }
 
 // runRateLimitMiddlewareContract is the shared contract helper for rate limit
 // middleware. It exercises header contract and 429 behavior for any backend
@@ -148,13 +154,19 @@ func (c *redisRateLimitConfig) GetAIEmbeddingModel() string            { return 
 func (c *redisRateLimitConfig) GetAIEmbeddingDimensions() int          { return 0 }
 func (c *redisRateLimitConfig) GetAIEmbeddingTimeoutSeconds() int      { return 30 }
 func (c *redisRateLimitConfig) IsEmbeddingConfigured() bool            { return false }
+func (c *redisRateLimitConfig) GetAIVerifierAPIURL() string            { return "" }
+func (c *redisRateLimitConfig) GetAIVerifierAPIKey() string            { return "" }
 func (c *redisRateLimitConfig) GetAIVerifierModel() string             { return "gpt-4o-mini" }
+func (c *redisRateLimitConfig) GetAIVerifierTimeoutSeconds() int       { return 60 }
 func (c *redisRateLimitConfig) GetAIVerifierMaxConcurrency() int       { return 5 }
 func (c *redisRateLimitConfig) GetClaimWriteRateLimit() int            { return 60 }
 func (c *redisRateLimitConfig) GetClaimReadRateLimit() int             { return 300 }
 func (c *redisRateLimitConfig) GetRecallValidatedClaimWeight() float64 { return 0.5 }
 func (c *redisRateLimitConfig) GetPromoteTxTimeoutSeconds() int        { return 10 }
 func (c *redisRateLimitConfig) GetAICommunityMaxNodes() int            { return 500000 }
+func (c *redisRateLimitConfig) GetControlPortalEnabled() bool          { return false }
+func (c *redisRateLimitConfig) GetControlHTTPAddr() string             { return "127.0.0.1:8090" }
+func (c *redisRateLimitConfig) GetControlPortalToken() string          { return "" }
 
 func TestRateLimitMiddleware_Contract_Redis(t *testing.T) {
 	t.Parallel()

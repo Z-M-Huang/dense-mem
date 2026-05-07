@@ -14,9 +14,9 @@ import (
 )
 
 const (
-	openAIVerifierProvider      = "openai"
-	openAIVerifierMaxItemChars  = 4000
-	openAIVerifierMaxTotalChars = 32000
+	openAIVerifierProvider       = "openai"
+	openAIVerifierMaxItemChars   = 4000
+	openAIVerifierMaxTotalChars  = 32000
 	openAIVerifierDefaultTimeout = 60 * time.Second
 
 	// openAIVerifierSystemPrompt is the fixed system instruction for all verification calls.
@@ -109,12 +109,16 @@ var _ Verifier = (*OpenAIVerifier)(nil)
 func NewOpenAIVerifier(cfg config.ConfigProvider, httpClient *http.Client) *OpenAIVerifier {
 	client := httpClient
 	if client == nil {
-		client = &http.Client{Timeout: openAIVerifierDefaultTimeout}
+		timeout := time.Duration(cfg.GetAIVerifierTimeoutSeconds()) * time.Second
+		if timeout == 0 {
+			timeout = openAIVerifierDefaultTimeout
+		}
+		client = &http.Client{Timeout: timeout}
 	}
 
 	return &OpenAIVerifier{
-		baseURL:    cfg.GetAIAPIURL(),
-		apiKey:     cfg.GetAIAPIKey(),
+		baseURL:    cfg.GetAIVerifierAPIURL(),
+		apiKey:     cfg.GetAIVerifierAPIKey(),
 		model:      cfg.GetAIVerifierModel(),
 		httpClient: client,
 	}

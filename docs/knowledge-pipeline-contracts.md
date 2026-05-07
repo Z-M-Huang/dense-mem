@@ -63,6 +63,11 @@ configured verifier model/provider evaluates the claim against its supporting
 fragments and returns the status transition. That makes the graph durable and
 traceable, while validation policy stays explicit and replaceable.
 
+Verifier calls can use a separate OpenAI-compatible endpoint from embeddings via
+`AI_VERIFIER_API_URL` and `AI_VERIFIER_API_KEY`. If those are unset, Dense-Mem
+uses `AI_API_URL` and `AI_API_KEY` for backward-compatible single-provider
+deployments.
+
 ## Recall Tier Definitions
 
 | Tier | Label | Source | Score Basis |

@@ -25,6 +25,7 @@ import (
 	"github.com/dense-mem/dense-mem/internal/service/factservice"
 	"github.com/dense-mem/dense-mem/internal/service/fragmentdedupe"
 	"github.com/dense-mem/dense-mem/internal/service/fragmentservice"
+	"github.com/dense-mem/dense-mem/internal/service/memoryservice"
 	"github.com/dense-mem/dense-mem/internal/service/recallservice"
 	"github.com/dense-mem/dense-mem/internal/sse"
 	"github.com/dense-mem/dense-mem/internal/storage/neo4j"
@@ -128,10 +129,10 @@ func main() {
 	// ========================================
 	// Creates uniqueness constraints, profile_id indexes, full-text indexes,
 	// vector index with configured dimensions, and composite fragment dedupe
-	// indexes. Idempotent; legacy index names are dropped and recreated with
-	// canonical names. The vector index uses EmbeddingDimensions (legacy
-	// setting shared with semantic search) rather than AIEmbeddingDimensions
-	// so the index exists even when the AI provider is unconfigured.
+		// indexes. Idempotent; legacy index names are dropped and recreated with
+		// canonical names. Config loading makes EmbeddingDimensions match the
+		// configured AI embedding dimensions unless an explicit matching legacy
+		// override is supplied.
 	schemaBootstrapper := neo4j.NewSchemaBootstrapper(neo4jClient, cfg.GetEmbeddingDimensions(), logger)
 	if err := schemaBootstrapper.EnsureSchema(startupCtx); err != nil {
 		log.Fatalf("failed to bootstrap neo4j schema: %v", err)
@@ -159,18 +160,19 @@ func main() {
 	apiKeyRepo := repository.NewAPIKeyRepository(pgDB.GetDB(), rlsHelper)
 
 	// ========================================
+	// Neo4j profile scope enforcer and graph writer
+	// ========================================
+	profileScopeEnforcer := neo4j.NewProfileScopeEnforcer(neo4jClient)
+	profileDataPurger := service.NewNeo4jProfileDataPurger(profileScopeEnforcer)
+
+	// ========================================
 	// Service layer
 	// ========================================
 	auditService := service.NewAuditService(pgDB.GetDB())
 
-	profileService := service.NewProfileService(profileRepo, auditService, backend.cleanupRepo)
+	profileService := service.NewProfileServiceWithDataPurger(profileRepo, auditService, backend.cleanupRepo, profileDataPurger)
 	apiKeyService := service.NewAPIKeyService(apiKeyRepo, profileService, auditService, backend.cleanupRepo, backend.cleanupRepo)
 	rateLimitService := backend.rateLimitService
-
-	// ========================================
-	// Neo4j profile scope enforcer and graph writer
-	// ========================================
-	profileScopeEnforcer := neo4j.NewProfileScopeEnforcer(neo4jClient)
 
 	// ========================================
 	// Tool services
@@ -257,6 +259,10 @@ func main() {
 		discoverabilityMetrics,
 		time.Duration(cfg.GetPromoteTxTimeoutSeconds())*time.Second,
 	)
+	var factConfirmSvc factservice.ConfirmMemoryService = unavailableConfirmMemoryService{}
+	if confirmSvc, ok := factPromoteSvc.(factservice.ConfirmMemoryService); ok {
+		factConfirmSvc = confirmSvc
+	}
 	factGetSvc := factservice.NewGetFactService(profileScopeEnforcer)
 	factListSvc := factservice.NewListFactsService(profileScopeEnforcer)
 	communityGetSvc := communityservice.NewGetCommunitySummaryService(neo4jClient)
@@ -315,6 +321,17 @@ func main() {
 		)
 	}
 
+	memorySvc := memoryservice.New(memoryservice.Dependencies{
+		FragmentCreate: fragmentCreateRegistrySvc,
+		ClaimCreate:    claimCreateSvc,
+		ClaimVerify:    claimVerifyRegistrySvc,
+		ClaimGet:       claimGetSvc,
+		ClaimList:      claimListSvc,
+		FactPromote:    factPromoteSvc,
+		FactConfirm:    factConfirmSvc,
+		FactList:       factListSvc,
+	})
+
 	var (
 		communityDetectRegistrySvc communityservice.DetectCommunityService = unavailableCommunityDetectService{}
 	)
@@ -346,6 +363,7 @@ func main() {
 		CommunityDetect: communityDetectRegistrySvc,
 		CommunityGet:    communityGetSvc,
 		CommunityList:   communityListSvc,
+		Memory:          memorySvc,
 	})
 	if err != nil {
 		log.Fatalf("failed to build tool registry: %v", err)
@@ -472,6 +490,25 @@ func main() {
 
 	http.RegisterProtectedRoutesWithHandlers(e, protectedDeps, protectedHandlers)
 
+	var shutdownControlPortal func()
+	if cfg.GetControlPortalEnabled() {
+		controlServer, err := http.NewControlPortalServer(&cfg, profileService, apiKeyService, logger)
+		if err != nil {
+			log.Fatalf("failed to build control portal server: %v", err)
+		}
+		logger.Info("starting control portal", observability.String("addr", cfg.GetControlHTTPAddr()))
+		go func() {
+			if err := controlServer.Start(cfg.GetControlHTTPAddr()); err != nil {
+				logger.Error("control portal server error", err)
+			}
+		}()
+		shutdownControlPortal = func() {
+			if err := http.ShutdownControlPortal(controlServer, logger); err != nil {
+				logger.Error("control portal shutdown error", err)
+			}
+		}
+	}
+
 	logger.Info("starting server", observability.String("addr", cfg.HTTPAddr))
 
 	// Start server in a goroutine
@@ -491,5 +528,8 @@ func main() {
 	// Graceful shutdown with 10-second timeout
 	if err := http.ShutdownServer(e, logger); err != nil {
 		logger.Error("server shutdown error", err)
+	}
+	if shutdownControlPortal != nil {
+		shutdownControlPortal()
 	}
 }

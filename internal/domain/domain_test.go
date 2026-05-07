@@ -160,40 +160,11 @@ func TestDTOValidationProfileCreate(t *testing.T) {
 func TestDTOValidationAPIKeyCreate(t *testing.T) {
 	t.Run("valid API key request passes validation", func(t *testing.T) {
 		req := dto.CreateAPIKeyRequest{
-			Label:     "Test Key",
-			Scopes:    []string{"read", "write"},
 			RateLimit: 100,
 		}
 
 		err := validation.ValidateStruct(&req)
 		assert.NoError(t, err)
-	})
-
-	t.Run("label too short fails validation", func(t *testing.T) {
-		req := dto.CreateAPIKeyRequest{
-			Label: "",
-		}
-
-		err := validation.ValidateStruct(&req)
-		assert.Error(t, err)
-	})
-
-	t.Run("label too long fails validation", func(t *testing.T) {
-		req := dto.CreateAPIKeyRequest{
-			Label: string(make([]byte, 101)),
-		}
-
-		err := validation.ValidateStruct(&req)
-		assert.Error(t, err)
-	})
-
-	t.Run("blank label fails validation", func(t *testing.T) {
-		req := dto.CreateAPIKeyRequest{
-			Label: "   ",
-		}
-
-		err := validation.ValidateStruct(&req)
-		assert.Error(t, err)
 	})
 }
 

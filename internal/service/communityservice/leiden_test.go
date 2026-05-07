@@ -160,12 +160,18 @@ func (s *stubConfigProvider) GetAIEmbeddingModel() string            { return ""
 func (s *stubConfigProvider) GetAIEmbeddingDimensions() int          { return 0 }
 func (s *stubConfigProvider) GetAIEmbeddingTimeoutSeconds() int      { return 0 }
 func (s *stubConfigProvider) IsEmbeddingConfigured() bool            { return false }
+func (s *stubConfigProvider) GetAIVerifierAPIURL() string            { return "" }
+func (s *stubConfigProvider) GetAIVerifierAPIKey() string            { return "" }
 func (s *stubConfigProvider) GetAIVerifierModel() string             { return "" }
+func (s *stubConfigProvider) GetAIVerifierTimeoutSeconds() int       { return 0 }
 func (s *stubConfigProvider) GetAIVerifierMaxConcurrency() int       { return 0 }
 func (s *stubConfigProvider) GetClaimWriteRateLimit() int            { return 0 }
 func (s *stubConfigProvider) GetClaimReadRateLimit() int             { return 0 }
 func (s *stubConfigProvider) GetRecallValidatedClaimWeight() float64 { return 0 }
 func (s *stubConfigProvider) GetPromoteTxTimeoutSeconds() int        { return 0 }
+func (s *stubConfigProvider) GetControlPortalEnabled() bool          { return false }
+func (s *stubConfigProvider) GetControlHTTPAddr() string             { return "127.0.0.1:8090" }
+func (s *stubConfigProvider) GetControlPortalToken() string          { return "" }
 
 // newTestLeidenService constructs a leidenServiceImpl with injected stubs.
 // Used only in tests; production callers use NewLeidenService.

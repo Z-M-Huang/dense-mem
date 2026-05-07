@@ -20,18 +20,15 @@ import (
 type cliConfig struct {
 	profileID string
 	keyID     string
-	label     string
 	expiresAt string
 }
 
 type output struct {
-	ProfileID string   `json:"profile_id"`
-	OldKeyID  string   `json:"old_key_id"`
-	NewKeyID  string   `json:"new_key_id"`
-	APIKey    string   `json:"api_key"`
-	KeyLabel  string   `json:"key_label"`
-	Scopes    []string `json:"scopes"`
-	ExpiresAt *string  `json:"expires_at,omitempty"`
+	ProfileID string  `json:"profile_id"`
+	OldKeyID  string  `json:"old_key_id"`
+	NewKeyID  string  `json:"new_key_id"`
+	APIKey    string  `json:"api_key"`
+	ExpiresAt *string `json:"expires_at,omitempty"`
 }
 
 func main() {
@@ -75,11 +72,6 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return fmt.Errorf("load existing key: %w", err)
 	}
 
-	label := existing.Label
-	if cfg.label != "" {
-		label = cfg.label
-	}
-
 	expiresAt := existing.ExpiresAt
 	if cfg.expiresAt != "" {
 		parsed, err := time.Parse(time.RFC3339, cfg.expiresAt)
@@ -91,8 +83,6 @@ func run(args []string, stdout, stderr io.Writer) error {
 
 	correlationID := operatorcli.CorrelationID()
 	newKey, rawKey, err := services.APIKeyService.CreateStandardKey(ctx, profileID, service.CreateAPIKeyRequest{
-		Label:     label,
-		Scopes:    existing.Scopes,
 		RateLimit: existing.RateLimit,
 		ExpiresAt: expiresAt,
 	}, nil, operatorcli.DefaultActorRole, operatorcli.DefaultClientIP, correlationID)
@@ -100,12 +90,12 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return fmt.Errorf("create replacement key: %w", err)
 	}
 
-	if err := services.APIKeyService.RevokeForProfile(ctx, profileID, keyID, nil, operatorcli.DefaultActorRole, operatorcli.DefaultClientIP, correlationID); err != nil {
-		rollbackErr := services.APIKeyService.RevokeForProfile(ctx, profileID, newKey.ID, nil, operatorcli.DefaultActorRole, operatorcli.DefaultClientIP, correlationID)
+	if err := services.APIKeyService.DeleteForProfile(ctx, profileID, keyID, nil, operatorcli.DefaultActorRole, operatorcli.DefaultClientIP, correlationID); err != nil {
+		rollbackErr := services.APIKeyService.DeleteForProfile(ctx, profileID, newKey.ID, nil, operatorcli.DefaultActorRole, operatorcli.DefaultClientIP, correlationID)
 		if rollbackErr != nil {
-			return fmt.Errorf("revoke old key: %w (rollback failed for new key %s: %v)", err, newKey.ID.String(), rollbackErr)
+			return fmt.Errorf("delete old key: %w (rollback failed for new key %s: %v)", err, newKey.ID.String(), rollbackErr)
 		}
-		return fmt.Errorf("revoke old key: %w", err)
+		return fmt.Errorf("delete old key: %w", err)
 	}
 
 	var expiresAtStr *string
@@ -121,8 +111,6 @@ func run(args []string, stdout, stderr io.Writer) error {
 		OldKeyID:  keyID.String(),
 		NewKeyID:  newKey.ID.String(),
 		APIKey:    rawKey,
-		KeyLabel:  label,
-		Scopes:    existing.Scopes,
 		ExpiresAt: expiresAtStr,
 	})
 }
@@ -134,7 +122,6 @@ func parseCLI(args []string, stderr io.Writer) (cliConfig, error) {
 	fs.SetOutput(stderr)
 	fs.StringVar(&cfg.profileID, "profile-id", "", "Profile UUID that owns the key")
 	fs.StringVar(&cfg.keyID, "key-id", "", "API key UUID to rotate")
-	fs.StringVar(&cfg.label, "label", "", "Optional label override for the replacement key")
 	fs.StringVar(&cfg.expiresAt, "expires-at", "", "Optional RFC3339 expiration override for the replacement key")
 
 	if err := fs.Parse(args); err != nil {
@@ -142,7 +129,6 @@ func parseCLI(args []string, stderr io.Writer) (cliConfig, error) {
 	}
 	cfg.profileID = strings.TrimSpace(cfg.profileID)
 	cfg.keyID = strings.TrimSpace(cfg.keyID)
-	cfg.label = strings.TrimSpace(cfg.label)
 	cfg.expiresAt = strings.TrimSpace(cfg.expiresAt)
 
 	if cfg.profileID == "" {

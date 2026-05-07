@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"strconv"
 	"strings"
@@ -33,13 +34,19 @@ type ConfigProvider interface {
 	GetAIEmbeddingTimeoutSeconds() int
 	IsEmbeddingConfigured() bool
 	// Knowledge-pipeline knobs (AC-X3)
+	GetAIVerifierAPIURL() string
+	GetAIVerifierAPIKey() string
 	GetAIVerifierModel() string
+	GetAIVerifierTimeoutSeconds() int
 	GetAIVerifierMaxConcurrency() int
 	GetClaimWriteRateLimit() int
 	GetClaimReadRateLimit() int
 	GetRecallValidatedClaimWeight() float64
 	GetPromoteTxTimeoutSeconds() int
 	GetAICommunityMaxNodes() int
+	GetControlPortalEnabled() bool
+	GetControlHTTPAddr() string
+	GetControlPortalToken() string
 }
 
 // Config holds all configuration for the application.
@@ -67,13 +74,19 @@ type Config struct {
 	AIEmbeddingDimensions     int
 	AIEmbeddingTimeoutSeconds int
 	// Knowledge-pipeline knobs (AC-X3)
+	AIVerifierAPIURL           string
+	AIVerifierAPIKey           string `json:"-"`
 	AIVerifierModel            string
+	AIVerifierTimeoutSeconds   int
 	AIVerifierMaxConcurrency   int
 	ClaimWriteRateLimit        int
 	ClaimReadRateLimit         int
 	RecallValidatedClaimWeight float64
 	PromoteTxTimeoutSeconds    int
 	AICommunityMaxNodes        int
+	ControlPortalEnabled       bool
+	ControlHTTPAddr            string
+	ControlPortalToken         string `json:"-"`
 }
 
 // Ensure Config implements ConfigProvider
@@ -106,13 +119,34 @@ func (c *Config) IsEmbeddingConfigured() bool {
 }
 
 // Knowledge-pipeline getters (AC-X3)
-func (c *Config) GetAIVerifierModel() string             { return c.AIVerifierModel }
+func (c *Config) GetAIVerifierAPIURL() string {
+	if c.AIVerifierAPIURL != "" {
+		return c.AIVerifierAPIURL
+	}
+	return c.AIAPIURL
+}
+func (c *Config) GetAIVerifierAPIKey() string {
+	if c.AIVerifierAPIKey != "" {
+		return c.AIVerifierAPIKey
+	}
+	return c.AIAPIKey
+}
+func (c *Config) GetAIVerifierModel() string { return c.AIVerifierModel }
+func (c *Config) GetAIVerifierTimeoutSeconds() int {
+	if c.AIVerifierTimeoutSeconds > 0 {
+		return c.AIVerifierTimeoutSeconds
+	}
+	return 60
+}
 func (c *Config) GetAIVerifierMaxConcurrency() int       { return c.AIVerifierMaxConcurrency }
 func (c *Config) GetClaimWriteRateLimit() int            { return c.ClaimWriteRateLimit }
 func (c *Config) GetClaimReadRateLimit() int             { return c.ClaimReadRateLimit }
 func (c *Config) GetRecallValidatedClaimWeight() float64 { return c.RecallValidatedClaimWeight }
 func (c *Config) GetPromoteTxTimeoutSeconds() int        { return c.PromoteTxTimeoutSeconds }
 func (c *Config) GetAICommunityMaxNodes() int            { return c.AICommunityMaxNodes }
+func (c *Config) GetControlPortalEnabled() bool          { return c.ControlPortalEnabled }
+func (c *Config) GetControlHTTPAddr() string             { return c.ControlHTTPAddr }
+func (c *Config) GetControlPortalToken() string          { return c.ControlPortalToken }
 
 // ValidationError represents a configuration validation failure.
 type ValidationError struct {
@@ -194,6 +228,21 @@ func parseFloatOrDefault(key string, defaultValue float64) (float64, error) {
 	return parsed, nil
 }
 
+func parseBoolOrDefault(key string, defaultValue bool) (bool, error) {
+	value := os.Getenv(key)
+	if value == "" {
+		return defaultValue, nil
+	}
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		return false, &ValidationError{
+			Field:   key,
+			Message: fmt.Sprintf("invalid boolean value: %s", value),
+		}
+	}
+	return parsed, nil
+}
+
 // Load reads configuration from environment variables and returns a Config.
 // Returns a typed ValidationError for any validation failures.
 func Load() (Config, error) {
@@ -249,7 +298,8 @@ func Load() (Config, error) {
 		return cfg, err
 	}
 
-	cfg.EmbeddingDimensions, err = parseIntOrDefault("EMBEDDING_DIMENSIONS", 1536)
+	embeddingDimensionsSet := strings.TrimSpace(os.Getenv("EMBEDDING_DIMENSIONS")) != ""
+	cfg.EmbeddingDimensions, err = parseIntOrDefault("EMBEDDING_DIMENSIONS", 0)
 	if err != nil {
 		return cfg, err
 	}
@@ -268,9 +318,37 @@ func Load() (Config, error) {
 	if err != nil {
 		return cfg, err
 	}
+	if !embeddingDimensionsSet {
+		if cfg.AIEmbeddingDimensions > 0 {
+			cfg.EmbeddingDimensions = cfg.AIEmbeddingDimensions
+		} else {
+			cfg.EmbeddingDimensions = 1536
+		}
+	}
+	if embeddingDimensionsSet && cfg.AIEmbeddingDimensions > 0 && cfg.EmbeddingDimensions != cfg.AIEmbeddingDimensions {
+		return cfg, &ValidationError{
+			Field:   "EMBEDDING_DIMENSIONS",
+			Message: fmt.Sprintf("must match AI_API_EMBEDDING_DIMENSIONS when both are set; got %d and %d", cfg.EmbeddingDimensions, cfg.AIEmbeddingDimensions),
+		}
+	}
 
 	// Knowledge-pipeline knobs (AC-X3)
+	verifierAPIURLSet := strings.TrimSpace(os.Getenv("AI_VERIFIER_API_URL")) != ""
+	verifierAPIKeySet := strings.TrimSpace(os.Getenv("AI_VERIFIER_API_KEY")) != ""
+	cfg.AIVerifierAPIURL = os.Getenv("AI_VERIFIER_API_URL")
+	if cfg.AIVerifierAPIURL == "" {
+		cfg.AIVerifierAPIURL = cfg.AIAPIURL
+	}
+	cfg.AIVerifierAPIKey = os.Getenv("AI_VERIFIER_API_KEY")
+	if cfg.AIVerifierAPIKey == "" && !verifierAPIURLSet {
+		cfg.AIVerifierAPIKey = cfg.AIAPIKey
+	}
 	cfg.AIVerifierModel = getEnvOrDefault("AI_VERIFIER_MODEL", "gpt-4o-mini")
+
+	cfg.AIVerifierTimeoutSeconds, err = parseIntOrDefault("AI_VERIFIER_TIMEOUT_SECONDS", 60)
+	if err != nil {
+		return cfg, err
+	}
 
 	cfg.AIVerifierMaxConcurrency, err = parseIntOrDefault("AI_VERIFIER_MAX_CONCURRENCY", 5)
 	if err != nil {
@@ -301,6 +379,13 @@ func Load() (Config, error) {
 	if err != nil {
 		return cfg, err
 	}
+
+	cfg.ControlPortalEnabled, err = parseBoolOrDefault("CONTROL_PORTAL_ENABLED", false)
+	if err != nil {
+		return cfg, err
+	}
+	cfg.ControlHTTPAddr = getEnvOrDefault("CONTROL_HTTP_ADDR", "127.0.0.1:8090")
+	cfg.ControlPortalToken = os.Getenv("CONTROL_PORTAL_TOKEN")
 
 	// Validation
 	if cfg.PostgresDSN == "" {
@@ -341,6 +426,7 @@ func Load() (Config, error) {
 		{"SSE_MAX_DURATION_SECONDS", cfg.SSEMaxDurationSeconds},
 		{"SSE_MAX_CONCURRENT_STREAMS", cfg.SSEMaxConcurrentStreams},
 		{"EMBEDDING_DIMENSIONS", cfg.EmbeddingDimensions},
+		{"AI_VERIFIER_TIMEOUT_SECONDS", cfg.AIVerifierTimeoutSeconds},
 		{"AI_VERIFIER_MAX_CONCURRENCY", cfg.AIVerifierMaxConcurrency},
 		{"CLAIM_WRITE_RATE_LIMIT", cfg.ClaimWriteRateLimit},
 		{"CLAIM_READ_RATE_LIMIT", cfg.ClaimReadRateLimit},
@@ -362,6 +448,34 @@ func Load() (Config, error) {
 		return cfg, &ValidationError{
 			Field:   "RECALL_VALIDATED_CLAIM_WEIGHT",
 			Message: fmt.Sprintf("must be between 0 and 1, got %f", cfg.RecallValidatedClaimWeight),
+		}
+	}
+
+	if cfg.ControlPortalEnabled {
+		if strings.TrimSpace(cfg.ControlPortalToken) == "" {
+			return cfg, &ValidationError{
+				Field:   "CONTROL_PORTAL_TOKEN",
+				Message: "required when CONTROL_PORTAL_ENABLED=true",
+			}
+		}
+		if !isLoopbackListenAddr(cfg.ControlHTTPAddr) {
+			return cfg, &ValidationError{
+				Field:   "CONTROL_HTTP_ADDR",
+				Message: "must bind to a loopback host when CONTROL_PORTAL_ENABLED=true",
+			}
+		}
+	}
+
+	if verifierAPIURLSet && !verifierAPIKeySet {
+		return cfg, &ValidationError{
+			Field:   "AI_VERIFIER_API_KEY",
+			Message: "required when AI_VERIFIER_API_URL is set",
+		}
+	}
+	if verifierAPIKeySet && strings.TrimSpace(cfg.AIVerifierAPIURL) == "" {
+		return cfg, &ValidationError{
+			Field:   "AI_VERIFIER_API_URL",
+			Message: "required when AI_VERIFIER_API_KEY is set and AI_API_URL is empty",
 		}
 	}
 
@@ -400,4 +514,19 @@ func Load() (Config, error) {
 	}
 
 	return cfg, nil
+}
+
+func isLoopbackListenAddr(addr string) bool {
+	host := addr
+	if splitHost, _, err := net.SplitHostPort(addr); err == nil {
+		host = splitHost
+	}
+	host = strings.Trim(host, "[]")
+	if host == "localhost" {
+		return true
+	}
+	if host == "" {
+		return false
+	}
+	return host == "127.0.0.1" || host == "::1"
 }

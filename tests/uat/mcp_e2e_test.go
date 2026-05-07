@@ -201,8 +201,6 @@ func createProfileAndKey(t *testing.T, ctx context.Context, env *TestEnv) (strin
 	require.NoError(t, err)
 
 	_, rawKey, err := env.apiKeySvc.CreateStandardKey(ctx, profile.ID, service.CreateAPIKeyRequest{
-		Label:     "uat-mcp-runtime",
-		Scopes:    []string{"read", "write"},
 		RateLimit: 0,
 	}, nil, "operator", "", "uat-mcp-runtime")
 	require.NoError(t, err)

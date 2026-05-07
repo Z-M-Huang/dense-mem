@@ -11,6 +11,7 @@ import (
 	"github.com/dense-mem/dense-mem/internal/service/communityservice"
 	"github.com/dense-mem/dense-mem/internal/service/factservice"
 	"github.com/dense-mem/dense-mem/internal/service/fragmentservice"
+	"github.com/dense-mem/dense-mem/internal/service/memoryservice"
 	"github.com/dense-mem/dense-mem/internal/service/recallservice"
 	"github.com/dense-mem/dense-mem/internal/tools/graphquery"
 	"github.com/dense-mem/dense-mem/internal/tools/keywordsearch"
@@ -43,6 +44,7 @@ type Dependencies struct {
 	CommunityDetect communityservice.DetectCommunityService
 	CommunityGet    communityservice.GetCommunitySummaryService
 	CommunityList   communityservice.ListCommunitiesService
+	Memory          memoryservice.Service
 }
 
 // ErrToolUnavailable is the defensive fallback returned when a tool dependency
@@ -70,6 +72,10 @@ func defaultTools(deps Dependencies) []Tool {
 		getMemoryTool(deps),
 		listRecentMemoriesTool(deps),
 		recallMemoryTool(deps),
+		rememberTool(deps),
+		importMemoriesTool(deps),
+		reflectMemoriesTool(deps),
+		confirmMemoryTool(deps),
 		keywordSearchTool(deps),
 		semanticSearchTool(deps),
 		graphQueryTool(deps),
@@ -278,6 +284,7 @@ func recallMemoryTool(deps Dependencies) Tool {
 						},
 					},
 				},
+				"clarifications": clarificationArraySchema(),
 			},
 		},
 		RequiredScopes: []string{"read"},
@@ -306,7 +313,15 @@ func recallMemoryTool(deps Dependencies) Tool {
 				m["final_score"] = hits[i].FinalScore
 				results = append(results, m)
 			}
-			return map[string]any{"results": results}, nil
+			out := map[string]any{"results": results, "clarifications": []any{}}
+			if deps.Memory != nil {
+				reflection, err := deps.Memory.Reflect(ctx, profileID, memoryservice.ReflectRequest{Limit: 20})
+				if err != nil {
+					return nil, err
+				}
+				out["clarifications"] = reflection.Clarifications
+			}
+			return out, nil
 		},
 	}
 }

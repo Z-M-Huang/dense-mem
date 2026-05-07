@@ -85,6 +85,35 @@ func TestOpenAIVerifier(t *testing.T) {
 		assert.NotEmpty(t, got.RawJSON)
 	})
 
+	t.Run("UsesVerifierEndpointAndKey", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			assert.Equal(t, http.MethodPost, r.Method)
+			assert.Equal(t, "/chat/completions", r.URL.Path)
+			assert.Equal(t, "Bearer verifier-key", r.Header.Get("Authorization"))
+
+			var reqBody openAIVerifierRequest
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&reqBody))
+			assert.Equal(t, "verifier-model", reqBody.Model)
+
+			verifierSuccessHandler("entailed", 0.9, "The verifier endpoint was used.")(w, r)
+		}))
+		defer srv.Close()
+
+		cfg := &config.Config{
+			AIAPIURL:         "https://embedding.example.com/v1",
+			AIAPIKey:         "embedding-key",
+			AIVerifierAPIURL: srv.URL,
+			AIVerifierAPIKey: "verifier-key",
+			AIVerifierModel:  "verifier-model",
+		}
+		v := NewOpenAIVerifier(cfg, srv.Client())
+
+		got, err := v.Verify(context.Background(), Request{ProfileID: "p", Predicate: "claim"})
+
+		require.NoError(t, err)
+		assert.Equal(t, "entailed", got.Verdict)
+	})
+
 	t.Run("HappyPath_Contradicted", func(t *testing.T) {
 		srv := httptest.NewServer(verifierSuccessHandler("contradicted", 0.8, "Evidence contradicts the claim."))
 		defer srv.Close()

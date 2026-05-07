@@ -33,3 +33,7 @@ var ErrPromotionDeferredDisputed = errors.New("promotion deferred: claim dispute
 // active fact for the same (subject, predicate) triple. HTTP callers MUST map
 // this to 409.
 var ErrPromotionRejected = errors.New("promotion rejected: claim weaker than existing fact")
+
+// ErrInvalidConfirmationDecision is returned when confirm_memory receives an
+// unsupported decision value.
+var ErrInvalidConfirmationDecision = errors.New("invalid confirmation decision")

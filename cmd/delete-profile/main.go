@@ -74,7 +74,7 @@ func parseCLI(args []string, stderr io.Writer) (cliConfig, error) {
 
 	fs := flag.NewFlagSet("delete-profile", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	fs.StringVar(&cfg.profileID, "profile-id", "", "Profile UUID to soft-delete")
+	fs.StringVar(&cfg.profileID, "profile-id", "", "Profile UUID to delete")
 
 	if err := fs.Parse(args); err != nil {
 		return cliConfig{}, err

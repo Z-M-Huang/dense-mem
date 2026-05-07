@@ -24,13 +24,11 @@ type cliConfig struct {
 
 type keyItem struct {
 	KeyID      string     `json:"key_id"`
-	Label      string     `json:"label"`
-	Scopes     []string   `json:"scopes"`
+	KeySuffix  string     `json:"key_suffix"`
 	RateLimit  int        `json:"rate_limit"`
 	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
 	ExpiresAt  *time.Time `json:"expires_at,omitempty"`
 	CreatedAt  time.Time  `json:"created_at"`
-	RevokedAt  *time.Time `json:"revoked_at,omitempty"`
 }
 
 type output struct {
@@ -86,13 +84,11 @@ func run(args []string, stdout, stderr io.Writer) error {
 	for _, key := range keys {
 		items = append(items, keyItem{
 			KeyID:      key.ID.String(),
-			Label:      key.Label,
-			Scopes:     key.Scopes,
+			KeySuffix:  key.KeySuffix,
 			RateLimit:  key.RateLimit,
 			LastUsedAt: key.LastUsedAt,
 			ExpiresAt:  key.ExpiresAt,
 			CreatedAt:  key.CreatedAt,
-			RevokedAt:  key.RevokedAt,
 		})
 	}
 

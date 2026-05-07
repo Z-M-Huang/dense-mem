@@ -37,6 +37,8 @@ coverage/
 .nyc_output/
 tests/uat/test-results/
 tests/uat/playwright-report/
+web/test-results/
+web/playwright-report/
 
 # Temporary
 tmp/

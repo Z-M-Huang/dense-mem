@@ -11,6 +11,7 @@ import (
 	"github.com/dense-mem/dense-mem/internal/service/communityservice"
 	"github.com/dense-mem/dense-mem/internal/service/factservice"
 	"github.com/dense-mem/dense-mem/internal/service/fragmentservice"
+	"github.com/dense-mem/dense-mem/internal/service/memoryservice"
 	"github.com/dense-mem/dense-mem/internal/service/recallservice"
 )
 
@@ -51,6 +52,7 @@ func TestBuildDefault_RegistersV1ToolSurface(t *testing.T) {
 	}
 	required := []string{
 		"save_memory", "get_memory", "list_recent_memories", "recall_memory",
+		"remember", "import_memories", "reflect_memories", "confirm_memory",
 		"keyword-search", "semantic-search", "graph-query",
 	}
 	for _, name := range required {
@@ -151,6 +153,34 @@ type stubRecall struct{}
 
 func (stubRecall) Recall(ctx context.Context, profileID string, req recallservice.RecallRequest) ([]recallservice.RecallHit, error) {
 	return []recallservice.RecallHit{}, nil
+}
+
+type stubMemory struct {
+	lastProfile string
+}
+
+func (s *stubMemory) Remember(ctx context.Context, profileID string, req memoryservice.RememberRequest) (*memoryservice.RememberResult, error) {
+	s.lastProfile = profileID
+	return &memoryservice.RememberResult{
+		Fragment: memoryservice.FragmentOutcome{ID: "fragment-1", Status: "created"},
+	}, nil
+}
+
+func (s *stubMemory) ImportMemories(ctx context.Context, profileID string, req memoryservice.ImportRequest) (*memoryservice.RememberResult, error) {
+	s.lastProfile = profileID
+	return &memoryservice.RememberResult{
+		Fragment: memoryservice.FragmentOutcome{ID: "fragment-import", Status: "created"},
+	}, nil
+}
+
+func (s *stubMemory) Reflect(ctx context.Context, profileID string, req memoryservice.ReflectRequest) (*memoryservice.ReflectResult, error) {
+	s.lastProfile = profileID
+	return &memoryservice.ReflectResult{}, nil
+}
+
+func (s *stubMemory) ConfirmMemory(ctx context.Context, profileID string, req memoryservice.ConfirmRequest) (*memoryservice.ConfirmResult, error) {
+	s.lastProfile = profileID
+	return &memoryservice.ConfirmResult{ClaimID: req.ClaimID, Decision: req.Decision, Status: "accepted"}, nil
 }
 
 // --- knowledge pipeline stubs ---
@@ -271,6 +301,10 @@ func TestBuildDefaultKnowledgeTools_ReturnUnavailableWhenDepsMissing(t *testing.
 		{"promote_claim", map[string]any{"claim_id": "claim-1"}},
 		{"get_fact", map[string]any{"id": "fact-1"}},
 		{"list_facts", map[string]any{}},
+		{"remember", map[string]any{"content": "hello"}},
+		{"import_memories", map[string]any{"summary": "hello"}},
+		{"reflect_memories", map[string]any{}},
+		{"confirm_memory", map[string]any{"claim_id": "claim-1", "decision": "keep_existing"}},
 		{"retract_fragment", map[string]any{"id": "fragment-1"}},
 		{"detect_community", map[string]any{}},
 		{"get_community_summary", map[string]any{"community_id": "community-1"}},
@@ -280,6 +314,37 @@ func TestBuildDefaultKnowledgeTools_ReturnUnavailableWhenDepsMissing(t *testing.
 		tool, _ := reg.Get(tc.name)
 		if _, err := tool.Invoke(context.Background(), "profileA", tc.input); !errors.Is(err, ErrToolUnavailable) {
 			t.Errorf("%s err = %v; want ErrToolUnavailable", tc.name, err)
+		}
+	}
+}
+
+func TestBuildDefaultMemoryTools_InvokeAndScope(t *testing.T) {
+	mem := &stubMemory{}
+	reg, _ := BuildDefault(Dependencies{Memory: mem})
+
+	cases := []struct {
+		name  string
+		input map[string]any
+		scope string
+	}{
+		{"remember", map[string]any{"content": "hello"}, "write"},
+		{"import_memories", map[string]any{"summary": "old chats"}, "write"},
+		{"reflect_memories", map[string]any{}, "read"},
+		{"confirm_memory", map[string]any{"claim_id": "claim-1", "decision": "keep_existing"}, "write"},
+	}
+	for _, tc := range cases {
+		tool, ok := reg.Get(tc.name)
+		if !ok {
+			t.Fatalf("%s not registered", tc.name)
+		}
+		if len(tool.RequiredScopes) != 1 || tool.RequiredScopes[0] != tc.scope {
+			t.Fatalf("%s scopes = %v; want [%s]", tc.name, tool.RequiredScopes, tc.scope)
+		}
+		if _, err := tool.Invoke(context.Background(), "profile-memory", tc.input); err != nil {
+			t.Fatalf("%s Invoke: %v", tc.name, err)
+		}
+		if mem.lastProfile != "profile-memory" {
+			t.Fatalf("%s routed to %q; want profile-memory", tc.name, mem.lastProfile)
 		}
 	}
 }

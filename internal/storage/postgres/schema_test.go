@@ -130,7 +130,7 @@ func TestCoreSchemaAPIKeysTable(t *testing.T) {
 
 	// Verify all columns exist
 	expectedColumns := []string{
-		"id", "profile_id", "key_hash", "key_prefix", "label",
+		"id", "profile_id", "key_hash", "key_prefix", "key_suffix", "label",
 		"scopes", "rate_limit", "expires_at", "revoked_at",
 		"last_used_at", "created_at", "updated_at",
 	}
@@ -210,7 +210,7 @@ func TestCoreSchemaAPIKeysTable(t *testing.T) {
 	assert.Error(t, err, "duplicate key_prefix should fail")
 }
 
-// TestCoreSchemaAuditLogTable verifies append semantics via FK cascade rules.
+// TestCoreSchemaAuditLogTable verifies append semantics for historical audit references.
 func TestCoreSchemaAuditLogTable(t *testing.T) {
 	ctx := context.Background()
 
@@ -267,7 +267,32 @@ func TestCoreSchemaAuditLogTable(t *testing.T) {
 		assert.True(t, colExists, "audit_log.%s column should exist", col)
 	}
 
-	// Create a profile and an audit log entry to test SET NULL
+	var auditProfileFKExists bool
+	err = sqlDB.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM information_schema.table_constraints
+			WHERE table_schema = 'public'
+				AND table_name = 'audit_log'
+				AND constraint_name = 'audit_log_profile_id_fkey'
+		)
+	`).Scan(&auditProfileFKExists)
+	require.NoError(t, err, "should check audit profile FK absence")
+	assert.False(t, auditProfileFKExists, "audit_log.profile_id should not have a live FK")
+
+	var auditActorKeyFKExists bool
+	err = sqlDB.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM information_schema.table_constraints
+			WHERE table_schema = 'public'
+				AND table_name = 'audit_log'
+				AND constraint_name = 'audit_log_actor_key_id_fkey'
+		)
+	`).Scan(&auditActorKeyFKExists)
+	require.NoError(t, err, "should check audit actor key FK absence")
+	assert.False(t, auditActorKeyFKExists, "audit_log.actor_key_id should not have a live FK")
+
+	// Create a profile, key, and audit entry to prove hard deletes do not mutate
+	// append-only audit history.
 	var profileID string
 	err = sqlDB.QueryRowContext(ctx, `
 		INSERT INTO profiles (id, name, status)
@@ -276,65 +301,37 @@ func TestCoreSchemaAuditLogTable(t *testing.T) {
 	`).Scan(&profileID)
 	require.NoError(t, err, "should create test profile")
 
-	var auditLogID string
-	err = sqlDB.QueryRowContext(ctx, `
-		INSERT INTO audit_log (id, profile_id, operation, entity_type, entity_id)
-		VALUES (gen_random_uuid(), $1, 'CREATE', 'test', 'test-123')
-		RETURNING id
-	`, profileID).Scan(&auditLogID)
-	require.NoError(t, err, "should create audit log entry")
-
-	// Verify profile_id is set
-	var currentProfileID string
-	err = sqlDB.QueryRowContext(ctx, `SELECT profile_id FROM audit_log WHERE id = $1`, auditLogID).Scan(&currentProfileID)
-	require.NoError(t, err, "should get audit log entry")
-	assert.Equal(t, profileID, currentProfileID, "profile_id should be set")
-
-	// Delete the profile - should set profile_id to NULL (SET NULL behavior)
-	_, err = sqlDB.ExecContext(ctx, `DELETE FROM profiles WHERE id = $1`, profileID)
-	require.NoError(t, err, "should delete profile without error due to SET NULL")
-
-	// Verify profile_id is now NULL
-	var nullProfileID interface{}
-	err = sqlDB.QueryRowContext(ctx, `SELECT profile_id FROM audit_log WHERE id = $1`, auditLogID).Scan(&nullProfileID)
-	require.NoError(t, err, "should get audit log entry after profile deletion")
-	assert.Nil(t, nullProfileID, "profile_id should be NULL after profile deletion (SET NULL)")
-
-	// Verify ON DELETE SET NULL for actor_key_id FK.
-	var keyProfileID string
-	err = sqlDB.QueryRowContext(ctx, `
-		INSERT INTO profiles (id, name, status)
-		VALUES (gen_random_uuid(), 'audit-key-profile', 'active')
-		RETURNING id
-	`).Scan(&keyProfileID)
-	require.NoError(t, err, "should create test profile for api key")
-
 	var keyID string
 	err = sqlDB.QueryRowContext(ctx, `
 		INSERT INTO api_keys (id, profile_id, key_hash, key_prefix, scopes)
 		VALUES (gen_random_uuid(), $1, 'testhash', 'test-prefix', ARRAY['read'])
 		RETURNING id
-	`, keyProfileID).Scan(&keyID)
+	`, profileID).Scan(&keyID)
 	require.NoError(t, err, "should create test api key")
 
-	// Create another audit log entry with actor_key_id
-	var auditLogID2 string
+	var auditLogID string
 	err = sqlDB.QueryRowContext(ctx, `
-		INSERT INTO audit_log (id, actor_key_id, operation, entity_type, entity_id)
-		VALUES (gen_random_uuid(), $1, 'DELETE', 'test', 'test-456')
+		INSERT INTO audit_log (id, profile_id, actor_key_id, operation, entity_type, entity_id)
+		VALUES (gen_random_uuid(), $1, $2, 'CREATE', 'test', 'test-123')
 		RETURNING id
-	`, keyID).Scan(&auditLogID2)
-	require.NoError(t, err, "should create audit log entry with actor_key_id")
+	`, profileID, keyID).Scan(&auditLogID)
+	require.NoError(t, err, "should create audit log entry")
 
-	// Delete the key - should set actor_key_id to NULL (SET NULL behavior)
 	_, err = sqlDB.ExecContext(ctx, `DELETE FROM api_keys WHERE id = $1`, keyID)
-	require.NoError(t, err, "should delete api key without error due to SET NULL")
+	require.NoError(t, err, "should delete api key without mutating audit_log")
 
-	// Verify actor_key_id is now NULL
-	var nullKeyID interface{}
-	err = sqlDB.QueryRowContext(ctx, `SELECT actor_key_id FROM audit_log WHERE id = $1`, auditLogID2).Scan(&nullKeyID)
-	require.NoError(t, err, "should get audit log entry after key deletion")
-	assert.Nil(t, nullKeyID, "actor_key_id should be NULL after key deletion (SET NULL)")
+	_, err = sqlDB.ExecContext(ctx, `DELETE FROM profiles WHERE id = $1`, profileID)
+	require.NoError(t, err, "should delete profile without mutating audit_log")
+
+	var currentProfileID, currentActorKeyID string
+	err = sqlDB.QueryRowContext(ctx, `
+		SELECT profile_id::text, actor_key_id::text
+		FROM audit_log
+		WHERE id = $1
+	`, auditLogID).Scan(&currentProfileID, &currentActorKeyID)
+	require.NoError(t, err, "should get audit log entry after hard deletes")
+	assert.Equal(t, profileID, currentProfileID, "audit_log.profile_id should remain historical")
+	assert.Equal(t, keyID, currentActorKeyID, "audit_log.actor_key_id should remain historical")
 }
 
 // TestCoreSchemaIndexes verifies the expected indexes exist.

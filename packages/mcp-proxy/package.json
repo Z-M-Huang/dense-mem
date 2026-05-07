@@ -1,0 +1,42 @@
+{
+  "name": "@dense-mem/mcp-proxy",
+  "version": "0.1.0",
+  "description": "Dense-Mem MCP stdio proxy for Streamable HTTP clients",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Z-M-Huang/dense-mem.git",
+    "directory": "packages/mcp-proxy"
+  },
+  "keywords": [
+    "dense-mem",
+    "mcp",
+    "stdio",
+    "streamable-http"
+  ],
+  "type": "module",
+  "bin": {
+    "dense-mem-mcp-proxy": "bin/dense-mem-mcp-proxy.js"
+  },
+  "files": [
+    "bin",
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node --test --test-concurrency=1 tests/*.test.js",
+    "start": "node bin/dense-mem-mcp-proxy.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "supergateway": "3.4.3"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/sdk": "1.29.0"
+  }
+}

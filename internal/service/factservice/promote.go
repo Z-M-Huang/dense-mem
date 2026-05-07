@@ -105,6 +105,7 @@ type promoteClaimServiceImpl struct {
 
 // Compile-time interface satisfaction check.
 var _ PromoteClaimService = (*promoteClaimServiceImpl)(nil)
+var _ ConfirmMemoryService = (*promoteClaimServiceImpl)(nil)
 
 // NewPromoteClaimService constructs a ready-to-use PromoteClaimService.
 //
@@ -157,6 +158,93 @@ func (s *promoteClaimServiceImpl) Promote(ctx context.Context, profileID string,
 		return nil, lockErr
 	}
 	return fact, nil
+}
+
+// ConfirmMemory applies an explicit user clarification to a disputed claim.
+//
+// Supported decisions:
+//   - accept_claim: supersede active conflicting facts for the claim's
+//     (subject, predicate), then create a new active Fact from the claim.
+//   - keep_existing or reject_claim: reject the claim and keep active facts.
+func (s *promoteClaimServiceImpl) ConfirmMemory(ctx context.Context, profileID string, req ConfirmMemoryRequest) (*ConfirmMemoryResult, error) {
+	if req.ClaimID == "" {
+		return nil, errors.New("confirm memory: claim_id is required")
+	}
+
+	var out *ConfirmMemoryResult
+	lockErr := s.locker.WithClaimLock(ctx, s.pgDB, profileID, req.ClaimID, s.lockTimeout, func(_ *gorm.DB) error {
+		result, err := s.doConfirmMemory(ctx, profileID, req)
+		if err != nil {
+			return err
+		}
+		out = result
+		return nil
+	})
+	if lockErr != nil {
+		s.incMetric("error")
+		return nil, lockErr
+	}
+	return out, nil
+}
+
+func (s *promoteClaimServiceImpl) doConfirmMemory(ctx context.Context, profileID string, req ConfirmMemoryRequest) (*ConfirmMemoryResult, error) {
+	claim, err := s.loadClaim(ctx, profileID, req.ClaimID)
+	if err != nil {
+		return nil, err
+	}
+
+	switch req.Decision {
+	case "accept_claim":
+		gate, ok := DefaultPromotionGates[claim.Predicate]
+		if !ok {
+			return nil, fmt.Errorf("%w: predicate=%s", ErrPredicateNotPoliced, claim.Predicate)
+		}
+		if gateErr := evaluateGates(claim, gate); gateErr != nil {
+			return nil, gateErr
+		}
+
+		activeFacts, err := findActiveFactsBySubjectPredicate(ctx, s.db, profileID, claim.Subject, claim.Predicate)
+		if err != nil {
+			return nil, fmt.Errorf("confirm memory: find active facts: %w", err)
+		}
+
+		conflicts := make([]*domain.Fact, 0, len(activeFacts))
+		for _, fact := range activeFacts {
+			if fact.Object != claim.Object {
+				conflicts = append(conflicts, fact)
+			}
+		}
+		if len(conflicts) > 0 {
+			if err := supersedePath(ctx, s.db, profileID, conflicts, claim.ClaimID, claim.ValidFrom); err != nil {
+				return nil, fmt.Errorf("confirm memory: supersede conflicts: %w", err)
+			}
+		}
+
+		fact, err := s.createNewFact(ctx, profileID, claim, gate)
+		if err != nil {
+			return nil, err
+		}
+		s.incMetric("promoted")
+		s.emitAudit(ctx, profileID, claim.ClaimID, fact.FactID, "claim.confirm.accept")
+		return &ConfirmMemoryResult{
+			ClaimID:  claim.ClaimID,
+			Decision: req.Decision,
+			Status:   "accepted",
+			Fact:     fact,
+		}, nil
+	case "keep_existing", "reject_claim":
+		if err := weakerPath(ctx, s.db, profileID, claim.ClaimID); err != nil {
+			return nil, fmt.Errorf("confirm memory: reject claim: %w", err)
+		}
+		s.emitAudit(ctx, profileID, claim.ClaimID, "", "claim.confirm.reject")
+		return &ConfirmMemoryResult{
+			ClaimID:  claim.ClaimID,
+			Decision: req.Decision,
+			Status:   "rejected",
+		}, nil
+	default:
+		return nil, fmt.Errorf("%w: %s", ErrInvalidConfirmationDecision, req.Decision)
+	}
 }
 
 // doPromote executes the promotion algorithm. It must be called while holding

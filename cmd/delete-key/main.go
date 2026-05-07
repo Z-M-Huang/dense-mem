@@ -63,8 +63,8 @@ func run(args []string, stdout, stderr io.Writer) error {
 	}
 	defer services.Close()
 
-	if err := services.APIKeyService.RevokeForProfile(ctx, profileID, keyID, nil, operatorcli.DefaultActorRole, operatorcli.DefaultClientIP, operatorcli.CorrelationID()); err != nil {
-		return fmt.Errorf("revoke key: %w", err)
+	if err := services.APIKeyService.DeleteForProfile(ctx, profileID, keyID, nil, operatorcli.DefaultActorRole, operatorcli.DefaultClientIP, operatorcli.CorrelationID()); err != nil {
+		return fmt.Errorf("delete key: %w", err)
 	}
 
 	enc := json.NewEncoder(stdout)
@@ -72,17 +72,17 @@ func run(args []string, stdout, stderr io.Writer) error {
 	return enc.Encode(output{
 		ProfileID: profileID.String(),
 		KeyID:     keyID.String(),
-		Status:    "revoked",
+		Status:    "deleted",
 	})
 }
 
 func parseCLI(args []string, stderr io.Writer) (cliConfig, error) {
 	var cfg cliConfig
 
-	fs := flag.NewFlagSet("revoke-key", flag.ContinueOnError)
+	fs := flag.NewFlagSet("delete-key", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.StringVar(&cfg.profileID, "profile-id", "", "Profile UUID that owns the key")
-	fs.StringVar(&cfg.keyID, "key-id", "", "API key UUID to revoke")
+	fs.StringVar(&cfg.keyID, "key-id", "", "API key UUID to delete")
 
 	if err := fs.Parse(args); err != nil {
 		return cliConfig{}, err

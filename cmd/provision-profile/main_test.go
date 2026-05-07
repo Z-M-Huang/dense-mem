@@ -2,20 +2,6 @@ package main
 
 import "testing"
 
-func TestParseScopes(t *testing.T) {
-	got := parseScopes("read, write,read , ,write,custom")
-	want := []string{"read", "write", "custom"}
-
-	if len(got) != len(want) {
-		t.Fatalf("len(parseScopes) = %d, want %d", len(got), len(want))
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("parseScopes()[%d] = %q, want %q", i, got[i], want[i])
-		}
-	}
-}
-
 func TestParseOptionalJSONObject(t *testing.T) {
 	got, err := parseOptionalJSONObject(`{"team":"alpha"}`)
 	if err != nil {

@@ -12,8 +12,9 @@
 #
 # Optional env (sensible defaults — see .env for the full list):
 #   NEO4J_USER, NEO4J_DATABASE
-#   REDIS_PASSWORD, REDIS_DB
-#   HTTP_PORT (host port to expose the API on; default 8080)
+#   REDIS_PASSWORD, REDIS_DB, REDIS_PORT
+#   HTTP_ADDR (host-network server bind address; default :8080)
+#   CONTROL_PORTAL_ENABLED, CONTROL_HTTP_ADDR, CONTROL_PORTAL_TOKEN
 #
 # The image entrypoint (/app/docker-entrypoint.sh) builds POSTGRES_DSN from
 # its component env vars at container start, so no credentialed connection
@@ -26,12 +27,12 @@
 services:
   postgres:
     image: postgres:16-alpine
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-densemem}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
-      POSTGRES_DB: ${POSTGRES_DB:-densemem}
+    env_file:
+      - .env
     volumes:
       - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U \"${POSTGRES_USER:-densemem}\" -d \"${POSTGRES_DB:-densemem}\""]
       interval: 10s
@@ -54,6 +55,9 @@ services:
       - neo4j-data:/data
       - neo4j-logs:/logs
       - neo4j-plugins:/plugins
+    ports:
+      - "127.0.0.1:${NEO4J_HTTP_PORT:-7474}:7474"
+      - "127.0.0.1:${NEO4J_BOLT_PORT:-7687}:7687"
     healthcheck:
       test:
         - "CMD-SHELL"
@@ -71,12 +75,16 @@ services:
     # Redis is optional for single-node and required for multi-instance.
     profiles: ["redis"]
     image: redis:7-alpine
+    env_file:
+      - .env
     command: >
       redis-server
       --appendonly yes
       ${REDIS_PASSWORD:+--requirepass ${REDIS_PASSWORD}}
     volumes:
       - redis-data:/data
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
     healthcheck:
       test: ["CMD-SHELL", "redis-cli ${REDIS_PASSWORD:+-a $$REDIS_PASSWORD} ping | grep -q PONG"]
       interval: 10s
@@ -105,6 +113,15 @@ services:
     image: densemem:latest
     env_file:
       - .env
+    # The control portal intentionally binds loopback-only. Host networking lets
+    # 127.0.0.1:8090 mean the host loopback instead of the container loopback.
+    # This local/dev template targets Linux Docker hosts.
+    network_mode: host
+    environment:
+      POSTGRES_HOST: 127.0.0.1
+      NEO4J_URI: bolt://127.0.0.1:7687
+      REDIS_ADDR: "${REDIS_ADDR:-}"
+      CONTROL_HTTP_ADDR: "${CONTROL_HTTP_ADDR:-127.0.0.1:8090}"
     depends_on:
       postgres:
         condition: service_healthy
@@ -112,8 +129,6 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
-    ports:
-      - "${HTTP_PORT:-8080}:8080"
     restart: unless-stopped
 
 volumes:

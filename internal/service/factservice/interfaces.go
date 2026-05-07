@@ -27,6 +27,26 @@ type PromoteClaimService interface {
 	Promote(ctx context.Context, profileID string, claimID string) (*domain.Fact, error)
 }
 
+// ConfirmMemoryRequest describes an explicit user decision for a disputed
+// memory claim.
+type ConfirmMemoryRequest struct {
+	ClaimID  string
+	Decision string
+}
+
+// ConfirmMemoryResult contains the outcome of applying a user clarification.
+type ConfirmMemoryResult struct {
+	ClaimID  string       `json:"claim_id"`
+	Decision string       `json:"decision"`
+	Status   string       `json:"status"`
+	Fact     *domain.Fact `json:"fact,omitempty"`
+}
+
+// ConfirmMemoryService applies explicit user decisions to disputed claims.
+type ConfirmMemoryService interface {
+	ConfirmMemory(ctx context.Context, profileID string, req ConfirmMemoryRequest) (*ConfirmMemoryResult, error)
+}
+
 // GetFactService defines the interface for fact retrieval by ID.
 type GetFactService interface {
 	// Get retrieves the Fact identified by factID within profileID.

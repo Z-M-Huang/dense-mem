@@ -48,6 +48,7 @@ type ProfileServiceImpl struct {
 	repo         repository.ProfileRepository
 	auditService AuditService
 	statePurger  ProfileStatePurger
+	dataPurger   ProfileDataPurger
 	logger       *slog.Logger
 }
 
@@ -62,6 +63,14 @@ func NewProfileService(repo repository.ProfileRepository, auditService AuditServ
 		statePurger:  statePurger,
 		logger:       slog.Default(),
 	}
+}
+
+// NewProfileServiceWithDataPurger creates a profile service that also purges
+// profile-owned non-Postgres state during profile deletion.
+func NewProfileServiceWithDataPurger(repo repository.ProfileRepository, auditService AuditService, statePurger ProfileStatePurger, dataPurger ProfileDataPurger) *ProfileServiceImpl {
+	svc := NewProfileService(repo, auditService, statePurger)
+	svc.dataPurger = dataPurger
+	return svc
 }
 
 // NewProfileServiceWithLogger creates a new profile service instance with a custom logger.
@@ -232,7 +241,8 @@ func (s *ProfileServiceImpl) Update(ctx context.Context, id uuid.UUID, req Updat
 }
 
 // PROFILE_HAS_ACTIVE_KEYS is kept for backward-compat with callers referencing the const.
-// The authoritative code lives in httperr.PROFILE_HAS_ACTIVE_KEYS (mapped to HTTP 409).
+// Profile deletion no longer blocks on active keys; current deletion removes
+// profile-owned API keys as part of the hard-delete path.
 const PROFILE_HAS_ACTIVE_KEYS = string(httperr.PROFILE_HAS_ACTIVE_KEYS)
 
 // ProfileHasActiveKeysError represents a 409 conflict when profile has active keys.
@@ -246,8 +256,8 @@ func (e *ProfileHasActiveKeysError) Error() string {
 	return fmt.Sprintf("profile %s has active keys and cannot be deleted", e.ProfileID.String())
 }
 
-// Delete performs a soft delete on a profile.
-// Returns 409 PROFILE_HAS_ACTIVE_KEYS if any non-revoked, non-expired keys remain.
+// Delete hard-deletes a profile and profile-owned database rows.
+// audit_log remains append-only and stores historical entity IDs without live FKs.
 func (s *ProfileServiceImpl) Delete(ctx context.Context, id uuid.UUID, actorKeyID *string, actorRole, clientIP, correlationID string) error {
 	// Get the existing profile
 	existing, err := s.repo.GetByID(ctx, id)
@@ -256,29 +266,6 @@ func (s *ProfileServiceImpl) Delete(ctx context.Context, id uuid.UUID, actorKeyI
 	}
 	if existing == nil {
 		return httperr.New(httperr.NOT_FOUND, fmt.Sprintf("profile with id '%s' not found", id.String()))
-	}
-
-	// Check for active keys
-	activeKeyCount, err := s.repo.CountActiveKeys(ctx, id)
-	if err != nil {
-		return fmt.Errorf("failed to count active keys: %w", err)
-	}
-	if activeKeyCount > 0 {
-		// Audit the blocked deletion
-		beforePayload := map[string]interface{}{
-			"id":          existing.ID.String(),
-			"name":        existing.Name,
-			"description": existing.Description,
-			"status":      "active",
-			"active_keys": activeKeyCount,
-		}
-
-		if err := s.auditService.ProfileDeleteBlocked(ctx, existing.ID.String(), beforePayload, actorKeyID, actorRole, clientIP, correlationID, "profile has active keys"); err != nil {
-			// Log the audit failure but don't fail the operation
-			s.logAuditError(err, "DELETE_BLOCKED", existing.ID.String(), correlationID)
-		}
-
-		return httperr.New(httperr.PROFILE_HAS_ACTIVE_KEYS, fmt.Sprintf("profile has %d active key(s)", activeKeyCount))
 	}
 
 	// Build before payload for audit
@@ -291,12 +278,28 @@ func (s *ProfileServiceImpl) Delete(ctx context.Context, id uuid.UUID, actorKeyI
 		"status":      "active",
 	}
 
-	// Perform the soft delete
-	if err := s.repo.SoftDelete(ctx, id); err != nil {
+	// Delete Postgres profile-owned rows. audit_log is not deleted or mutated.
+	if err := s.repo.HardDelete(ctx, id); err != nil {
 		return fmt.Errorf("failed to delete profile: %w", err)
 	}
 
-	// Purge all profile state (cache, session, stream) after soft-delete succeeds (nil-safe)
+	profileIDStr := existing.ID.String()
+	if err := s.auditService.Append(ctx, AuditLogEntry{
+		ProfileID:     &profileIDStr,
+		Operation:     "DELETE",
+		EntityType:    "profile",
+		EntityID:      existing.ID.String(),
+		BeforePayload: beforePayload,
+		ActorKeyID:    actorKeyID,
+		ActorRole:     actorRole,
+		ClientIP:      clientIP,
+		CorrelationID: correlationID,
+	}); err != nil {
+		// Log the audit failure but don't fail the operation
+		s.logAuditError(err, "DELETE", existing.ID.String(), correlationID)
+	}
+
+	// Purge all profile state (cache, session, stream) after hard-delete succeeds (nil-safe)
 	if s.statePurger != nil {
 		if err := s.statePurger.PurgeProfileState(ctx, id.String()); err != nil {
 			// Log but don't fail the operation
@@ -304,10 +307,10 @@ func (s *ProfileServiceImpl) Delete(ctx context.Context, id uuid.UUID, actorKeyI
 		}
 	}
 
-	// Audit the deletion
-	if err := s.auditService.ProfileDeleted(ctx, existing.ID.String(), beforePayload, actorKeyID, actorRole, clientIP, correlationID); err != nil {
-		// Log the audit failure but don't fail the operation
-		s.logAuditError(err, "DELETE", existing.ID.String(), correlationID)
+	if s.dataPurger != nil {
+		if err := s.dataPurger.PurgeProfileData(ctx, id.String()); err != nil {
+			return fmt.Errorf("profile row deleted but failed to purge profile data: %w", err)
+		}
 	}
 
 	return nil

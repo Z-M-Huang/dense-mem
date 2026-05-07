@@ -46,6 +46,11 @@ func (m *MockAPIKeyRepository) RevokeForProfile(ctx context.Context, profileID, 
 	return args.Get(0).(int64), args.Error(1)
 }
 
+func (m *MockAPIKeyRepository) DeleteForProfile(ctx context.Context, profileID, id uuid.UUID) (int64, error) {
+	args := m.Called(ctx, profileID, id)
+	return args.Get(0).(int64), args.Error(1)
+}
+
 func (m *MockAPIKeyRepository) GetByIDForProfile(ctx context.Context, profileID, id uuid.UUID) (*domain.APIKey, error) {
 	args := m.Called(ctx, profileID, id)
 	if args.Get(0) == nil {
@@ -304,13 +309,12 @@ func TestAPIKeyServiceCreate(t *testing.T) {
 	mockProfileService.On("Get", ctx, profileID).Return(&domain.Profile{ID: profileID}, nil)
 	mockRepo.On("CreateStandardKey", ctx, mock.AnythingOfType("*domain.APIKey")).Run(func(args mock.Arguments) {
 		key := args.Get(1).(*domain.APIKey)
+		assert.Equal(t, []string{"read", "write"}, key.Scopes)
 		key.ID = uuid.New() // Simulate DB assigning ID
 	}).Return(nil)
 	mockAuditService.On("APIKeyCreated", ctx, mock.AnythingOfType("*string"), mock.AnythingOfType("string"), mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
 	req := CreateAPIKeyRequest{
-		Label:     "test-key",
-		Scopes:    []string{"read"},
 		RateLimit: 100,
 	}
 
@@ -321,6 +325,9 @@ func TestAPIKeyServiceCreate(t *testing.T) {
 	assert.NotEmpty(t, rawKey)
 	assert.True(t, strings.HasPrefix(rawKey, "dm_live_"), "Raw key should have dm_live_ prefix")
 	assert.Empty(t, key.KeyHash, "KeyHash should not be returned")
+	assert.Equal(t, crypto.GetKeySuffix(rawKey), key.KeySuffix, "KeySuffix should be last 6 raw key characters")
+	assert.Equal(t, []string{"read", "write"}, key.Scopes)
+	assert.Empty(t, key.Label)
 
 	// Verify the raw key is not logged or stored in the response
 	mockRepo.AssertExpectations(t)
@@ -362,6 +369,49 @@ func TestAPIKeyServiceListNeverReturnsHash(t *testing.T) {
 	assert.Empty(t, result[0].KeyHash, "List should not return key_hash")
 
 	mockRepo.AssertExpectations(t)
+}
+
+// TestAPIKeyServiceDeleteForProfile_CallsSessionInvalidator proves that DeleteForProfile
+// hard-deletes the key and invalidates sessions.
+func TestAPIKeyServiceDeleteForProfile_CallsSessionInvalidator(t *testing.T) {
+	ctx := context.Background()
+	keyID := uuid.New()
+	profileID := uuid.New()
+
+	mockRepo := new(MockAPIKeyRepository)
+	mockProfileService := new(MockProfileService)
+	mockAuditService := new(MockAuditService)
+	mockSessionInvalidator := new(MockKeySessionInvalidator)
+	mockStatePurger := new(MockProfileStatePurger)
+
+	service := NewAPIKeyService(mockRepo, mockProfileService, mockAuditService, mockSessionInvalidator, mockStatePurger)
+
+	now := time.Now()
+	key := &domain.APIKey{
+		ID:        keyID,
+		ProfileID: profileID,
+		RateLimit: 100,
+		CreatedAt: now,
+	}
+
+	mockRepo.On("GetByIDForProfile", ctx, profileID, keyID).Return(key, nil)
+	mockRepo.On("DeleteForProfile", ctx, profileID, keyID).Return(int64(1), nil)
+	mockSessionInvalidator.On("InvalidateKeySessions", ctx, profileID.String(), keyID.String()).Return(nil)
+	mockAuditService.On("Append", ctx, mock.MatchedBy(func(entry AuditLogEntry) bool {
+		return entry.Operation == "DELETE" &&
+			entry.EntityType == "api_key" &&
+			entry.EntityID == keyID.String() &&
+			entry.ProfileID != nil &&
+			*entry.ProfileID == profileID.String()
+	})).Return(nil)
+
+	err := service.DeleteForProfile(ctx, profileID, keyID, nil, "system", "127.0.0.1", "test-correlation")
+
+	require.NoError(t, err)
+	mockSessionInvalidator.AssertCalled(t, "InvalidateKeySessions", ctx, profileID.String(), keyID.String())
+	mockRepo.AssertExpectations(t)
+	mockSessionInvalidator.AssertExpectations(t)
+	mockAuditService.AssertExpectations(t)
 }
 
 // TestAPIKeyServiceRevokeForProfile_CallsSessionInvalidator proves that RevokeForProfile
