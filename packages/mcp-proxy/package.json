@@ -1,5 +1,5 @@
 {
-  "name": "@dense-mem/mcp-proxy",
+  "name": "dense-mem-mcp-proxy",
   "version": "0.1.0",
   "description": "Dense-Mem MCP stdio proxy for Streamable HTTP clients",
   "license": "Apache-2.0",

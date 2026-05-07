@@ -1,13 +1,13 @@
 # Dense-Mem MCP Proxy
 
-`@dense-mem/mcp-proxy` exposes a Dense-Mem Streamable HTTP MCP server as a local
+`dense-mem-mcp-proxy` exposes a Dense-Mem Streamable HTTP MCP server as a local
 stdio MCP process. Use it for MCP clients that can run local stdio commands but
 do not reliably load Streamable HTTP MCP servers.
 
-The npm package is not published yet. After it is published, this will work:
+Once the package is published to npm, use:
 
 ```bash
-npx -y @dense-mem/mcp-proxy
+npx -y dense-mem-mcp-proxy
 ```
 
 Until then, run the proxy from a local checkout:

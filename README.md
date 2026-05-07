@@ -272,10 +272,10 @@ Some desktop MCP clients can run stdio MCP commands but do not reliably surface
 Streamable HTTP MCP servers in their callable tool registry. For those clients,
 use the Dense-Mem stdio proxy.
 
-The npm package is not published yet. After it is published, this will work:
+Once the package is published to npm, use:
 
 ```bash
-npx -y @dense-mem/mcp-proxy
+npx -y dense-mem-mcp-proxy
 ```
 
 Until then, run the package from a local checkout or a local `npm pack` tarball.
@@ -295,14 +295,14 @@ tool_timeout_sec = 60
 enabled = true
 ```
 
-After npm publication, the same configuration can use `npx`:
+The same configuration can use `npx` after publication:
 
 ```toml
 [mcp_servers.dense_mem]
 command = "npx"
 args = [
   "-y",
-  "@dense-mem/mcp-proxy",
+  "dense-mem-mcp-proxy",
   "--url",
   "http://127.0.0.1:8080/mcp",
   "--header",
@@ -317,7 +317,7 @@ Environment variables are also supported:
 ```toml
 [mcp_servers.dense_mem]
 command = "npx"
-args = ["-y", "@dense-mem/mcp-proxy"]
+args = ["-y", "dense-mem-mcp-proxy"]
 env = { DENSE_MEM_MCP_URL = "http://127.0.0.1:8080/mcp", DENSE_MEM_API_KEY = "dm_live_..." }
 tool_timeout_sec = 60
 enabled = true

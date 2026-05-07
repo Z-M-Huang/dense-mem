@@ -179,7 +179,7 @@ Security requirements:
 - Keep the server-owned MCP transport HTTP-first. The optional stdio proxy under
   `packages/mcp-proxy` is a local adapter for clients that cannot load
   Streamable HTTP MCP servers directly; it is not a separate Dense-Mem server
-  transport. Publish it to npm before documenting `npx @dense-mem/mcp-proxy` as
+  transport. Publish it to npm before relying on `npx dense-mem-mcp-proxy` as
   a release install path.
 
 ## Local Control Portal
