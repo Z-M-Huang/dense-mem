@@ -8,13 +8,14 @@ import (
 	"path/filepath"
 
 	"github.com/pressly/goose/v3"
+	gooselock "github.com/pressly/goose/v3/lock"
 	"gorm.io/gorm"
 )
 
 // Migrator handles database migrations using goose.
 type Migrator struct {
-	db     *sql.DB
-	dir    string
+	db  *sql.DB
+	dir string
 }
 
 // MigratorClient is the companion interface for Migrator.
@@ -35,13 +36,13 @@ var _ MigratorClient = (*Migrator)(nil)
 // 3. Falls back to hardcoded absolute path
 func getMigrationsDir() string {
 	relDir := "migrations/postgres"
-	
+
 	// Strategy 1: Check if migrations exists relative to current working directory
 	if _, err := os.Stat(relDir); err == nil {
 		absPath, _ := filepath.Abs(relDir)
 		return absPath
 	}
-	
+
 	// Strategy 2: Walk up directories to find project root
 	cwd, _ := os.Getwd()
 	for {
@@ -55,7 +56,7 @@ func getMigrationsDir() string {
 		}
 		cwd = parent
 	}
-	
+
 	// Strategy 3: Fallback to absolute path
 	return "/app/dense-mem/migrations/postgres"
 }
@@ -84,11 +85,22 @@ func NewMigratorWithDB(sqlDB *sql.DB) *Migrator {
 
 // RunUp runs all pending up migrations.
 func (m *Migrator) RunUp(ctx context.Context) error {
-	if err := goose.SetDialect("postgres"); err != nil {
-		return fmt.Errorf("failed to set goose dialect: %w", err)
+	locker, err := gooselock.NewPostgresSessionLocker()
+	if err != nil {
+		return fmt.Errorf("failed to create postgres migration lock: %w", err)
 	}
 
-	if err := goose.UpContext(ctx, m.db, m.dir); err != nil {
+	provider, err := goose.NewProvider(
+		goose.DialectPostgres,
+		m.db,
+		os.DirFS(m.dir),
+		goose.WithSessionLocker(locker),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to create migration provider: %w", err)
+	}
+
+	if _, err := provider.Up(ctx); err != nil {
 		return fmt.Errorf("failed to run up migrations: %w", err)
 	}
 

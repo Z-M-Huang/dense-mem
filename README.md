@@ -150,7 +150,7 @@ To rotate embedding models safely:
 ```bash
 cp docker-compose.example.yml docker-compose.yml
 cp .env.example .env
-docker compose up -d --build
+docker compose up -d
 curl http://localhost:8080/health
 ```
 

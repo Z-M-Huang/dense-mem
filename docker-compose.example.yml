@@ -20,9 +20,8 @@
 # its component env vars at container start, so no credentialed connection
 # string literal appears in this file, in .env, or anywhere else on disk.
 #
-# Migrations run once on `docker compose up` via the `migrate` service, which
-# is gated on postgres health and exits 0 on success. The `server` service
-# waits for it via service_completed_successfully before starting.
+# Postgres migrations run during server startup after postgres is healthy and
+# before schema-dependent checks run.
 
 services:
   postgres:
@@ -93,24 +92,8 @@ services:
       start_period: 5s
     restart: unless-stopped
 
-  migrate:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: densemem:latest
-    env_file:
-      - .env
-    depends_on:
-      postgres:
-        condition: service_healthy
-    command: ["/app/migrate", "up"]
-    restart: "no"
-
   server:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: densemem:latest
+    image: ghcr.io/z-m-huang/dense-mem:latest
     env_file:
       - .env
     # The control portal intentionally binds loopback-only. Host networking lets
@@ -127,8 +110,6 @@ services:
         condition: service_healthy
       neo4j:
         condition: service_healthy
-      migrate:
-        condition: service_completed_successfully
     restart: unless-stopped
 
 volumes:

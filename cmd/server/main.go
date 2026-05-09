@@ -95,8 +95,9 @@ func main() {
 	// on dto.SemanticSearchRequest enforces the configured length at bind time.
 	validation.SetEmbeddingDimensions(cfg.GetEmbeddingDimensions())
 
-	// Create root context with timeout for startup
-	startupCtx, startupCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	// Create root context with timeout for startup. A cold database may need
+	// time to apply migrations before schema-dependent checks can run.
+	startupCtx, startupCancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer startupCancel()
 
 	// Initialize Postgres connection (REQUIRED for production)
@@ -105,6 +106,12 @@ func main() {
 		log.Fatalf("failed to connect to postgres: %v", err)
 	}
 	defer pgDB.Close()
+
+	logger.Info("running postgres migrations")
+	if err := postgres.RunUp(startupCtx, pgDB.GetDB()); err != nil {
+		log.Fatalf("failed to run postgres migrations: %v", err)
+	}
+	logger.Info("postgres migrations completed")
 
 	// ========================================
 	// Embedding consistency check
