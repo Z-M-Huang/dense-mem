@@ -7,11 +7,13 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 
+	"github.com/dense-mem/dense-mem/internal/requestctx"
 	"github.com/dense-mem/dense-mem/internal/storage/postgres"
 )
 
@@ -120,6 +122,17 @@ func redactPayload(payload map[string]interface{}) map[string]interface{} {
 	return redacted
 }
 
+func auditClientIPValue(ctx context.Context, entry AuditLogEntry) any {
+	clientIP := strings.TrimSpace(entry.ClientIP)
+	if clientIP == "" {
+		clientIP = requestctx.ClientIPFromContext(ctx)
+	}
+	if clientIP == "" {
+		return nil
+	}
+	return clientIP
+}
+
 // Append writes an audit log entry to the database.
 // Payloads are automatically redacted to remove sensitive fields.
 func (s *AuditServiceImpl) Append(ctx context.Context, entry AuditLogEntry) error {
@@ -165,6 +178,7 @@ func (s *AuditServiceImpl) Append(ctx context.Context, entry AuditLogEntry) erro
 	if id == "" {
 		id = uuid.New().String()
 	}
+	clientIP := auditClientIPValue(ctx, entry)
 
 	insertFn := func(tx *gorm.DB) error {
 		return tx.Exec(`
@@ -187,7 +201,7 @@ func (s *AuditServiceImpl) Append(ctx context.Context, entry AuditLogEntry) erro
 			afterJSON,
 			entry.ActorKeyID,
 			entry.ActorRole,
-			entry.ClientIP,
+			clientIP,
 			entry.CorrelationID,
 			metadataJSON,
 		).Error
@@ -232,6 +246,7 @@ func (s *AuditServiceImpl) List(ctx context.Context, profileID string, limit, of
 			var beforePayloadJSON, afterPayloadJSON, metadataJSON []byte
 			var profileIDNullable sql.NullString
 			var actorKeyIDNullable sql.NullString
+			var clientIPNullable sql.NullString
 
 			err := rows.Scan(
 				&entry.ID,
@@ -244,7 +259,7 @@ func (s *AuditServiceImpl) List(ctx context.Context, profileID string, limit, of
 				&afterPayloadJSON,
 				&actorKeyIDNullable,
 				&entry.ActorRole,
-				&entry.ClientIP,
+				&clientIPNullable,
 				&entry.CorrelationID,
 				&metadataJSON,
 			)
@@ -258,6 +273,9 @@ func (s *AuditServiceImpl) List(ctx context.Context, profileID string, limit, of
 			}
 			if actorKeyIDNullable.Valid {
 				entry.ActorKeyID = &actorKeyIDNullable.String
+			}
+			if clientIPNullable.Valid {
+				entry.ClientIP = clientIPNullable.String
 			}
 
 			// Parse JSON payloads

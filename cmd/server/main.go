@@ -447,8 +447,9 @@ func main() {
 	}
 	e := http.NewServer(cfg, logger, healthConfig)
 
-	// Register CorrelationIDMiddleware globally
+	// Register request context middleware globally.
 	e.Use(middleware.CorrelationIDMiddleware())
+	e.Use(middleware.ClientIPMiddleware())
 
 	// ========================================
 	// Register protected routes with all handlers

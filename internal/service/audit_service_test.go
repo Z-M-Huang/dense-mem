@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/dense-mem/dense-mem/internal/requestctx"
 	"github.com/dense-mem/dense-mem/internal/storage/postgres"
 )
 
@@ -247,6 +248,105 @@ func TestAuditServiceAppend(t *testing.T) {
 	assert.Equal(t, "standard", retrievedActorRole, "actor_role should match")
 	assert.Equal(t, "192.168.1.1", retrievedClientIP, "client_ip should match")
 	assert.Equal(t, "corr-123-456", retrievedCorrelationID, "correlation_id should match")
+}
+
+func TestAuditServiceAppendUsesContextClientIPWhenEntryBlank(t *testing.T) {
+	ctx := requestctx.WithClientIP(context.Background(), "192.168.1.101")
+
+	dsn, cleanup := skipIfNoPostgres(t, ctx)
+	defer cleanup()
+
+	db, err := postgres.Open(ctx, &testConfig{dsn: dsn})
+	require.NoError(t, err, "Open should succeed")
+	defer func() {
+		sqlDB, _ := db.DB()
+		if sqlDB != nil {
+			sqlDB.Close()
+		}
+	}()
+
+	m, err := postgres.NewMigrator(db)
+	require.NoError(t, err, "NewMigrator should succeed")
+	require.NoError(t, m.RunUp(ctx), "RunUp should succeed")
+
+	auditService := NewAuditService(db)
+	sqlDB, err := db.DB()
+	require.NoError(t, err, "should get underlying sql.DB")
+
+	var profileID string
+	err = sqlDB.QueryRowContext(ctx, `
+		INSERT INTO profiles (id, name, status)
+		VALUES (gen_random_uuid(), 'Test Profile for Context Client IP', 'active')
+		RETURNING id
+	`).Scan(&profileID)
+	require.NoError(t, err, "should create test profile")
+
+	entry := AuditLogEntry{
+		ProfileID:  &profileID,
+		Operation:  "CREATE",
+		EntityType: "test_entity",
+		EntityID:   "test-context-client-ip",
+	}
+	require.NoError(t, auditService.Append(ctx, entry), "Append should succeed")
+
+	var retrievedClientIP string
+	err = sqlDB.QueryRowContext(ctx, `
+		SELECT client_ip::text
+		FROM audit_log
+		WHERE entity_id = 'test-context-client-ip'
+	`).Scan(&retrievedClientIP)
+	require.NoError(t, err, "should retrieve audit log entry")
+	assert.Equal(t, "192.168.1.101", retrievedClientIP, "client_ip should come from context")
+}
+
+func TestAuditServiceAppendStoresNullClientIPWhenMissing(t *testing.T) {
+	ctx := context.Background()
+
+	dsn, cleanup := skipIfNoPostgres(t, ctx)
+	defer cleanup()
+
+	db, err := postgres.Open(ctx, &testConfig{dsn: dsn})
+	require.NoError(t, err, "Open should succeed")
+	defer func() {
+		sqlDB, _ := db.DB()
+		if sqlDB != nil {
+			sqlDB.Close()
+		}
+	}()
+
+	m, err := postgres.NewMigrator(db)
+	require.NoError(t, err, "NewMigrator should succeed")
+	require.NoError(t, m.RunUp(ctx), "RunUp should succeed")
+
+	auditService := NewAuditService(db)
+	sqlDB, err := db.DB()
+	require.NoError(t, err, "should get underlying sql.DB")
+
+	var profileID string
+	err = sqlDB.QueryRowContext(ctx, `
+		INSERT INTO profiles (id, name, status)
+		VALUES (gen_random_uuid(), 'Test Profile for Null Client IP', 'active')
+		RETURNING id
+	`).Scan(&profileID)
+	require.NoError(t, err, "should create test profile")
+
+	entry := AuditLogEntry{
+		ProfileID:  &profileID,
+		Operation:  "CREATE",
+		EntityType: "test_entity",
+		EntityID:   "test-null-client-ip",
+		ClientIP:   " ",
+	}
+	require.NoError(t, auditService.Append(ctx, entry), "Append should succeed")
+
+	var retrievedClientIP sql.NullString
+	err = sqlDB.QueryRowContext(ctx, `
+		SELECT client_ip::text
+		FROM audit_log
+		WHERE entity_id = 'test-null-client-ip'
+	`).Scan(&retrievedClientIP)
+	require.NoError(t, err, "should retrieve audit log entry")
+	assert.False(t, retrievedClientIP.Valid, "client_ip should be SQL NULL")
 }
 
 // TestAuditServiceRedactsSecrets verifies key_hash, encrypted_secret, raw key, embedding absent from payloads.

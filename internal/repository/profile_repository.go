@@ -2,6 +2,8 @@ package repository
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -48,6 +50,60 @@ func NewProfileRepository(db *gorm.DB, rls postgres.RLSHelper) *ProfileRepositor
 	return &ProfileRepositoryImpl{db: db, rls: rls}
 }
 
+func marshalJSONBMap(value map[string]any) (string, error) {
+	if value == nil {
+		value = emptyMetadata
+	}
+	data, err := json.Marshal(value)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+func decodeJSONBMap(raw string) (map[string]any, error) {
+	if raw == "" {
+		return map[string]any{}, nil
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal([]byte(raw), &decoded); err != nil {
+		return nil, err
+	}
+	if decoded == nil {
+		return map[string]any{}, nil
+	}
+	return decoded, nil
+}
+
+func scanProfileRow(rows *sql.Rows) (*domain.Profile, error) {
+	var profile domain.Profile
+	var metadataJSON, configJSON string
+	if err := rows.Scan(
+		&profile.ID,
+		&profile.Name,
+		&profile.Description,
+		&metadataJSON,
+		&configJSON,
+		&profile.CreatedAt,
+		&profile.UpdatedAt,
+		&profile.DeletedAt,
+	); err != nil {
+		return nil, err
+	}
+
+	metadata, err := decodeJSONBMap(metadataJSON)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode profile metadata: %w", err)
+	}
+	config, err := decodeJSONBMap(configJSON)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode profile config: %w", err)
+	}
+	profile.Metadata = metadata
+	profile.Config = config
+	return &profile, nil
+}
+
 // Create creates a new profile with server-side UUID generation.
 // Enforces unique lower(name) among non-deleted rows and sets status='active'.
 func (r *ProfileRepositoryImpl) Create(ctx context.Context, profile *domain.Profile) error {
@@ -61,22 +117,21 @@ func (r *ProfileRepositoryImpl) Create(ctx context.Context, profile *domain.Prof
 	profile.CreatedAt = now
 	profile.UpdatedAt = now
 
-	// Ensure metadata and config are not nil for postgres jsonb NOT NULL columns
-	metadata := profile.Metadata
-	if metadata == nil {
-		metadata = emptyMetadata
+	metadata, err := marshalJSONBMap(profile.Metadata)
+	if err != nil {
+		return fmt.Errorf("failed to create profile: marshal metadata: %w", err)
 	}
-	config := profile.Config
-	if config == nil {
-		config = emptyMetadata
+	config, err := marshalJSONBMap(profile.Config)
+	if err != nil {
+		return fmt.Errorf("failed to create profile: marshal config: %w", err)
 	}
 
 	// INSERT must satisfy profiles_self_access (id = app.current_profile_id);
 	// seed the session with the new profile's id so the RLS policy passes.
-	err := r.rls.WithProfileTx(ctx, r.db, profile.ID.String(), func(tx *gorm.DB) error {
+	err = r.rls.WithProfileTx(ctx, r.db, profile.ID.String(), func(tx *gorm.DB) error {
 		return tx.Exec(`
 			INSERT INTO profiles (id, name, description, metadata, config, status, created_at, updated_at, deleted_at)
-			VALUES ($1, $2, $3, $4, $5, 'active', $6, $7, NULL)
+			VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, 'active', $6, $7, NULL)
 		`, profile.ID, profile.Name, profile.Description, metadata, config, profile.CreatedAt, profile.UpdatedAt).Error
 	})
 
@@ -92,26 +147,35 @@ func (r *ProfileRepositoryImpl) Create(ctx context.Context, profile *domain.Prof
 // resolve profiles without yet knowing whether the requester is authorized.
 // Authorization is enforced at the HTTP middleware layer, not here.
 func (r *ProfileRepositoryImpl) GetByID(ctx context.Context, id uuid.UUID) (*domain.Profile, error) {
-	var profile domain.Profile
+	var profile *domain.Profile
 
 	err := r.rls.WithSystemTx(ctx, r.db, func(tx *gorm.DB) error {
-		return tx.Raw(`
-			SELECT id, name, description, metadata, config, created_at, updated_at, deleted_at
+		rows, err := tx.Raw(`
+			SELECT id, name, description, metadata::text, config::text, created_at, updated_at, deleted_at
 			FROM profiles
 			WHERE id = $1 AND deleted_at IS NULL
-		`, id).Scan(&profile).Error
+		`, id).Rows()
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+
+		if !rows.Next() {
+			return rows.Err()
+		}
+		scanned, err := scanProfileRow(rows)
+		if err != nil {
+			return err
+		}
+		profile = scanned
+		return rows.Err()
 	})
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to get profile: %w", err)
 	}
 
-	// Check if profile was found
-	if profile.ID == uuid.Nil {
-		return nil, nil
-	}
-
-	return &profile, nil
+	return profile, nil
 }
 
 // List retrieves profiles with pagination, excluding soft-deleted rows.
@@ -133,13 +197,26 @@ func (r *ProfileRepositoryImpl) List(ctx context.Context, limit, offset int) ([]
 	// List is a cross-profile read; system RLS context lets the
 	// profiles_system_read_access policy return every non-deleted row.
 	err := r.rls.WithSystemTx(ctx, r.db, func(tx *gorm.DB) error {
-		return tx.Raw(`
-			SELECT id, name, description, metadata, config, created_at, updated_at, deleted_at
+		rows, err := tx.Raw(`
+			SELECT id, name, description, metadata::text, config::text, created_at, updated_at, deleted_at
 			FROM profiles
 			WHERE deleted_at IS NULL
 			ORDER BY created_at DESC, id ASC
 			LIMIT $1 OFFSET $2
-		`, limit, offset).Scan(&profiles).Error
+		`, limit, offset).Rows()
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			profile, err := scanProfileRow(rows)
+			if err != nil {
+				return err
+			}
+			profiles = append(profiles, profile)
+		}
+		return rows.Err()
 	})
 
 	if err != nil {
@@ -172,21 +249,20 @@ func (r *ProfileRepositoryImpl) Count(ctx context.Context) (int64, error) {
 func (r *ProfileRepositoryImpl) Update(ctx context.Context, profile *domain.Profile) error {
 	profile.UpdatedAt = time.Now().UTC()
 
-	// Ensure metadata and config are not nil for postgres jsonb NOT NULL columns
-	metadata := profile.Metadata
-	if metadata == nil {
-		metadata = emptyMetadata
+	metadata, err := marshalJSONBMap(profile.Metadata)
+	if err != nil {
+		return fmt.Errorf("failed to update profile: marshal metadata: %w", err)
 	}
-	config := profile.Config
-	if config == nil {
-		config = emptyMetadata
+	config, err := marshalJSONBMap(profile.Config)
+	if err != nil {
+		return fmt.Errorf("failed to update profile: marshal config: %w", err)
 	}
 
 	// UPDATE must satisfy profiles_self_access (id = app.current_profile_id).
-	err := r.rls.WithProfileTx(ctx, r.db, profile.ID.String(), func(tx *gorm.DB) error {
+	err = r.rls.WithProfileTx(ctx, r.db, profile.ID.String(), func(tx *gorm.DB) error {
 		return tx.Exec(`
 			UPDATE profiles
-			SET name = $1, description = $2, metadata = $3, config = $4, updated_at = $5
+			SET name = $1, description = $2, metadata = $3::jsonb, config = $4::jsonb, updated_at = $5
 			WHERE id = $6 AND deleted_at IS NULL
 		`, profile.Name, profile.Description, metadata, config, profile.UpdatedAt, profile.ID).Error
 	})
