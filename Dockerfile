@@ -56,6 +56,20 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 # ============================================================================
 FROM alpine:3.20
 
+ARG IMAGE_VERSION=dev
+ARG IMAGE_REVISION=unknown
+ARG IMAGE_CREATED=unknown
+
+LABEL org.opencontainers.image.title="Dense-Mem" \
+      org.opencontainers.image.description="Standalone HTTP MCP memory server with profile-scoped recall, claims, and local control portal." \
+      org.opencontainers.image.url="https://github.com/Z-M-Huang/dense-mem" \
+      org.opencontainers.image.source="https://github.com/Z-M-Huang/dense-mem" \
+      org.opencontainers.image.documentation="https://github.com/Z-M-Huang/dense-mem#readme" \
+      org.opencontainers.image.licenses="Apache-2.0" \
+      org.opencontainers.image.version="${IMAGE_VERSION}" \
+      org.opencontainers.image.revision="${IMAGE_REVISION}" \
+      org.opencontainers.image.created="${IMAGE_CREATED}"
+
 # ca-certificates for outbound TLS (Postgres/Neo4j/Redis if TLS-enabled);
 # tzdata for correct UTC handling in audit timestamps; wget for HEALTHCHECK.
 RUN apk add --no-cache ca-certificates tzdata wget && \
