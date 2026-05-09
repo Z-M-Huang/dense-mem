@@ -162,12 +162,6 @@ func testControlServer(t *testing.T) (*controlProfileSvc, *controlKeySvc, http.H
 
 func TestControlPortalRejectsUnsafeConfig(t *testing.T) {
 	_, err := NewControlPortalServer(&config.Config{
-		ControlHTTPAddr:    "0.0.0.0:8090",
-		ControlPortalToken: "secret",
-	}, &controlProfileSvc{}, &controlKeySvc{}, nil)
-	require.ErrorContains(t, err, "loopback")
-
-	_, err = NewControlPortalServer(&config.Config{
 		ControlHTTPAddr: "127.0.0.1:8090",
 	}, &controlProfileSvc{}, &controlKeySvc{}, nil)
 	require.ErrorContains(t, err, "token")
@@ -181,26 +175,20 @@ func TestControlPortalAuthAndOrigin(t *testing.T) {
 	server.ServeHTTP(rec, req)
 	require.Equal(t, http.StatusUnauthorized, rec.Code)
 
-	req = httptest.NewRequest(http.MethodGet, "/control/api/session", nil)
-	req.Header.Set("Authorization", "Bearer secret")
-	req.Header.Set("Origin", "https://example.com")
-	rec = httptest.NewRecorder()
-	server.ServeHTTP(rec, req)
-	require.Equal(t, http.StatusForbidden, rec.Code)
-
 	req = httptest.NewRequest(http.MethodOptions, "/control/api/session", nil)
-	req.Header.Set("Origin", "http://127.0.0.1:5173")
+	req.Header.Set("Origin", "http://192.168.1.253:8090")
 	rec = httptest.NewRecorder()
 	server.ServeHTTP(rec, req)
 	require.Equal(t, http.StatusNoContent, rec.Code)
-	require.Equal(t, "http://127.0.0.1:5173", rec.Header().Get("Access-Control-Allow-Origin"))
+	require.Equal(t, "http://192.168.1.253:8090", rec.Header().Get("Access-Control-Allow-Origin"))
 
 	req = httptest.NewRequest(http.MethodGet, "/control/api/session", nil)
 	req.Header.Set("X-Control-Portal-Token", "secret")
-	req.Header.Set("Origin", "http://localhost:5173")
+	req.Header.Set("Origin", "https://example.com")
 	rec = httptest.NewRecorder()
 	server.ServeHTTP(rec, req)
 	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "https://example.com", rec.Header().Get("Access-Control-Allow-Origin"))
 }
 
 func TestControlPortalProfileAndKeyFlows(t *testing.T) {

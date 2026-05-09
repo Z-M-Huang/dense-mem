@@ -4,9 +4,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"fmt"
-	"net"
 	nethttp "net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -27,7 +25,7 @@ import (
 	"github.com/dense-mem/dense-mem/internal/service"
 )
 
-// NewControlPortalServer creates the local-only management portal server.
+// NewControlPortalServer creates the token-protected management portal server.
 func NewControlPortalServer(
 	cfg config.ConfigProvider,
 	profileSvc handler.ProfileServiceInterface,
@@ -39,9 +37,6 @@ func NewControlPortalServer(
 	}
 	if strings.TrimSpace(cfg.GetControlPortalToken()) == "" {
 		return nil, fmt.Errorf("control portal: token is required")
-	}
-	if !isSafeControlListenAddr(cfg.GetControlHTTPAddr()) {
-		return nil, fmt.Errorf("control portal: address must bind to loopback or an unspecified host")
 	}
 
 	e := echo.New()
@@ -260,9 +255,6 @@ func controlPortalMiddleware(token string) echo.MiddlewareFunc {
 		return func(c echo.Context) error {
 			origin := c.Request().Header.Get(echo.HeaderOrigin)
 			if origin != "" {
-				if !isLoopbackOrigin(origin) {
-					return httperr.New(httperr.FORBIDDEN, "invalid origin")
-				}
 				c.Response().Header().Set(echo.HeaderVary, echo.HeaderOrigin)
 				c.Response().Header().Set(echo.HeaderAccessControlAllowOrigin, origin)
 				c.Response().Header().Set(echo.HeaderAccessControlAllowHeaders, "Authorization, Content-Type, X-Control-Portal-Token")
@@ -291,32 +283,6 @@ func controlTokenMatches(req *nethttp.Request, expected string) bool {
 		return false
 	}
 	return subtle.ConstantTimeCompare([]byte(got), []byte(expected)) == 1
-}
-
-func isLoopbackOrigin(raw string) bool {
-	parsed, err := url.Parse(raw)
-	if err != nil || parsed.Host == "" {
-		return false
-	}
-	host := parsed.Hostname()
-	return isLoopbackHost(host)
-}
-
-func isSafeControlListenAddr(addr string) bool {
-	host := addr
-	if splitHost, _, err := net.SplitHostPort(addr); err == nil {
-		host = splitHost
-	}
-	host = strings.Trim(host, "[]")
-	return host == "" || isLoopbackHost(host)
-}
-
-func isLoopbackHost(host string) bool {
-	if host == "localhost" {
-		return true
-	}
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
 }
 
 func defaultPortalStaticDir() string {

@@ -2,7 +2,6 @@ package config
 
 import (
 	"fmt"
-	"net"
 	"os"
 	"strconv"
 	"strings"
@@ -430,13 +429,6 @@ func Load() (Config, error) {
 		}
 	}
 
-	if !isSafeControlListenAddr(cfg.ControlHTTPAddr) {
-		return cfg, &ValidationError{
-			Field:   "CONTROL_HTTP_ADDR",
-			Message: "must bind to loopback or an unspecified host",
-		}
-	}
-
 	if verifierAPIURLSet && !verifierAPIKeySet {
 		return cfg, &ValidationError{
 			Field:   "AI_VERIFIER_API_KEY",
@@ -485,19 +477,4 @@ func Load() (Config, error) {
 	}
 
 	return cfg, nil
-}
-
-func isSafeControlListenAddr(addr string) bool {
-	host := addr
-	if splitHost, _, err := net.SplitHostPort(addr); err == nil {
-		host = splitHost
-	}
-	host = strings.Trim(host, "[]")
-	if host == "localhost" {
-		return true
-	}
-	if host == "" {
-		return true
-	}
-	return host == "127.0.0.1" || host == "::1"
 }

@@ -6,8 +6,8 @@ profile isolation, and recall. The host LLM owns conversation, judgment, and use
 interaction.
 
 HTTP MCP is the v1 supported MCP transport. Dense-Mem serves MCP at `/mcp` from
-the main HTTP process and also exposes REST, OpenAPI, and a local-only control
-portal for profile and API-key administration.
+the main HTTP process and also exposes REST, OpenAPI, and a token-protected
+control portal for profile and API-key administration.
 
 Redis is optional for single-node deployments and required for multi-instance
 deployments.
@@ -20,7 +20,7 @@ deployments.
 | Embeddings | Fragment embeddings and recall-query embeddings through the configured provider | No vectors for normal writes or recall |
 | Retrieval | Facts, validated claims, fragments, contradictions, clarification tasks | Choosing what to ask or cite in the conversation |
 | Truth changes | Comparable-conflict detection, confirmation-driven supersession | Asking the user which uncertain memory is correct |
-| Operations | Profiles, API keys, audit metadata, local control portal | Client-side MCP configuration |
+| Operations | Profiles, API keys, audit metadata, control portal | Client-side MCP configuration |
 
 Dense-Mem is not an agent brain, planner, or external truth arbiter. It stores
 memory, applies explicit gates, and returns structured outcomes.
@@ -38,7 +38,7 @@ flowchart TB
     subgraph DenseMem["Dense-Mem server"]
         MCP["/mcp Streamable HTTP"]
         REST["/api/v1 REST"]
-        Portal["127.0.0.1 control portal"]
+        Portal["control portal"]
         Registry["shared tool registry"]
         Memory["memory orchestration"]
         Recall["recall service"]
@@ -377,7 +377,7 @@ curl "http://localhost:8080/api/v1/recall?q=preferences" \
 
 ## Local Control Portal
 
-The control portal is for local profile and API-key management only. It does not
+The control portal is for profile and API-key management only. It does not
 expose a memory, fact, claim, graph, or database browser.
 
 Environment variables:
@@ -388,15 +388,14 @@ CONTROL_PORTAL_TOKEN=
 
 With the local Docker compose setup, the portal is available at
 `http://127.0.0.1:8090/`. The compose file publishes the portal port on host
-loopback only.
+loopback only by default. Operators may publish the port differently for their
+own network.
 
 Dense-Mem validates all of the following before starting the portal:
 
 - `CONTROL_PORTAL_TOKEN` must be set.
-- `CONTROL_HTTP_ADDR`, when set, must bind to loopback (`127.0.0.1`, `::1`, or
-  `localhost`) or an unspecified host such as `:8090`.
 - Requests must include the portal token.
-- Browser `Origin` headers must be loopback origins.
+- Browser `Origin` headers are allowed for token-authenticated requests.
 
 The portal supports:
 

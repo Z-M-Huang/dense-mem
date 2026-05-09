@@ -618,21 +618,17 @@ func TestLoadControlPortalValidation(t *testing.T) {
 		}
 	})
 
-	t.Run("requires local bind", func(t *testing.T) {
+	t.Run("allows explicit network bind", func(t *testing.T) {
 		clearEnv()
 		setRequiredEnv()
 		os.Setenv("CONTROL_HTTP_ADDR", "0.0.0.0:8090")
 
-		_, err := Load()
-		if err == nil {
-			t.Fatal("Load() expected error for non-loopback control addr, got nil")
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("Load() returned unexpected error: %v", err)
 		}
-		validationErr, ok := err.(*ValidationError)
-		if !ok {
-			t.Fatalf("expected *ValidationError, got %T", err)
-		}
-		if validationErr.Field != "CONTROL_HTTP_ADDR" {
-			t.Errorf("ValidationError.Field = %q, want CONTROL_HTTP_ADDR", validationErr.Field)
+		if cfg.ControlHTTPAddr != "0.0.0.0:8090" {
+			t.Errorf("ControlHTTPAddr = %q, want 0.0.0.0:8090", cfg.ControlHTTPAddr)
 		}
 	})
 }

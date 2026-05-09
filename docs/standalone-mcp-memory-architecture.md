@@ -17,7 +17,7 @@ surfaces are maintained for non-MCP integrations and operational tooling.
 - Promote only typed, gate-approved personal-memory claims.
 - Return clarification tasks instead of choosing silently during comparable
   conflicts.
-- Keep profile and API-key administration local-only.
+- Keep profile and API-key administration token-protected and operator-scoped.
 - Preserve optional Redis operation for single-node deployments while requiring
   Redis for multi-instance rate limits and SSE concurrency.
 
@@ -174,8 +174,8 @@ Dense-Mem implements MCP Streamable HTTP at one endpoint:
 Security requirements:
 
 - Authenticate with bearer API keys.
-- Validate `Origin` on local browser-accessible HTTP surfaces.
-- Bind local-only administrative surfaces to loopback.
+- Require control portal tokens for browser-accessible administrative surfaces.
+- Let operators choose administrative bind addresses and network exposure.
 - Keep the server-owned MCP transport HTTP-first. The optional stdio proxy under
   `packages/mcp-proxy` is a local adapter for clients that cannot load
   Streamable HTTP MCP servers directly; it is not a separate Dense-Mem server
@@ -203,11 +203,11 @@ Runtime controls:
 
 | Variable | Default | Meaning |
 |----------|---------|---------|
-| `CONTROL_HTTP_ADDR` | `:8090` | Portal bind address. Must be loopback or unspecified. |
+| `CONTROL_HTTP_ADDR` | `:8090` | Portal bind address. |
 | `CONTROL_PORTAL_TOKEN` | empty | Required bearer or `X-Control-Portal-Token` token. |
 
-The server rejects unsafe binds, missing tokens, invalid tokens, and non-loopback
-browser origins.
+The server rejects missing and invalid control portal tokens. Network exposure is
+an operator deployment decision.
 
 ## Operational Notes
 
