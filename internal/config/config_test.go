@@ -21,7 +21,6 @@ func clearEnv() {
 		"SSE_HEARTBEAT_SECONDS",
 		"SSE_MAX_DURATION_SECONDS",
 		"SSE_MAX_CONCURRENT_STREAMS",
-		"EMBEDDING_DIMENSIONS",
 		"AI_API_URL",
 		"AI_API_KEY",
 		"AI_API_EMBEDDING_MODEL",
@@ -255,7 +254,6 @@ func TestLoadOverrides(t *testing.T) {
 	os.Setenv("SSE_HEARTBEAT_SECONDS", "60")
 	os.Setenv("SSE_MAX_DURATION_SECONDS", "600")
 	os.Setenv("SSE_MAX_CONCURRENT_STREAMS", "20")
-	os.Setenv("EMBEDDING_DIMENSIONS", "768")
 	os.Setenv("CONTROL_PORTAL_ENABLED", "true")
 	os.Setenv("CONTROL_HTTP_ADDR", "localhost:9091")
 	os.Setenv("CONTROL_PORTAL_TOKEN", "control-secret")
@@ -291,9 +289,6 @@ func TestLoadOverrides(t *testing.T) {
 	}
 	if cfg.SSEMaxConcurrentStreams != 20 {
 		t.Errorf("SSEMaxConcurrentStreams = %d, want %d", cfg.SSEMaxConcurrentStreams, 20)
-	}
-	if cfg.EmbeddingDimensions != 768 {
-		t.Errorf("EmbeddingDimensions = %d, want %d", cfg.EmbeddingDimensions, 768)
 	}
 	if !cfg.ControlPortalEnabled {
 		t.Errorf("ControlPortalEnabled = false, want true")
@@ -456,28 +451,6 @@ func TestLoadEmbeddingDimensions_DefaultsToAIEmbeddingDimensions(t *testing.T) {
 	}
 	if got := cfg.GetEmbeddingDimensions(); got != 1024 {
 		t.Errorf("GetEmbeddingDimensions() = %d, want 1024", got)
-	}
-}
-
-func TestLoadEmbeddingDimensions_RejectsMismatch(t *testing.T) {
-	clearEnv()
-	setRequiredEnv()
-	os.Setenv("EMBEDDING_DIMENSIONS", "1536")
-	os.Setenv("AI_API_URL", "https://example.com/v1")
-	os.Setenv("AI_API_KEY", "sk-test")
-	os.Setenv("AI_API_EMBEDDING_MODEL", "text-embedding-nomic-embed-text-v2-moe")
-	os.Setenv("AI_API_EMBEDDING_DIMENSIONS", "1024")
-
-	_, err := Load()
-	if err == nil {
-		t.Fatal("Load() expected error for mismatched embedding dimensions, got nil")
-	}
-	validationErr, ok := err.(*ValidationError)
-	if !ok {
-		t.Fatalf("expected *ValidationError, got %T", err)
-	}
-	if validationErr.Field != "EMBEDDING_DIMENSIONS" {
-		t.Errorf("ValidationError.Field = %q, want EMBEDDING_DIMENSIONS", validationErr.Field)
 	}
 }
 

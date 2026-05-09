@@ -298,12 +298,6 @@ func Load() (Config, error) {
 		return cfg, err
 	}
 
-	embeddingDimensionsSet := strings.TrimSpace(os.Getenv("EMBEDDING_DIMENSIONS")) != ""
-	cfg.EmbeddingDimensions, err = parseIntOrDefault("EMBEDDING_DIMENSIONS", 0)
-	if err != nil {
-		return cfg, err
-	}
-
 	// AI embedding configuration
 	cfg.AIAPIURL = os.Getenv("AI_API_URL")
 	cfg.AIAPIKey = os.Getenv("AI_API_KEY")
@@ -318,18 +312,10 @@ func Load() (Config, error) {
 	if err != nil {
 		return cfg, err
 	}
-	if !embeddingDimensionsSet {
-		if cfg.AIEmbeddingDimensions > 0 {
-			cfg.EmbeddingDimensions = cfg.AIEmbeddingDimensions
-		} else {
-			cfg.EmbeddingDimensions = 1536
-		}
-	}
-	if embeddingDimensionsSet && cfg.AIEmbeddingDimensions > 0 && cfg.EmbeddingDimensions != cfg.AIEmbeddingDimensions {
-		return cfg, &ValidationError{
-			Field:   "EMBEDDING_DIMENSIONS",
-			Message: fmt.Sprintf("must match AI_API_EMBEDDING_DIMENSIONS when both are set; got %d and %d", cfg.EmbeddingDimensions, cfg.AIEmbeddingDimensions),
-		}
+	if cfg.AIEmbeddingDimensions > 0 {
+		cfg.EmbeddingDimensions = cfg.AIEmbeddingDimensions
+	} else {
+		cfg.EmbeddingDimensions = 1536
 	}
 
 	// Knowledge-pipeline knobs (AC-X3)
@@ -425,7 +411,6 @@ func Load() (Config, error) {
 		{"SSE_HEARTBEAT_SECONDS", cfg.SSEHeartbeatSeconds},
 		{"SSE_MAX_DURATION_SECONDS", cfg.SSEMaxDurationSeconds},
 		{"SSE_MAX_CONCURRENT_STREAMS", cfg.SSEMaxConcurrentStreams},
-		{"EMBEDDING_DIMENSIONS", cfg.EmbeddingDimensions},
 		{"AI_VERIFIER_TIMEOUT_SECONDS", cfg.AIVerifierTimeoutSeconds},
 		{"AI_VERIFIER_MAX_CONCURRENCY", cfg.AIVerifierMaxConcurrency},
 		{"CLAIM_WRITE_RATE_LIMIT", cfg.ClaimWriteRateLimit},

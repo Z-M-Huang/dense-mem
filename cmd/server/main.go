@@ -129,10 +129,9 @@ func main() {
 	// ========================================
 	// Creates uniqueness constraints, profile_id indexes, full-text indexes,
 	// vector index with configured dimensions, and composite fragment dedupe
-		// indexes. Idempotent; legacy index names are dropped and recreated with
-		// canonical names. Config loading makes EmbeddingDimensions match the
-		// configured AI embedding dimensions unless an explicit matching legacy
-		// override is supplied.
+	// indexes. Idempotent; legacy index names are dropped and recreated with
+	// canonical names. Config loading makes EmbeddingDimensions match the
+	// configured AI embedding dimensions.
 	schemaBootstrapper := neo4j.NewSchemaBootstrapper(neo4jClient, cfg.GetEmbeddingDimensions(), logger)
 	if err := schemaBootstrapper.EnsureSchema(startupCtx); err != nil {
 		log.Fatalf("failed to bootstrap neo4j schema: %v", err)
