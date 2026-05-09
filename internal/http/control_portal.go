@@ -40,8 +40,8 @@ func NewControlPortalServer(
 	if strings.TrimSpace(cfg.GetControlPortalToken()) == "" {
 		return nil, fmt.Errorf("control portal: token is required")
 	}
-	if !isLoopbackAddr(cfg.GetControlHTTPAddr()) {
-		return nil, fmt.Errorf("control portal: address must bind to loopback")
+	if !isSafeControlListenAddr(cfg.GetControlHTTPAddr()) {
+		return nil, fmt.Errorf("control portal: address must bind to loopback or an unspecified host")
 	}
 
 	e := echo.New()
@@ -302,12 +302,13 @@ func isLoopbackOrigin(raw string) bool {
 	return isLoopbackHost(host)
 }
 
-func isLoopbackAddr(addr string) bool {
+func isSafeControlListenAddr(addr string) bool {
 	host := addr
 	if splitHost, _, err := net.SplitHostPort(addr); err == nil {
 		host = splitHost
 	}
-	return isLoopbackHost(strings.Trim(host, "[]"))
+	host = strings.Trim(host, "[]")
+	return host == "" || isLoopbackHost(host)
 }
 
 func isLoopbackHost(host string) bool {

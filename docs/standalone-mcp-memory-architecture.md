@@ -203,9 +203,8 @@ Runtime controls:
 
 | Variable | Default | Meaning |
 |----------|---------|---------|
-| `CONTROL_PORTAL_ENABLED` | `false` | Enables the local portal server. |
-| `CONTROL_HTTP_ADDR` | `127.0.0.1:8090` | Loopback bind address. |
-| `CONTROL_PORTAL_TOKEN` | empty | Required bearer or `X-Control-Portal-Token` token when enabled. |
+| `CONTROL_HTTP_ADDR` | `:8090` | Portal bind address. Must be loopback or unspecified. |
+| `CONTROL_PORTAL_TOKEN` | empty | Required bearer or `X-Control-Portal-Token` token. |
 
 The server rejects unsafe binds, missing tokens, invalid tokens, and non-loopback
 browser origins.

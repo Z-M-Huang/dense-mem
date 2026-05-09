@@ -44,7 +44,6 @@ type ConfigProvider interface {
 	GetRecallValidatedClaimWeight() float64
 	GetPromoteTxTimeoutSeconds() int
 	GetAICommunityMaxNodes() int
-	GetControlPortalEnabled() bool
 	GetControlHTTPAddr() string
 	GetControlPortalToken() string
 }
@@ -84,7 +83,6 @@ type Config struct {
 	RecallValidatedClaimWeight float64
 	PromoteTxTimeoutSeconds    int
 	AICommunityMaxNodes        int
-	ControlPortalEnabled       bool
 	ControlHTTPAddr            string
 	ControlPortalToken         string `json:"-"`
 }
@@ -144,7 +142,6 @@ func (c *Config) GetClaimReadRateLimit() int             { return c.ClaimReadRat
 func (c *Config) GetRecallValidatedClaimWeight() float64 { return c.RecallValidatedClaimWeight }
 func (c *Config) GetPromoteTxTimeoutSeconds() int        { return c.PromoteTxTimeoutSeconds }
 func (c *Config) GetAICommunityMaxNodes() int            { return c.AICommunityMaxNodes }
-func (c *Config) GetControlPortalEnabled() bool          { return c.ControlPortalEnabled }
 func (c *Config) GetControlHTTPAddr() string             { return c.ControlHTTPAddr }
 func (c *Config) GetControlPortalToken() string          { return c.ControlPortalToken }
 
@@ -169,6 +166,7 @@ func (c *Config) ValidateServerStartup() error {
 		{"AI_API_URL", c.AIAPIURL},
 		{"AI_API_KEY", c.AIAPIKey},
 		{"AI_API_EMBEDDING_MODEL", c.AIEmbeddingModel},
+		{"CONTROL_PORTAL_TOKEN", c.ControlPortalToken},
 	}
 	for _, item := range required {
 		if strings.TrimSpace(item.value) == "" {
@@ -366,11 +364,7 @@ func Load() (Config, error) {
 		return cfg, err
 	}
 
-	cfg.ControlPortalEnabled, err = parseBoolOrDefault("CONTROL_PORTAL_ENABLED", false)
-	if err != nil {
-		return cfg, err
-	}
-	cfg.ControlHTTPAddr = getEnvOrDefault("CONTROL_HTTP_ADDR", "127.0.0.1:8090")
+	cfg.ControlHTTPAddr = getEnvOrDefault("CONTROL_HTTP_ADDR", ":8090")
 	cfg.ControlPortalToken = os.Getenv("CONTROL_PORTAL_TOKEN")
 
 	// Validation
@@ -436,18 +430,10 @@ func Load() (Config, error) {
 		}
 	}
 
-	if cfg.ControlPortalEnabled {
-		if strings.TrimSpace(cfg.ControlPortalToken) == "" {
-			return cfg, &ValidationError{
-				Field:   "CONTROL_PORTAL_TOKEN",
-				Message: "required when CONTROL_PORTAL_ENABLED=true",
-			}
-		}
-		if !isLoopbackListenAddr(cfg.ControlHTTPAddr) {
-			return cfg, &ValidationError{
-				Field:   "CONTROL_HTTP_ADDR",
-				Message: "must bind to a loopback host when CONTROL_PORTAL_ENABLED=true",
-			}
+	if !isSafeControlListenAddr(cfg.ControlHTTPAddr) {
+		return cfg, &ValidationError{
+			Field:   "CONTROL_HTTP_ADDR",
+			Message: "must bind to loopback or an unspecified host",
 		}
 	}
 
@@ -501,7 +487,7 @@ func Load() (Config, error) {
 	return cfg, nil
 }
 
-func isLoopbackListenAddr(addr string) bool {
+func isSafeControlListenAddr(addr string) bool {
 	host := addr
 	if splitHost, _, err := net.SplitHostPort(addr); err == nil {
 		host = splitHost
@@ -511,7 +497,7 @@ func isLoopbackListenAddr(addr string) bool {
 		return true
 	}
 	if host == "" {
-		return false
+		return true
 	}
 	return host == "127.0.0.1" || host == "::1"
 }

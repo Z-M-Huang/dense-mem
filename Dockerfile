@@ -87,7 +87,7 @@ RUN chmod +x /app/docker-entrypoint.sh
 
 USER densemem
 
-EXPOSE 8080
+EXPOSE 8080 8090
 
 # /health is a liveness probe (process up); /ready flips to 503 on transient
 # dependency blips which would force Docker to restart a healthy container.

@@ -644,6 +644,5 @@ func (c *testConfig) GetClaimReadRateLimit() int             { return 300 }
 func (c *testConfig) GetRecallValidatedClaimWeight() float64 { return 0.5 }
 func (c *testConfig) GetPromoteTxTimeoutSeconds() int        { return 10 }
 func (c *testConfig) GetAICommunityMaxNodes() int            { return 500000 }
-func (c *testConfig) GetControlPortalEnabled() bool          { return false }
 func (c *testConfig) GetControlHTTPAddr() string             { return "127.0.0.1:0" }
 func (c *testConfig) GetControlPortalToken() string          { return "" }

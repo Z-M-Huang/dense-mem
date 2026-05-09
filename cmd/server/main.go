@@ -496,24 +496,16 @@ func main() {
 
 	http.RegisterProtectedRoutesWithHandlers(e, protectedDeps, protectedHandlers)
 
-	var shutdownControlPortal func()
-	if cfg.GetControlPortalEnabled() {
-		controlServer, err := http.NewControlPortalServer(&cfg, profileService, apiKeyService, logger)
-		if err != nil {
-			log.Fatalf("failed to build control portal server: %v", err)
-		}
-		logger.Info("starting control portal", observability.String("addr", cfg.GetControlHTTPAddr()))
-		go func() {
-			if err := controlServer.Start(cfg.GetControlHTTPAddr()); err != nil {
-				logger.Error("control portal server error", err)
-			}
-		}()
-		shutdownControlPortal = func() {
-			if err := http.ShutdownControlPortal(controlServer, logger); err != nil {
-				logger.Error("control portal shutdown error", err)
-			}
-		}
+	controlServer, err := http.NewControlPortalServer(&cfg, profileService, apiKeyService, logger)
+	if err != nil {
+		log.Fatalf("failed to build control portal server: %v", err)
 	}
+	logger.Info("starting control portal", observability.String("addr", cfg.GetControlHTTPAddr()))
+	go func() {
+		if err := controlServer.Start(cfg.GetControlHTTPAddr()); err != nil {
+			logger.Error("control portal server error", err)
+		}
+	}()
 
 	logger.Info("starting server", observability.String("addr", cfg.HTTPAddr))
 
@@ -535,7 +527,7 @@ func main() {
 	if err := http.ShutdownServer(e, logger); err != nil {
 		logger.Error("server shutdown error", err)
 	}
-	if shutdownControlPortal != nil {
-		shutdownControlPortal()
+	if err := http.ShutdownControlPortal(controlServer, logger); err != nil {
+		logger.Error("control portal shutdown error", err)
 	}
 }

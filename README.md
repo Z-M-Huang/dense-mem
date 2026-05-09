@@ -377,28 +377,24 @@ curl "http://localhost:8080/api/v1/recall?q=preferences" \
 
 ## Local Control Portal
 
-The optional control portal is for local profile and API-key management only. It
-does not expose a memory, fact, claim, graph, or database browser.
+The control portal is for local profile and API-key management only. It does not
+expose a memory, fact, claim, graph, or database browser.
 
 Environment variables:
 
 ```bash
-CONTROL_PORTAL_ENABLED=false
-CONTROL_HTTP_ADDR=127.0.0.1:8090
 CONTROL_PORTAL_TOKEN=
 ```
 
 With the local Docker compose setup, the portal is available at
-`http://127.0.0.1:8090/` when `CONTROL_PORTAL_ENABLED=true`. The server
-container uses host networking so the portal still binds to the host loopback
-address instead of `0.0.0.0`.
+`http://127.0.0.1:8090/`. The compose file publishes the portal port on host
+loopback only.
 
-When enabled, Dense-Mem validates all of the following before starting the
-portal:
+Dense-Mem validates all of the following before starting the portal:
 
 - `CONTROL_PORTAL_TOKEN` must be set.
-- `CONTROL_HTTP_ADDR` must bind to loopback (`127.0.0.1`, `::1`, or
-  `localhost`).
+- `CONTROL_HTTP_ADDR`, when set, must bind to loopback (`127.0.0.1`, `::1`, or
+  `localhost`) or an unspecified host such as `:8090`.
 - Requests must include the portal token.
 - Browser `Origin` headers must be loopback origins.
 

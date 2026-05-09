@@ -153,9 +153,8 @@ func testControlServer(t *testing.T) (*controlProfileSvc, *controlKeySvc, http.H
 	}}}
 	keys := &controlKeySvc{}
 	e, err := NewControlPortalServer(&config.Config{
-		ControlHTTPAddr:      "127.0.0.1:8090",
-		ControlPortalToken:   "secret",
-		ControlPortalEnabled: true,
+		ControlHTTPAddr:    "127.0.0.1:8090",
+		ControlPortalToken: "secret",
 	}, profiles, keys, nil)
 	require.NoError(t, err)
 	return profiles, keys, e
@@ -163,15 +162,13 @@ func testControlServer(t *testing.T) (*controlProfileSvc, *controlKeySvc, http.H
 
 func TestControlPortalRejectsUnsafeConfig(t *testing.T) {
 	_, err := NewControlPortalServer(&config.Config{
-		ControlHTTPAddr:      "0.0.0.0:8090",
-		ControlPortalToken:   "secret",
-		ControlPortalEnabled: true,
+		ControlHTTPAddr:    "0.0.0.0:8090",
+		ControlPortalToken: "secret",
 	}, &controlProfileSvc{}, &controlKeySvc{}, nil)
 	require.ErrorContains(t, err, "loopback")
 
 	_, err = NewControlPortalServer(&config.Config{
-		ControlHTTPAddr:      "127.0.0.1:8090",
-		ControlPortalEnabled: true,
+		ControlHTTPAddr: "127.0.0.1:8090",
 	}, &controlProfileSvc{}, &controlKeySvc{}, nil)
 	require.ErrorContains(t, err, "token")
 }

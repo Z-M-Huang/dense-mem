@@ -37,7 +37,6 @@ func clearEnv() {
 		"RECALL_VALIDATED_CLAIM_WEIGHT",
 		"PROMOTE_TX_TIMEOUT_SECONDS",
 		"AI_COMMUNITY_MAX_NODES",
-		"CONTROL_PORTAL_ENABLED",
 		"CONTROL_HTTP_ADDR",
 		"CONTROL_PORTAL_TOKEN",
 	}
@@ -52,6 +51,7 @@ func setRequiredEnv() {
 	os.Setenv("NEO4J_URI", "bolt://localhost:7687")
 	os.Setenv("NEO4J_USER", "neo4j")
 	os.Setenv("NEO4J_PASSWORD", "password")
+	os.Setenv("CONTROL_PORTAL_TOKEN", "control-secret")
 }
 
 func setRequiredEmbeddingEnv() {
@@ -96,11 +96,8 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.RedisDB != 0 {
 		t.Errorf("RedisDB default = %d, want %d", cfg.RedisDB, 0)
 	}
-	if cfg.ControlPortalEnabled {
-		t.Errorf("ControlPortalEnabled default = true, want false")
-	}
-	if cfg.ControlHTTPAddr != "127.0.0.1:8090" {
-		t.Errorf("ControlHTTPAddr default = %q, want %q", cfg.ControlHTTPAddr, "127.0.0.1:8090")
+	if cfg.ControlHTTPAddr != ":8090" {
+		t.Errorf("ControlHTTPAddr default = %q, want %q", cfg.ControlHTTPAddr, ":8090")
 	}
 }
 
@@ -254,7 +251,6 @@ func TestLoadOverrides(t *testing.T) {
 	os.Setenv("SSE_HEARTBEAT_SECONDS", "60")
 	os.Setenv("SSE_MAX_DURATION_SECONDS", "600")
 	os.Setenv("SSE_MAX_CONCURRENT_STREAMS", "20")
-	os.Setenv("CONTROL_PORTAL_ENABLED", "true")
 	os.Setenv("CONTROL_HTTP_ADDR", "localhost:9091")
 	os.Setenv("CONTROL_PORTAL_TOKEN", "control-secret")
 
@@ -289,9 +285,6 @@ func TestLoadOverrides(t *testing.T) {
 	}
 	if cfg.SSEMaxConcurrentStreams != 20 {
 		t.Errorf("SSEMaxConcurrentStreams = %d, want %d", cfg.SSEMaxConcurrentStreams, 20)
-	}
-	if !cfg.ControlPortalEnabled {
-		t.Errorf("ControlPortalEnabled = false, want true")
 	}
 	if cfg.ControlHTTPAddr != "localhost:9091" {
 		t.Errorf("ControlHTTPAddr = %q, want %q", cfg.ControlHTTPAddr, "localhost:9091")
@@ -339,7 +332,6 @@ func TestConfigProviderInterface(t *testing.T) {
 	_ = provider.GetAIVerifierModel()
 	_ = provider.GetAIVerifierTimeoutSeconds()
 	_ = provider.GetAIVerifierMaxConcurrency()
-	_ = provider.GetControlPortalEnabled()
 	_ = provider.GetControlHTTPAddr()
 	_ = provider.GetControlPortalToken()
 }
@@ -362,6 +354,7 @@ func TestLoad_WithoutRedis_Succeeds(t *testing.T) {
 	os.Setenv("NEO4J_URI", "bolt://localhost:7687")
 	os.Setenv("NEO4J_USER", "neo4j")
 	os.Setenv("NEO4J_PASSWORD", "password")
+	os.Setenv("CONTROL_PORTAL_TOKEN", "control-secret")
 
 	cfg, err := Load()
 	if err != nil {
@@ -392,6 +385,7 @@ func TestLoad_EmbeddingConfig_AllOrNothing(t *testing.T) {
 	os.Setenv("NEO4J_URI", "bolt://localhost:7687")
 	os.Setenv("NEO4J_USER", "neo4j")
 	os.Setenv("NEO4J_PASSWORD", "password")
+	os.Setenv("CONTROL_PORTAL_TOKEN", "control-secret")
 	os.Setenv("AI_API_URL", "https://example.com/v1")
 	// Missing AI_API_KEY intentionally
 	os.Setenv("AI_API_EMBEDDING_MODEL", "text-embedding-3-small")
@@ -417,6 +411,7 @@ func TestLoad_EmbeddingConfig_Complete(t *testing.T) {
 	os.Setenv("NEO4J_URI", "bolt://localhost:7687")
 	os.Setenv("NEO4J_USER", "neo4j")
 	os.Setenv("NEO4J_PASSWORD", "password")
+	os.Setenv("CONTROL_PORTAL_TOKEN", "control-secret")
 	setRequiredEmbeddingEnv()
 
 	cfg, err := Load()
@@ -599,15 +594,20 @@ func TestLoadKnowledgeConfigDefaults(t *testing.T) {
 }
 
 func TestLoadControlPortalValidation(t *testing.T) {
-	t.Run("enabled requires token", func(t *testing.T) {
+	t.Run("server startup requires token", func(t *testing.T) {
 		clearEnv()
 		setRequiredEnv()
-		os.Setenv("CONTROL_PORTAL_ENABLED", "true")
-		os.Setenv("CONTROL_HTTP_ADDR", "127.0.0.1:8090")
+		setRequiredEmbeddingEnv()
+		os.Unsetenv("CONTROL_PORTAL_TOKEN")
 
-		_, err := Load()
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("Load() returned unexpected error: %v", err)
+		}
+
+		err = cfg.ValidateServerStartup()
 		if err == nil {
-			t.Fatal("Load() expected error for missing control token, got nil")
+			t.Fatal("ValidateServerStartup() expected error for missing control token, got nil")
 		}
 		validationErr, ok := err.(*ValidationError)
 		if !ok {
@@ -618,12 +618,10 @@ func TestLoadControlPortalValidation(t *testing.T) {
 		}
 	})
 
-	t.Run("enabled requires loopback bind", func(t *testing.T) {
+	t.Run("requires local bind", func(t *testing.T) {
 		clearEnv()
 		setRequiredEnv()
-		os.Setenv("CONTROL_PORTAL_ENABLED", "true")
 		os.Setenv("CONTROL_HTTP_ADDR", "0.0.0.0:8090")
-		os.Setenv("CONTROL_PORTAL_TOKEN", "secret")
 
 		_, err := Load()
 		if err == nil {

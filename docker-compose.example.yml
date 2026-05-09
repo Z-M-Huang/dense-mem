@@ -2,19 +2,19 @@
 #
 # Copy this file to docker-compose.yml (gitignored) and adjust as needed.
 # A matching .env file must live beside it — use .env.example as a starting
-# point and set at minimum POSTGRES_PASSWORD and NEO4J_PASSWORD.
+# point and set at minimum POSTGRES_PASSWORD, NEO4J_PASSWORD, and
+# CONTROL_PORTAL_TOKEN.
 #
 # Required env in .env:
 #   POSTGRES_PASSWORD         Postgres password for the postgres container
 #   NEO4J_PASSWORD            Neo4j password (user defaults to "neo4j")
+#   CONTROL_PORTAL_TOKEN      Token for the local profile/API-key portal
 #   POSTGRES_HOST, _USER, _DB, _PORT, _SSLMODE  (for the entrypoint to
 #                             assemble POSTGRES_DSN — see docker-entrypoint.sh)
 #
 # Optional env (sensible defaults — see .env for the full list):
 #   NEO4J_USER, NEO4J_DATABASE
 #   REDIS_PASSWORD, REDIS_DB, REDIS_PORT
-#   HTTP_ADDR (host-network server bind address; default :8080)
-#   CONTROL_PORTAL_ENABLED, CONTROL_HTTP_ADDR, CONTROL_PORTAL_TOKEN
 #
 # The image entrypoint (/app/docker-entrypoint.sh) builds POSTGRES_DSN from
 # its component env vars at container start, so no credentialed connection
@@ -96,15 +96,13 @@ services:
     image: ghcr.io/z-m-huang/dense-mem:latest
     env_file:
       - .env
-    # The control portal intentionally binds loopback-only. Host networking lets
-    # 127.0.0.1:8090 mean the host loopback instead of the container loopback.
-    # This local/dev template targets Linux Docker hosts.
-    network_mode: host
+    ports:
+      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:8090:8090"
     environment:
-      POSTGRES_HOST: 127.0.0.1
-      NEO4J_URI: bolt://127.0.0.1:7687
+      POSTGRES_HOST: postgres
+      NEO4J_URI: bolt://neo4j:7687
       REDIS_ADDR: "${REDIS_ADDR:-}"
-      CONTROL_HTTP_ADDR: "${CONTROL_HTTP_ADDR:-127.0.0.1:8090}"
     depends_on:
       postgres:
         condition: service_healthy
