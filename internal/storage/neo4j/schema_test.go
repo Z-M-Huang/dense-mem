@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dense-mem/dense-mem/internal/observability"
+	"github.com/markhuangai/dense-mem/internal/observability"
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

@@ -5,7 +5,7 @@ import (
 
 	"github.com/go-playground/validator/v10"
 
-	httpvalidation "github.com/dense-mem/dense-mem/internal/http/validation"
+	httpvalidation "github.com/markhuangai/dense-mem/internal/http/validation"
 )
 
 func init() {

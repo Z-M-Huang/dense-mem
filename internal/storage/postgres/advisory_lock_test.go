@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dense-mem/dense-mem/internal/observability"
+	"github.com/markhuangai/dense-mem/internal/observability"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )

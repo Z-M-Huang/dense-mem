@@ -11,9 +11,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dense-mem/dense-mem/internal/config"
-	"github.com/dense-mem/dense-mem/internal/domain"
-	"github.com/dense-mem/dense-mem/internal/service"
+	"github.com/markhuangai/dense-mem/internal/config"
+	"github.com/markhuangai/dense-mem/internal/domain"
+	"github.com/markhuangai/dense-mem/internal/service"
 )
 
 type controlProfileSvc struct {

@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/dense-mem/dense-mem/internal/http/dto"
+	"github.com/markhuangai/dense-mem/internal/http/dto"
 )
 
 // TestCreatePersistsSourceQualityAndClassification verifies that source_quality and

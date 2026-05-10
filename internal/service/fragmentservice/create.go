@@ -18,15 +18,15 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/dense-mem/dense-mem/internal/correlation"
-	"github.com/dense-mem/dense-mem/internal/domain"
-	"github.com/dense-mem/dense-mem/internal/embedding"
-	"github.com/dense-mem/dense-mem/internal/http/dto"
-	"github.com/dense-mem/dense-mem/internal/observability"
-	"github.com/dense-mem/dense-mem/internal/service/fragmentcodec"
-	"github.com/dense-mem/dense-mem/internal/service/fragmentdedupe"
-	"github.com/dense-mem/dense-mem/internal/service/fragmentidentity"
-	"github.com/dense-mem/dense-mem/internal/storage/neo4j"
+	"github.com/markhuangai/dense-mem/internal/correlation"
+	"github.com/markhuangai/dense-mem/internal/domain"
+	"github.com/markhuangai/dense-mem/internal/embedding"
+	"github.com/markhuangai/dense-mem/internal/http/dto"
+	"github.com/markhuangai/dense-mem/internal/observability"
+	"github.com/markhuangai/dense-mem/internal/service/fragmentcodec"
+	"github.com/markhuangai/dense-mem/internal/service/fragmentdedupe"
+	"github.com/markhuangai/dense-mem/internal/service/fragmentidentity"
+	"github.com/markhuangai/dense-mem/internal/storage/neo4j"
 )
 
 // Errors for the create fragment service.

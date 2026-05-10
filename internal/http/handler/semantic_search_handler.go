@@ -5,11 +5,11 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/dense-mem/dense-mem/internal/http/dto"
-	"github.com/dense-mem/dense-mem/internal/http/middleware"
-	"github.com/dense-mem/dense-mem/internal/http/validation"
-	"github.com/dense-mem/dense-mem/internal/httperr"
-	"github.com/dense-mem/dense-mem/internal/tools/semanticsearch"
+	"github.com/markhuangai/dense-mem/internal/http/dto"
+	"github.com/markhuangai/dense-mem/internal/http/middleware"
+	"github.com/markhuangai/dense-mem/internal/http/validation"
+	"github.com/markhuangai/dense-mem/internal/httperr"
+	"github.com/markhuangai/dense-mem/internal/tools/semanticsearch"
 )
 
 // SemanticSearchHandler handles HTTP requests for semantic-search operations.

@@ -13,8 +13,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dense-mem/dense-mem/internal/domain"
-	"github.com/dense-mem/dense-mem/internal/httperr"
+	"github.com/markhuangai/dense-mem/internal/domain"
+	"github.com/markhuangai/dense-mem/internal/httperr"
 )
 
 // mockProfileResolutionService implements ProfileResolutionServiceInterface for testing.

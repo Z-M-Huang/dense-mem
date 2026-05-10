@@ -10,8 +10,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dense-mem/dense-mem/internal/http/dto"
-	"github.com/dense-mem/dense-mem/internal/tools/keywordsearch"
+	"github.com/markhuangai/dense-mem/internal/http/dto"
+	"github.com/markhuangai/dense-mem/internal/tools/keywordsearch"
 )
 
 // Phase-0 UATs validate the primitive fixes that unblock the later phases.

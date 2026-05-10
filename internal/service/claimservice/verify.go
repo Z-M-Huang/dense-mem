@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dense-mem/dense-mem/internal/domain"
-	"github.com/dense-mem/dense-mem/internal/observability"
-	"github.com/dense-mem/dense-mem/internal/verifier"
+	"github.com/markhuangai/dense-mem/internal/domain"
+	"github.com/markhuangai/dense-mem/internal/observability"
+	"github.com/markhuangai/dense-mem/internal/verifier"
 )
 
 // verifyClaimCypher updates a Claim node's verification fields after a
@@ -92,9 +92,9 @@ func NewVerifyClaimService(
 //  3. Build a verifier.Request from the claim triple + fragment context.
 //  4. Call verifier.Verify.
 //  5. On success, map verdict to status/entailment_verdict:
-//       entailed     → StatusValidated,  VerdictEntailed
-//       contradicted → ClaimStatus("disputed"), VerdictContradicted
-//       insufficient → status/verdict unchanged (claim stays candidate)
+//     entailed     → StatusValidated,  VerdictEntailed
+//     contradicted → ClaimStatus("disputed"), VerdictContradicted
+//     insufficient → status/verdict unchanged (claim stays candidate)
 //     Persist verifier_model, verified_at, last_verifier_response.
 //  6. On verifier failure, leave claim state unchanged; persist
 //     last_verifier_response when the provider attached a raw body.

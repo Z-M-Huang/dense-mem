@@ -9,8 +9,8 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/dense-mem/dense-mem/internal/http/dto"
-	"github.com/dense-mem/dense-mem/internal/tools/registry"
+	"github.com/markhuangai/dense-mem/internal/http/dto"
+	"github.com/markhuangai/dense-mem/internal/tools/registry"
 )
 
 // TestToolCatalogHandler_ReturnsRegisteredTools — backpressure test + AC-32.

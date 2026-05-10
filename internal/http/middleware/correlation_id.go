@@ -6,7 +6,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 
-	"github.com/dense-mem/dense-mem/internal/correlation"
+	"github.com/markhuangai/dense-mem/internal/correlation"
 )
 
 // CorrelationIDHeader is the HTTP header for correlation IDs.

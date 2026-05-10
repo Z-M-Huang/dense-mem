@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/dense-mem/dense-mem/internal/tools/keywordsearch"
-	"github.com/dense-mem/dense-mem/internal/tools/semanticsearch"
+	"github.com/markhuangai/dense-mem/internal/tools/keywordsearch"
+	"github.com/markhuangai/dense-mem/internal/tools/semanticsearch"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

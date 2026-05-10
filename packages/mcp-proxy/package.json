@@ -5,7 +5,7 @@
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Z-M-Huang/dense-mem.git",
+    "url": "git+https://github.com/markhuangai/dense-mem.git",
     "directory": "packages/mcp-proxy"
   },
   "keywords": [

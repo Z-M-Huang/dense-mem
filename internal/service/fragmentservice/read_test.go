@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/dense-mem/dense-mem/internal/domain"
+	"github.com/markhuangai/dense-mem/internal/domain"
 )
 
 type fakeScopedReader struct {

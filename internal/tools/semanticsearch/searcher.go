@@ -7,7 +7,7 @@ import (
 
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 
-	neo4jstore "github.com/dense-mem/dense-mem/internal/storage/neo4j"
+	neo4jstore "github.com/markhuangai/dense-mem/internal/storage/neo4j"
 )
 
 // ScopedReaderInterface is the interface for scoped read operations.

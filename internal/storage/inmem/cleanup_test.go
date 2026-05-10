@@ -6,9 +6,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/dense-mem/dense-mem/internal/service"
-	"github.com/dense-mem/dense-mem/internal/sse"
-	"github.com/dense-mem/dense-mem/internal/storage/redis"
+	"github.com/markhuangai/dense-mem/internal/service"
+	"github.com/markhuangai/dense-mem/internal/sse"
+	"github.com/markhuangai/dense-mem/internal/storage/redis"
 )
 
 func TestNoopCleanupRepository_ReturnsNilForBothCleanupCalls(t *testing.T) {

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dense-mem/dense-mem/internal/correlation"
+	"github.com/markhuangai/dense-mem/internal/correlation"
 )
 
 func TestDelete_Success_EmitsAudit(t *testing.T) {

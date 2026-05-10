@@ -5,8 +5,8 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/dense-mem/dense-mem/internal/httperr"
-	"github.com/dense-mem/dense-mem/internal/service"
+	"github.com/markhuangai/dense-mem/internal/httperr"
+	"github.com/markhuangai/dense-mem/internal/service"
 )
 
 // ProfileAuthorizationService is the interface for services needed by profile authorization middleware.

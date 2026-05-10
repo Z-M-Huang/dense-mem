@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dense-mem/dense-mem/internal/sse"
+	"github.com/markhuangai/dense-mem/internal/sse"
 )
 
 // InMemoryConcurrencyLimiter implements sse.ConcurrencyLimiter using an

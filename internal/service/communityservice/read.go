@@ -3,7 +3,7 @@ package communityservice
 import (
 	"context"
 
-	"github.com/dense-mem/dense-mem/internal/domain"
+	"github.com/markhuangai/dense-mem/internal/domain"
 )
 
 type getCommunitySummaryServiceImpl struct {

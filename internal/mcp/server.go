@@ -13,9 +13,9 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/dense-mem/dense-mem/internal/observability"
-	"github.com/dense-mem/dense-mem/internal/tools"
-	"github.com/dense-mem/dense-mem/internal/tools/registry"
+	"github.com/markhuangai/dense-mem/internal/observability"
+	"github.com/markhuangai/dense-mem/internal/tools"
+	"github.com/markhuangai/dense-mem/internal/tools/registry"
 )
 
 // ProtocolVersion is the MCP protocol revision this server speaks.

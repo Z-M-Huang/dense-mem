@@ -9,11 +9,11 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/dense-mem/dense-mem/internal/http/middleware"
-	"github.com/dense-mem/dense-mem/internal/httperr"
-	"github.com/dense-mem/dense-mem/internal/mcp"
-	"github.com/dense-mem/dense-mem/internal/observability"
-	"github.com/dense-mem/dense-mem/internal/tools/registry"
+	"github.com/markhuangai/dense-mem/internal/http/middleware"
+	"github.com/markhuangai/dense-mem/internal/httperr"
+	"github.com/markhuangai/dense-mem/internal/mcp"
+	"github.com/markhuangai/dense-mem/internal/observability"
+	"github.com/markhuangai/dense-mem/internal/tools/registry"
 )
 
 // MCPHandler serves the MCP Streamable HTTP endpoint at /mcp.

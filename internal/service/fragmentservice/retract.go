@@ -34,10 +34,10 @@ import (
 
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 
-	"github.com/dense-mem/dense-mem/internal/correlation"
-	"github.com/dense-mem/dense-mem/internal/observability"
-	"github.com/dense-mem/dense-mem/internal/service/factservice"
-	neo4jstorage "github.com/dense-mem/dense-mem/internal/storage/neo4j"
+	"github.com/markhuangai/dense-mem/internal/correlation"
+	"github.com/markhuangai/dense-mem/internal/observability"
+	"github.com/markhuangai/dense-mem/internal/service/factservice"
+	neo4jstorage "github.com/markhuangai/dense-mem/internal/storage/neo4j"
 )
 
 // retractDB is the minimal Neo4j interface required by retractFragmentService.

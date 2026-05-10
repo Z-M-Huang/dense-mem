@@ -9,11 +9,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 
-	"github.com/dense-mem/dense-mem/internal/crypto"
-	"github.com/dense-mem/dense-mem/internal/domain"
-	"github.com/dense-mem/dense-mem/internal/httperr"
-	"github.com/dense-mem/dense-mem/internal/repository"
-	"github.com/dense-mem/dense-mem/internal/service"
+	"github.com/markhuangai/dense-mem/internal/crypto"
+	"github.com/markhuangai/dense-mem/internal/domain"
+	"github.com/markhuangai/dense-mem/internal/httperr"
+	"github.com/markhuangai/dense-mem/internal/repository"
+	"github.com/markhuangai/dense-mem/internal/service"
 )
 
 // Principal represents the authenticated principal stored in context.

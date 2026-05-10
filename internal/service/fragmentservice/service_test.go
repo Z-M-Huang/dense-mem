@@ -10,10 +10,10 @@ import (
 
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 
-	"github.com/dense-mem/dense-mem/internal/correlation"
-	"github.com/dense-mem/dense-mem/internal/domain"
-	"github.com/dense-mem/dense-mem/internal/embedding"
-	"github.com/dense-mem/dense-mem/internal/http/dto"
+	"github.com/markhuangai/dense-mem/internal/correlation"
+	"github.com/markhuangai/dense-mem/internal/domain"
+	"github.com/markhuangai/dense-mem/internal/embedding"
+	"github.com/markhuangai/dense-mem/internal/http/dto"
 )
 
 // --- Fakes ---
@@ -38,12 +38,12 @@ func (f *fakeScopedWriter) ScopedWrite(ctx context.Context, profileID string, qu
 }
 
 type fakeDedupeLookup struct {
-	ByKey         *domain.Fragment
-	ByHash        *domain.Fragment
-	ByKeyErr      error
-	ByHashErr     error
-	KeyCallCount  int
-	HashCallCount int
+	ByKey           *domain.Fragment
+	ByHash          *domain.Fragment
+	ByKeyErr        error
+	ByHashErr       error
+	KeyCallCount    int
+	HashCallCount   int
 	LastKeyProfile  string
 	LastHashProfile string
 }
@@ -77,12 +77,12 @@ func (f *fakeAudit) Append(ctx context.Context, entry AuditLogEntry) error {
 }
 
 type fakeConsistency struct {
-	ValidateErr        error
-	RecordErr          error
-	RecordCount        int
-	ValidateCount      int
-	LastRecordedModel  string
-	LastRecordedDims   int
+	ValidateErr         error
+	RecordErr           error
+	RecordCount         int
+	ValidateCount       int
+	LastRecordedModel   string
+	LastRecordedDims    int
 	LastValidatedVector []float32
 }
 

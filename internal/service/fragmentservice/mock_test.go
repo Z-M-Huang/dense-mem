@@ -4,8 +4,8 @@ import (
 	"context"
 	"sync"
 
-	"github.com/dense-mem/dense-mem/internal/domain"
-	"github.com/dense-mem/dense-mem/internal/http/dto"
+	"github.com/markhuangai/dense-mem/internal/domain"
+	"github.com/markhuangai/dense-mem/internal/http/dto"
 )
 
 // MockCreate is a test double for CreateFragmentService. Configure behavior via

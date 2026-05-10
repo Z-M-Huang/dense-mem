@@ -9,8 +9,8 @@ import (
 	"github.com/lib/pq"
 	"gorm.io/gorm"
 
-	"github.com/dense-mem/dense-mem/internal/domain"
-	"github.com/dense-mem/dense-mem/internal/storage/postgres"
+	"github.com/markhuangai/dense-mem/internal/domain"
+	"github.com/markhuangai/dense-mem/internal/storage/postgres"
 )
 
 // APIKeyRepository is the companion interface for API key data access.
@@ -21,13 +21,13 @@ type APIKeyRepository interface {
 	CountByProfile(ctx context.Context, profileID uuid.UUID) (int64, error)
 	// GetByIDForProfile returns an API key only when it belongs to profileID. Returns nil on mismatch.
 	GetByIDForProfile(ctx context.Context, profileID, id uuid.UUID) (*domain.APIKey, error)
-		GetActiveByPrefix(ctx context.Context, prefix string) (*domain.APIKey, error)
-		// RevokeForProfile marks a key revoked only when it belongs to profileID. Returns number of rows affected.
-		RevokeForProfile(ctx context.Context, profileID, id uuid.UUID) (int64, error)
-		// DeleteForProfile hard-deletes a key only when it belongs to profileID. Returns number of rows affected.
-		DeleteForProfile(ctx context.Context, profileID, id uuid.UUID) (int64, error)
-		TouchLastUsed(ctx context.Context, id uuid.UUID) error
-	}
+	GetActiveByPrefix(ctx context.Context, prefix string) (*domain.APIKey, error)
+	// RevokeForProfile marks a key revoked only when it belongs to profileID. Returns number of rows affected.
+	RevokeForProfile(ctx context.Context, profileID, id uuid.UUID) (int64, error)
+	// DeleteForProfile hard-deletes a key only when it belongs to profileID. Returns number of rows affected.
+	DeleteForProfile(ctx context.Context, profileID, id uuid.UUID) (int64, error)
+	TouchLastUsed(ctx context.Context, id uuid.UUID) error
+}
 
 // APIKeyRepositoryImpl implements the APIKeyRepository interface.
 // Every query runs inside an RLS-aware transaction so Postgres FORCE RLS

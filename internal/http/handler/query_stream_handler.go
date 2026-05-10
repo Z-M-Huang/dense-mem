@@ -6,12 +6,12 @@ import (
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 
-	"github.com/dense-mem/dense-mem/internal/http/middleware"
-	"github.com/dense-mem/dense-mem/internal/httperr"
-	"github.com/dense-mem/dense-mem/internal/sse"
-	"github.com/dense-mem/dense-mem/internal/tools/graphquery"
-	"github.com/dense-mem/dense-mem/internal/tools/keywordsearch"
-	"github.com/dense-mem/dense-mem/internal/tools/semanticsearch"
+	"github.com/markhuangai/dense-mem/internal/http/middleware"
+	"github.com/markhuangai/dense-mem/internal/httperr"
+	"github.com/markhuangai/dense-mem/internal/sse"
+	"github.com/markhuangai/dense-mem/internal/tools/graphquery"
+	"github.com/markhuangai/dense-mem/internal/tools/keywordsearch"
+	"github.com/markhuangai/dense-mem/internal/tools/semanticsearch"
 )
 
 // QueryStreamRequest represents the request body for query/stream.

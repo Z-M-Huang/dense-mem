@@ -32,11 +32,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dense-mem/dense-mem/internal/domain"
-	"github.com/dense-mem/dense-mem/internal/embedding"
-	"github.com/dense-mem/dense-mem/internal/observability"
-	"github.com/dense-mem/dense-mem/internal/tools/keywordsearch"
-	"github.com/dense-mem/dense-mem/internal/tools/semanticsearch"
+	"github.com/markhuangai/dense-mem/internal/domain"
+	"github.com/markhuangai/dense-mem/internal/embedding"
+	"github.com/markhuangai/dense-mem/internal/observability"
+	"github.com/markhuangai/dense-mem/internal/tools/keywordsearch"
+	"github.com/markhuangai/dense-mem/internal/tools/semanticsearch"
 )
 
 // Tuning constants.

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dense-mem/dense-mem/internal/sse"
+	"github.com/markhuangai/dense-mem/internal/sse"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

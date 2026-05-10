@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/dense-mem/dense-mem/internal/observability"
+	"github.com/markhuangai/dense-mem/internal/observability"
 	"gorm.io/gorm"
 )
 

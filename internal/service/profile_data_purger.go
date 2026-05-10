@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/dense-mem/dense-mem/internal/storage/neo4j"
+	"github.com/markhuangai/dense-mem/internal/storage/neo4j"
 )
 
 // ProfileDataPurger removes non-Postgres profile-owned state.

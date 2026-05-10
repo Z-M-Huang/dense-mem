@@ -1,4 +1,4 @@
-module github.com/dense-mem/dense-mem
+module github.com/markhuangai/dense-mem
 
 go 1.26
 

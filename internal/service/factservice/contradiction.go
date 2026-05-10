@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/dense-mem/dense-mem/internal/domain"
-	neo4jstorage "github.com/dense-mem/dense-mem/internal/storage/neo4j"
+	"github.com/markhuangai/dense-mem/internal/domain"
+	neo4jstorage "github.com/markhuangai/dense-mem/internal/storage/neo4j"
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 )
 

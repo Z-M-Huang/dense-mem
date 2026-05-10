@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dense-mem/dense-mem/internal/domain"
-	"github.com/dense-mem/dense-mem/internal/observability"
-	postgresstorage "github.com/dense-mem/dense-mem/internal/storage/postgres"
+	"github.com/markhuangai/dense-mem/internal/domain"
+	"github.com/markhuangai/dense-mem/internal/observability"
+	postgresstorage "github.com/markhuangai/dense-mem/internal/storage/postgres"
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"

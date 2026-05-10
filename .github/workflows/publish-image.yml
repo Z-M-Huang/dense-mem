@@ -15,7 +15,7 @@ env:
 jobs:
   publish:
     name: Build and push image
-    runs-on: self-hosted
+    runs-on: rootless-docker
 
     steps:
       - name: Checkout repository

@@ -3,7 +3,7 @@ package factservice
 import (
 	"math"
 
-	"github.com/dense-mem/dense-mem/internal/domain"
+	"github.com/markhuangai/dense-mem/internal/domain"
 )
 
 // Strength is the multi-dimensional evidence weight of a Claim or Fact.

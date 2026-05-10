@@ -13,8 +13,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/dense-mem/dense-mem/internal/operatorcli"
-	"github.com/dense-mem/dense-mem/internal/service"
+	"github.com/markhuangai/dense-mem/internal/operatorcli"
+	"github.com/markhuangai/dense-mem/internal/service"
 )
 
 type cliConfig struct {

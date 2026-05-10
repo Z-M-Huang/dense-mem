@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/dense-mem/dense-mem/internal/service/memoryservice"
+	"github.com/markhuangai/dense-mem/internal/service/memoryservice"
 )
 
 func rememberTool(deps Dependencies) Tool {

@@ -9,7 +9,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/dense-mem/dense-mem/internal/operatorcli"
+	"github.com/markhuangai/dense-mem/internal/operatorcli"
 )
 
 type cliConfig struct {

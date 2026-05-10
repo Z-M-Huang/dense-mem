@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dense-mem/dense-mem/internal/domain"
-	"github.com/dense-mem/dense-mem/internal/embedding"
-	"github.com/dense-mem/dense-mem/internal/tools/keywordsearch"
-	"github.com/dense-mem/dense-mem/internal/tools/semanticsearch"
+	"github.com/markhuangai/dense-mem/internal/domain"
+	"github.com/markhuangai/dense-mem/internal/embedding"
+	"github.com/markhuangai/dense-mem/internal/tools/keywordsearch"
+	"github.com/markhuangai/dense-mem/internal/tools/semanticsearch"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

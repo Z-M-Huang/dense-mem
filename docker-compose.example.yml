@@ -93,7 +93,7 @@ services:
     restart: unless-stopped
 
   server:
-    image: ghcr.io/z-m-huang/dense-mem:latest
+    image: ghcr.io/markhuangai/dense-mem:latest
     env_file:
       - .env
     ports:

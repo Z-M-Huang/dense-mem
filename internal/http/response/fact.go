@@ -1,8 +1,8 @@
 package response
 
 import (
-	"github.com/dense-mem/dense-mem/internal/domain"
-	dto "github.com/dense-mem/dense-mem/internal/http/dto"
+	"github.com/markhuangai/dense-mem/internal/domain"
+	dto "github.com/markhuangai/dense-mem/internal/http/dto"
 )
 
 // ToFactResponse converts a domain Fact to a DTO FactResponse.

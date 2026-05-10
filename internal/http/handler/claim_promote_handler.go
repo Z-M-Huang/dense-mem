@@ -6,10 +6,10 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/dense-mem/dense-mem/internal/http/middleware"
-	"github.com/dense-mem/dense-mem/internal/http/response"
-	"github.com/dense-mem/dense-mem/internal/httperr"
-	"github.com/dense-mem/dense-mem/internal/service/factservice"
+	"github.com/markhuangai/dense-mem/internal/http/middleware"
+	"github.com/markhuangai/dense-mem/internal/http/response"
+	"github.com/markhuangai/dense-mem/internal/httperr"
+	"github.com/markhuangai/dense-mem/internal/service/factservice"
 )
 
 // ClaimPromoteHandler handles HTTP requests for promoting a validated claim to a fact.

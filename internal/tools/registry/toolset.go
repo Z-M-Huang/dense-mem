@@ -6,16 +6,16 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/dense-mem/dense-mem/internal/http/dto"
-	"github.com/dense-mem/dense-mem/internal/service/claimservice"
-	"github.com/dense-mem/dense-mem/internal/service/communityservice"
-	"github.com/dense-mem/dense-mem/internal/service/factservice"
-	"github.com/dense-mem/dense-mem/internal/service/fragmentservice"
-	"github.com/dense-mem/dense-mem/internal/service/memoryservice"
-	"github.com/dense-mem/dense-mem/internal/service/recallservice"
-	"github.com/dense-mem/dense-mem/internal/tools/graphquery"
-	"github.com/dense-mem/dense-mem/internal/tools/keywordsearch"
-	"github.com/dense-mem/dense-mem/internal/tools/semanticsearch"
+	"github.com/markhuangai/dense-mem/internal/http/dto"
+	"github.com/markhuangai/dense-mem/internal/service/claimservice"
+	"github.com/markhuangai/dense-mem/internal/service/communityservice"
+	"github.com/markhuangai/dense-mem/internal/service/factservice"
+	"github.com/markhuangai/dense-mem/internal/service/fragmentservice"
+	"github.com/markhuangai/dense-mem/internal/service/memoryservice"
+	"github.com/markhuangai/dense-mem/internal/service/recallservice"
+	"github.com/markhuangai/dense-mem/internal/tools/graphquery"
+	"github.com/markhuangai/dense-mem/internal/tools/keywordsearch"
+	"github.com/markhuangai/dense-mem/internal/tools/semanticsearch"
 )
 
 // Dependencies is the wiring bundle that BuildDefault uses to construct the

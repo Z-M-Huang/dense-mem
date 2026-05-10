@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dense-mem/dense-mem/internal/observability"
+	"github.com/markhuangai/dense-mem/internal/observability"
 )
 
 // UAT-14: Phase 2 migration and backfill (Unit 11–12).

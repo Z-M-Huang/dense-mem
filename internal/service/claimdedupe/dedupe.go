@@ -5,8 +5,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/dense-mem/dense-mem/internal/domain"
-	"github.com/dense-mem/dense-mem/internal/service/claimservice"
+	"github.com/markhuangai/dense-mem/internal/domain"
+	"github.com/markhuangai/dense-mem/internal/service/claimservice"
 )
 
 // ScopedReader defines the profile-scoped read surface required by this package.

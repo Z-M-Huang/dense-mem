@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dense-mem/dense-mem/internal/config"
+	"github.com/markhuangai/dense-mem/internal/config"
 )
 
 // OpenAIEmbeddingProvider implements EmbeddingProviderInterface for OpenAI-compatible APIs.

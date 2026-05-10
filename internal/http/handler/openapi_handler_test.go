@@ -8,8 +8,8 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/dense-mem/dense-mem/internal/openapi"
-	"github.com/dense-mem/dense-mem/internal/tools/registry"
+	"github.com/markhuangai/dense-mem/internal/openapi"
+	"github.com/markhuangai/dense-mem/internal/tools/registry"
 )
 
 func buildTestGenerator(t *testing.T) openapi.Generator {

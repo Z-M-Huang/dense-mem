@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/dense-mem/dense-mem/internal/domain"
-	"github.com/dense-mem/dense-mem/internal/service/classification"
-	"github.com/dense-mem/dense-mem/internal/service/fragmentcodec"
+	"github.com/markhuangai/dense-mem/internal/domain"
+	"github.com/markhuangai/dense-mem/internal/service/classification"
+	"github.com/markhuangai/dense-mem/internal/service/fragmentcodec"
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 )
 

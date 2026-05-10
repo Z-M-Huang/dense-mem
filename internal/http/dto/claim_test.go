@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dense-mem/dense-mem/internal/http/validation"
+	"github.com/markhuangai/dense-mem/internal/http/validation"
 )
 
 // validUUID returns a random UUID v4 string for testing.

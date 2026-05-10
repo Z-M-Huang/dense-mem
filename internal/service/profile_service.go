@@ -9,9 +9,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/lib/pq"
 
-	"github.com/dense-mem/dense-mem/internal/domain"
-	"github.com/dense-mem/dense-mem/internal/httperr"
-	"github.com/dense-mem/dense-mem/internal/repository"
+	"github.com/markhuangai/dense-mem/internal/domain"
+	"github.com/markhuangai/dense-mem/internal/httperr"
+	"github.com/markhuangai/dense-mem/internal/repository"
 )
 
 // ProfileService is the companion interface for profile business logic.

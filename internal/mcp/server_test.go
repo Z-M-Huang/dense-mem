@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dense-mem/dense-mem/internal/observability"
-	"github.com/dense-mem/dense-mem/internal/service/memoryservice"
-	"github.com/dense-mem/dense-mem/internal/tools/registry"
+	"github.com/markhuangai/dense-mem/internal/observability"
+	"github.com/markhuangai/dense-mem/internal/service/memoryservice"
+	"github.com/markhuangai/dense-mem/internal/tools/registry"
 )
 
 // TestServerIgnoresProfileOverride verifies that a caller cannot override the

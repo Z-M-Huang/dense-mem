@@ -10,9 +10,9 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/dense-mem/dense-mem/internal/repository"
-	"github.com/dense-mem/dense-mem/internal/service"
-	"github.com/dense-mem/dense-mem/internal/storage/postgres"
+	"github.com/markhuangai/dense-mem/internal/repository"
+	"github.com/markhuangai/dense-mem/internal/service"
+	"github.com/markhuangai/dense-mem/internal/storage/postgres"
 )
 
 const (

@@ -4,7 +4,7 @@ import (
 	"context"
 	"sync"
 
-	"github.com/dense-mem/dense-mem/internal/embedding"
+	"github.com/markhuangai/dense-mem/internal/embedding"
 )
 
 // stubEmbedding is a test-only implementation of embedding.EmbeddingProviderInterface.

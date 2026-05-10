@@ -13,11 +13,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dense-mem/dense-mem/internal/http/middleware"
-	"github.com/dense-mem/dense-mem/internal/sse"
-	"github.com/dense-mem/dense-mem/internal/tools/graphquery"
-	"github.com/dense-mem/dense-mem/internal/tools/keywordsearch"
-	"github.com/dense-mem/dense-mem/internal/tools/semanticsearch"
+	"github.com/markhuangai/dense-mem/internal/http/middleware"
+	"github.com/markhuangai/dense-mem/internal/sse"
+	"github.com/markhuangai/dense-mem/internal/tools/graphquery"
+	"github.com/markhuangai/dense-mem/internal/tools/keywordsearch"
+	"github.com/markhuangai/dense-mem/internal/tools/semanticsearch"
 )
 
 // mockQueryStreamOrchestrator implements QueryStreamOrchestrator for testing.
@@ -51,11 +51,11 @@ func (m *mockStreamLifecycle) Start(ctx context.Context, profileID string, write
 
 // mockSSEWriter implements SSEWriter for testing.
 type mockSSEWriter struct {
-	events    []mockEvent
-	comments  []string
-	closed    bool
-	writeErr  error
-	closeErr  error
+	events   []mockEvent
+	comments []string
+	closed   bool
+	writeErr error
+	closeErr error
 }
 
 type mockEvent struct {

@@ -7,7 +7,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/dense-mem/dense-mem/internal/requestctx"
+	"github.com/markhuangai/dense-mem/internal/requestctx"
 )
 
 func TestClientIPMiddlewareStoresRealIPInContext(t *testing.T) {

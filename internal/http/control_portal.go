@@ -15,14 +15,14 @@ import (
 	"github.com/labstack/echo/v4"
 	echomw "github.com/labstack/echo/v4/middleware"
 
-	"github.com/dense-mem/dense-mem/internal/config"
-	"github.com/dense-mem/dense-mem/internal/domain"
-	dto "github.com/dense-mem/dense-mem/internal/http/dto"
-	"github.com/dense-mem/dense-mem/internal/http/handler"
-	httpvalidation "github.com/dense-mem/dense-mem/internal/http/validation"
-	"github.com/dense-mem/dense-mem/internal/httperr"
-	"github.com/dense-mem/dense-mem/internal/observability"
-	"github.com/dense-mem/dense-mem/internal/service"
+	"github.com/markhuangai/dense-mem/internal/config"
+	"github.com/markhuangai/dense-mem/internal/domain"
+	dto "github.com/markhuangai/dense-mem/internal/http/dto"
+	"github.com/markhuangai/dense-mem/internal/http/handler"
+	httpvalidation "github.com/markhuangai/dense-mem/internal/http/validation"
+	"github.com/markhuangai/dense-mem/internal/httperr"
+	"github.com/markhuangai/dense-mem/internal/observability"
+	"github.com/markhuangai/dense-mem/internal/service"
 )
 
 // NewControlPortalServer creates the token-protected management portal server.

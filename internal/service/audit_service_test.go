@@ -10,8 +10,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dense-mem/dense-mem/internal/requestctx"
-	"github.com/dense-mem/dense-mem/internal/storage/postgres"
+	"github.com/markhuangai/dense-mem/internal/requestctx"
+	"github.com/markhuangai/dense-mem/internal/storage/postgres"
 )
 
 // testConfig implements postgres.ConfigProvider for testing.

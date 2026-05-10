@@ -10,8 +10,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 
-	"github.com/dense-mem/dense-mem/internal/httperr"
-	"github.com/dense-mem/dense-mem/internal/service/claimservice"
+	"github.com/markhuangai/dense-mem/internal/httperr"
+	"github.com/markhuangai/dense-mem/internal/service/claimservice"
 )
 
 // mockDeleteClaimService implements claimservice.DeleteClaimService for testing.

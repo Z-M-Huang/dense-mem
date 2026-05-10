@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dense-mem/dense-mem/internal/config"
+	"github.com/markhuangai/dense-mem/internal/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -24,7 +24,7 @@ func TestOpenAIProvider_Embed_SendsBearerAuth(t *testing.T) {
 	defer srv.Close()
 
 	cfg := &config.Config{
-		AIAPIURL:                   srv.URL,
+		AIAPIURL:                  srv.URL,
 		AIAPIKey:                  "sk-123",
 		AIEmbeddingModel:          "m",
 		AIEmbeddingDimensions:     2,
@@ -65,7 +65,7 @@ func TestOpenAIProvider_EmbedBatch_HappyPath(t *testing.T) {
 	defer srv.Close()
 
 	cfg := &config.Config{
-		AIAPIURL:                   srv.URL,
+		AIAPIURL:                  srv.URL,
 		AIAPIKey:                  "test-key",
 		AIEmbeddingModel:          "text-embedding-3-small",
 		AIEmbeddingDimensions:     3,
@@ -89,7 +89,7 @@ func TestOpenAIProvider_Non200Response(t *testing.T) {
 	defer srv.Close()
 
 	cfg := &config.Config{
-		AIAPIURL:                   srv.URL,
+		AIAPIURL:                  srv.URL,
 		AIAPIKey:                  "bad-key",
 		AIEmbeddingModel:          "m",
 		AIEmbeddingDimensions:     2,
@@ -113,7 +113,7 @@ func TestOpenAIProvider_WrongDimensions(t *testing.T) {
 	defer srv.Close()
 
 	cfg := &config.Config{
-		AIAPIURL:                   srv.URL,
+		AIAPIURL:                  srv.URL,
 		AIAPIKey:                  "key",
 		AIEmbeddingModel:          "m",
 		AIEmbeddingDimensions:     2, // Config says 2, but server returns 4
@@ -135,7 +135,7 @@ func TestOpenAIProvider_WrongNumberOfEmbeddings(t *testing.T) {
 	defer srv.Close()
 
 	cfg := &config.Config{
-		AIAPIURL:                   srv.URL,
+		AIAPIURL:                  srv.URL,
 		AIAPIKey:                  "key",
 		AIEmbeddingModel:          "m",
 		AIEmbeddingDimensions:     2,
@@ -203,7 +203,7 @@ func TestOpenAIProvider_IsAvailable(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := &config.Config{
-				AIAPIURL:                   tt.url,
+				AIAPIURL:                  tt.url,
 				AIAPIKey:                  tt.key,
 				AIEmbeddingModel:          tt.model,
 				AIEmbeddingDimensions:     tt.dimensions,
@@ -217,7 +217,7 @@ func TestOpenAIProvider_IsAvailable(t *testing.T) {
 
 func TestOpenAIProvider_ModelNameAndDimensions(t *testing.T) {
 	cfg := &config.Config{
-		AIAPIURL:                   "https://api.example.com",
+		AIAPIURL:                  "https://api.example.com",
 		AIAPIKey:                  "key",
 		AIEmbeddingModel:          "text-embedding-3-small",
 		AIEmbeddingDimensions:     1536,
@@ -231,7 +231,7 @@ func TestOpenAIProvider_ModelNameAndDimensions(t *testing.T) {
 
 func TestOpenAIProvider_DefaultTimeout(t *testing.T) {
 	cfg := &config.Config{
-		AIAPIURL:                   "https://api.example.com",
+		AIAPIURL:                  "https://api.example.com",
 		AIAPIKey:                  "key",
 		AIEmbeddingModel:          "m",
 		AIEmbeddingDimensions:     2,
@@ -244,7 +244,7 @@ func TestOpenAIProvider_DefaultTimeout(t *testing.T) {
 
 func TestOpenAIProvider_NilHTTPClient(t *testing.T) {
 	cfg := &config.Config{
-		AIAPIURL:                   "https://api.example.com",
+		AIAPIURL:                  "https://api.example.com",
 		AIAPIKey:                  "key",
 		AIEmbeddingModel:          "m",
 		AIEmbeddingDimensions:     2,
@@ -264,7 +264,7 @@ func TestOpenAIProvider_TrailingSlashInURL(t *testing.T) {
 	defer srv.Close()
 
 	cfg := &config.Config{
-		AIAPIURL:                   srv.URL + "/", // Trailing slash
+		AIAPIURL:                  srv.URL + "/", // Trailing slash
 		AIAPIKey:                  "key",
 		AIEmbeddingModel:          "m",
 		AIEmbeddingDimensions:     1,

@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dense-mem/dense-mem/internal/domain"
-	"github.com/dense-mem/dense-mem/internal/http/response"
+	"github.com/markhuangai/dense-mem/internal/domain"
+	"github.com/markhuangai/dense-mem/internal/http/response"
 	"github.com/stretchr/testify/require"
 )
 
@@ -80,13 +80,13 @@ func TestToClaimResponse(t *testing.T) {
 		now := time.Now().UTC().Truncate(time.Second)
 		claims := []domain.Claim{
 			{
-				ClaimID:   "claim-a",
-				ProfileID: "profile-a",
+				ClaimID:    "claim-a",
+				ProfileID:  "profile-a",
 				RecordedAt: now,
 			},
 			{
-				ClaimID:   "claim-b",
-				ProfileID: "profile-a",
+				ClaimID:    "claim-b",
+				ProfileID:  "profile-a",
 				RecordedAt: now,
 			},
 		}

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dense-mem/dense-mem/internal/observability"
+	"github.com/markhuangai/dense-mem/internal/observability"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -14,10 +14,10 @@ import (
 // testNopLogger is a no-op logger for tests
 type testNopLogger struct{}
 
-func (l *testNopLogger) Info(msg string, attrs ...observability.LogAttr) {}
-func (l *testNopLogger) Error(msg string, err error, attrs ...observability.LogAttr) {}
-func (l *testNopLogger) Warn(msg string, attrs ...observability.LogAttr)  {}
-func (l *testNopLogger) Debug(msg string, attrs ...observability.LogAttr) {}
+func (l *testNopLogger) Info(msg string, attrs ...observability.LogAttr)               {}
+func (l *testNopLogger) Error(msg string, err error, attrs ...observability.LogAttr)   {}
+func (l *testNopLogger) Warn(msg string, attrs ...observability.LogAttr)               {}
+func (l *testNopLogger) Debug(msg string, attrs ...observability.LogAttr)              {}
 func (l *testNopLogger) With(attrs ...observability.LogAttr) observability.LogProvider { return l }
 
 func newTestLogger() observability.LogProvider { return &testNopLogger{} }

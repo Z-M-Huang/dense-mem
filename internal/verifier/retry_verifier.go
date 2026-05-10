@@ -5,8 +5,8 @@ import (
 	"errors"
 	"time"
 
-	"github.com/dense-mem/dense-mem/internal/config"
-	"github.com/dense-mem/dense-mem/internal/observability"
+	"github.com/markhuangai/dense-mem/internal/config"
+	"github.com/markhuangai/dense-mem/internal/observability"
 )
 
 // RetryVerifier wraps a Verifier with up to three retry attempts and a

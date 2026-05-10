@@ -3,7 +3,7 @@ package claimservice
 import (
 	"context"
 
-	"github.com/dense-mem/dense-mem/internal/domain"
+	"github.com/markhuangai/dense-mem/internal/domain"
 )
 
 // listClaimsCompatService adapts the newer cursor-paginated list implementation

@@ -8,10 +8,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 
-	"github.com/dense-mem/dense-mem/internal/http/dto"
-	"github.com/dense-mem/dense-mem/internal/http/middleware"
-	"github.com/dense-mem/dense-mem/internal/httperr"
-	"github.com/dense-mem/dense-mem/internal/tools/graphquery"
+	"github.com/markhuangai/dense-mem/internal/http/dto"
+	"github.com/markhuangai/dense-mem/internal/http/middleware"
+	"github.com/markhuangai/dense-mem/internal/httperr"
+	"github.com/markhuangai/dense-mem/internal/tools/graphquery"
 )
 
 // GraphQueryResponse represents the response for graph-query.
@@ -28,7 +28,7 @@ type GraphQueryData struct {
 
 // GraphQueryMeta represents the metadata portion of the response.
 type GraphQueryMeta struct {
-	RowCount     int  `json:"row_count"`
+	RowCount      int  `json:"row_count"`
 	RowCapApplied bool `json:"row_cap_applied"`
 }
 
@@ -97,7 +97,7 @@ func (h *GraphQueryHandler) Handle(c echo.Context) error {
 			Rows:    result.Rows,
 		},
 		Meta: GraphQueryMeta{
-			RowCount:     result.RowCount,
+			RowCount:      result.RowCount,
 			RowCapApplied: result.RowCapApplied,
 		},
 	}

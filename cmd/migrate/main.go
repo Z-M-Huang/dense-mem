@@ -8,10 +8,10 @@ import (
 	"os"
 	"time"
 
-	"github.com/dense-mem/dense-mem/internal/config"
-	"github.com/dense-mem/dense-mem/internal/observability"
-	"github.com/dense-mem/dense-mem/internal/storage/neo4j"
-	"github.com/dense-mem/dense-mem/internal/storage/postgres"
+	"github.com/markhuangai/dense-mem/internal/config"
+	"github.com/markhuangai/dense-mem/internal/observability"
+	"github.com/markhuangai/dense-mem/internal/storage/neo4j"
+	"github.com/markhuangai/dense-mem/internal/storage/postgres"
 )
 
 func main() {

@@ -11,8 +11,8 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dense-mem/dense-mem/internal/crypto"
-	"github.com/dense-mem/dense-mem/internal/domain"
+	"github.com/markhuangai/dense-mem/internal/crypto"
+	"github.com/markhuangai/dense-mem/internal/domain"
 )
 
 // MockAPIKeyRepository is a mock implementation of repository.APIKeyRepository

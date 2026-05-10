@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/dense-mem/dense-mem/internal/config"
-	"github.com/dense-mem/dense-mem/internal/observability"
-	"github.com/dense-mem/dense-mem/internal/service"
-	"github.com/dense-mem/dense-mem/internal/sse"
-	"github.com/dense-mem/dense-mem/internal/storage/inmem"
-	"github.com/dense-mem/dense-mem/internal/storage/redis"
+	"github.com/markhuangai/dense-mem/internal/config"
+	"github.com/markhuangai/dense-mem/internal/observability"
+	"github.com/markhuangai/dense-mem/internal/service"
+	"github.com/markhuangai/dense-mem/internal/sse"
+	"github.com/markhuangai/dense-mem/internal/storage/inmem"
+	"github.com/markhuangai/dense-mem/internal/storage/redis"
 )
 
 // backendBundle holds the wired backend components for either Redis or in-memory mode.

@@ -10,10 +10,10 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/dense-mem/dense-mem/internal/httperr"
-	"github.com/dense-mem/dense-mem/internal/service"
-	"github.com/dense-mem/dense-mem/internal/storage/inmem"
-	"github.com/dense-mem/dense-mem/internal/storage/redis"
+	"github.com/markhuangai/dense-mem/internal/httperr"
+	"github.com/markhuangai/dense-mem/internal/service"
+	"github.com/markhuangai/dense-mem/internal/storage/inmem"
+	"github.com/markhuangai/dense-mem/internal/storage/redis"
 )
 
 // testRateLimitConfig implements config.ConfigProvider for rate limit tests.

@@ -3,7 +3,7 @@ package middleware
 import (
 	"github.com/labstack/echo/v4"
 
-	"github.com/dense-mem/dense-mem/internal/httperr"
+	"github.com/markhuangai/dense-mem/internal/httperr"
 )
 
 // RequireScopes creates a middleware that enforces scope requirements.

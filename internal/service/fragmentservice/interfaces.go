@@ -4,8 +4,8 @@ package fragmentservice
 import (
 	"context"
 
-	"github.com/dense-mem/dense-mem/internal/http/dto"
-	"github.com/dense-mem/dense-mem/internal/domain"
+	"github.com/markhuangai/dense-mem/internal/domain"
+	"github.com/markhuangai/dense-mem/internal/http/dto"
 )
 
 // CreateResult contains the result of a fragment creation operation.

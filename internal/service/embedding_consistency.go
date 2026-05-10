@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/dense-mem/dense-mem/internal/storage/postgres"
+	"github.com/markhuangai/dense-mem/internal/storage/postgres"
 )
 
 // EmbeddingConfig represents the configured embedding model parameters.

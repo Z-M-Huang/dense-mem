@@ -13,8 +13,8 @@ import (
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 
-	"github.com/dense-mem/dense-mem/internal/requestctx"
-	"github.com/dense-mem/dense-mem/internal/storage/postgres"
+	"github.com/markhuangai/dense-mem/internal/requestctx"
+	"github.com/markhuangai/dense-mem/internal/storage/postgres"
 )
 
 // AuditLogEntry represents a single audit log entry to be written.

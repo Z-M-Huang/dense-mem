@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dense-mem/dense-mem/internal/config"
+	"github.com/markhuangai/dense-mem/internal/config"
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 	"gorm.io/gorm"
 )

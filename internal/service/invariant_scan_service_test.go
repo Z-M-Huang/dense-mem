@@ -14,8 +14,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	neo4jclient "github.com/dense-mem/dense-mem/internal/storage/neo4j"
-	postgresstorage "github.com/dense-mem/dense-mem/internal/storage/postgres"
+	neo4jclient "github.com/markhuangai/dense-mem/internal/storage/neo4j"
+	postgresstorage "github.com/markhuangai/dense-mem/internal/storage/postgres"
 )
 
 // testNeo4jConfig implements neo4j.ConfigProvider for testing

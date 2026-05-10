@@ -10,7 +10,7 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/dense-mem/dense-mem/internal/config"
+	"github.com/markhuangai/dense-mem/internal/config"
 )
 
 const (

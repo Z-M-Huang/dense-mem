@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dense-mem/dense-mem/internal/config"
+	"github.com/markhuangai/dense-mem/internal/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

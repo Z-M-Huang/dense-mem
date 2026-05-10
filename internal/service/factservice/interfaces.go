@@ -10,7 +10,7 @@ package factservice
 import (
 	"context"
 
-	"github.com/dense-mem/dense-mem/internal/domain"
+	"github.com/markhuangai/dense-mem/internal/domain"
 )
 
 // PromoteClaimService defines the interface for promoting a validated Claim to a Fact.

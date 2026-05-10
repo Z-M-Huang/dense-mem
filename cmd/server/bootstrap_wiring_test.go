@@ -4,10 +4,10 @@ import (
 	"context"
 	"testing"
 
-	internalhttp "github.com/dense-mem/dense-mem/internal/http"
-	"github.com/dense-mem/dense-mem/internal/http/handler"
-	"github.com/dense-mem/dense-mem/internal/service/recallservice"
-	"github.com/dense-mem/dense-mem/internal/tools/registry"
+	internalhttp "github.com/markhuangai/dense-mem/internal/http"
+	"github.com/markhuangai/dense-mem/internal/http/handler"
+	"github.com/markhuangai/dense-mem/internal/service/recallservice"
+	"github.com/markhuangai/dense-mem/internal/tools/registry"
 	"github.com/stretchr/testify/require"
 )
 

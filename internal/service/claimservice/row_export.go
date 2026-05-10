@@ -1,6 +1,6 @@
 package claimservice
 
-import "github.com/dense-mem/dense-mem/internal/domain"
+import "github.com/markhuangai/dense-mem/internal/domain"
 
 // RowToClaimForExternalUse exposes the shared Neo4j row-to-domain mapping to
 // adjacent infrastructure packages that need to hydrate claims without

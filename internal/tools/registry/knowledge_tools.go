@@ -6,12 +6,12 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/dense-mem/dense-mem/internal/domain"
-	"github.com/dense-mem/dense-mem/internal/http/dto"
-	"github.com/dense-mem/dense-mem/internal/http/validation"
-	"github.com/dense-mem/dense-mem/internal/service/claimservice"
-	"github.com/dense-mem/dense-mem/internal/service/communityservice"
-	"github.com/dense-mem/dense-mem/internal/service/factservice"
+	"github.com/markhuangai/dense-mem/internal/domain"
+	"github.com/markhuangai/dense-mem/internal/http/dto"
+	"github.com/markhuangai/dense-mem/internal/http/validation"
+	"github.com/markhuangai/dense-mem/internal/service/claimservice"
+	"github.com/markhuangai/dense-mem/internal/service/communityservice"
+	"github.com/markhuangai/dense-mem/internal/service/factservice"
 )
 
 // --- post_claim -----------------------------------------------------------

@@ -5,7 +5,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/dense-mem/dense-mem/internal/openapi"
+	"github.com/markhuangai/dense-mem/internal/openapi"
 )
 
 // OpenAPIHandler serves the generated OpenAPI document for a given variant.

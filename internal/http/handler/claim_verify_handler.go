@@ -7,11 +7,11 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	dto "github.com/dense-mem/dense-mem/internal/http/dto"
-	"github.com/dense-mem/dense-mem/internal/http/middleware"
-	"github.com/dense-mem/dense-mem/internal/httperr"
-	"github.com/dense-mem/dense-mem/internal/service/claimservice"
-	"github.com/dense-mem/dense-mem/internal/verifier"
+	dto "github.com/markhuangai/dense-mem/internal/http/dto"
+	"github.com/markhuangai/dense-mem/internal/http/middleware"
+	"github.com/markhuangai/dense-mem/internal/httperr"
+	"github.com/markhuangai/dense-mem/internal/service/claimservice"
+	"github.com/markhuangai/dense-mem/internal/verifier"
 )
 
 // ClaimVerifyHandler serves POST /api/v1/claims/:id/verify.

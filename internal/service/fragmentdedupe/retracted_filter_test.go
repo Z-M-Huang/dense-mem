@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	neo4jstorage "github.com/dense-mem/dense-mem/internal/storage/neo4j"
+	neo4jstorage "github.com/markhuangai/dense-mem/internal/storage/neo4j"
 )
 
 // TestDedupe_ByIdempotencyKey_ExcludesRetracted verifies that the ByIdempotencyKey

@@ -13,8 +13,8 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/dense-mem/dense-mem/internal/correlation"
-	"github.com/dense-mem/dense-mem/internal/storage/neo4j"
+	"github.com/markhuangai/dense-mem/internal/correlation"
+	"github.com/markhuangai/dense-mem/internal/storage/neo4j"
 )
 
 // DeleteFragmentService hard-deletes a fragment within a profile scope.

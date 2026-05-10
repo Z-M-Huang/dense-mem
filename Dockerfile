@@ -62,9 +62,9 @@ ARG IMAGE_CREATED=unknown
 
 LABEL org.opencontainers.image.title="Dense-Mem" \
       org.opencontainers.image.description="Standalone HTTP MCP memory server with profile-scoped recall, claims, and local control portal." \
-      org.opencontainers.image.url="https://github.com/Z-M-Huang/dense-mem" \
-      org.opencontainers.image.source="https://github.com/Z-M-Huang/dense-mem" \
-      org.opencontainers.image.documentation="https://github.com/Z-M-Huang/dense-mem#readme" \
+      org.opencontainers.image.url="https://github.com/markhuangai/dense-mem" \
+      org.opencontainers.image.source="https://github.com/markhuangai/dense-mem" \
+      org.opencontainers.image.documentation="https://github.com/markhuangai/dense-mem#readme" \
       org.opencontainers.image.licenses="Apache-2.0" \
       org.opencontainers.image.version="${IMAGE_VERSION}" \
       org.opencontainers.image.revision="${IMAGE_REVISION}" \

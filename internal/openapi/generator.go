@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/dense-mem/dense-mem/internal/tools/registry"
+	"github.com/markhuangai/dense-mem/internal/tools/registry"
 )
 
 // SpecVariant distinguishes the public AI-safe spec from the full runtime spec.

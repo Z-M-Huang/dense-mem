@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dense-mem/dense-mem/internal/tools/registry"
+	"github.com/markhuangai/dense-mem/internal/tools/registry"
 )
 
 func testRegistry(t *testing.T) registry.Registry {

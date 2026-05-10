@@ -11,9 +11,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dense-mem/dense-mem/internal/sse"
-	"github.com/dense-mem/dense-mem/internal/storage/inmem"
-	"github.com/dense-mem/dense-mem/internal/storage/redis"
+	"github.com/markhuangai/dense-mem/internal/sse"
+	"github.com/markhuangai/dense-mem/internal/storage/inmem"
+	"github.com/markhuangai/dense-mem/internal/storage/redis"
 )
 
 // redisConcurrencyTestConfig implements redis.ConfigProvider for testing.
