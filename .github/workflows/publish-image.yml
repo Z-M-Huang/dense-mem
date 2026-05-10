@@ -15,7 +15,7 @@ env:
 jobs:
   publish:
     name: Build and push image
-    runs-on: rootless-docker
+    runs-on: docker-runner
 
     steps:
       - name: Checkout repository
